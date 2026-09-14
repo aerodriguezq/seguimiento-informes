@@ -6,6 +6,29 @@ Estos endpoints son una propuesta inicial para diseñar frontend/backend. No rep
 
 `GET /api/projects`
 
+Devuelve los proyectos registrados en `proyectos`, su empresa relacionada y los
+tipos de informe asociados mediante `proyecto_tipo_informe`.
+
+Respuesta exitosa:
+
+```json
+{
+  "data": [
+    {
+      "id": "1",
+      "name": "Proyecto de ejemplo",
+      "bpin": "2024001000452",
+      "active": true,
+      "company_id": "1",
+      "company_name": "Empresa de ejemplo",
+      "applicable_type_ids": ["1"]
+    }
+  ],
+  "meta": { "total": 1 },
+  "errors": []
+}
+```
+
 `GET /api/projects/:id`
 
 `PUT /api/projects/:id`
