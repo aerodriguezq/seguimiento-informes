@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSql } from '../server/db';
 
 export default async function handler(
   request: VercelRequest,
@@ -14,7 +13,18 @@ export default async function handler(
   }
 
   try {
-    const sql = await getSql();
+    const databaseUrl = process.env.DATABASE_URL;
+
+    if (!databaseUrl?.trim()) {
+      return response.status(503).json({
+        data: null,
+        meta: {},
+        errors: ['DATABASE_URL no está configurada en Vercel.'],
+      });
+    }
+
+    const { neon } = await import('@neondatabase/serverless');
+    const sql = neon(databaseUrl);
     const result = await sql`SELECT NOW() AS connected_at`;
 
     return response.status(200).json({
