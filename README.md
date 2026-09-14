@@ -203,6 +203,20 @@ npm run build
 npm run preview
 ```
 
+### Neon y Vercel
+
+La conexión server-side está disponible en `server/db.ts` y se verifica mediante `GET /api/health`.
+Configura `DATABASE_URL` como variable de entorno en Vercel con la cadena de conexión de Neon
+(incluyendo `sslmode=require`). No expongas esta variable con el prefijo `VITE_`.
+
+Después de configurar la variable, valida el despliegue en:
+
+```text
+https://<tu-dominio>/api/health
+```
+
+El esquema inicial para ejecutar en Neon está en `database/schema.sql`.
+
 ## 13. Comandos sugeridos
 
 ```bash
