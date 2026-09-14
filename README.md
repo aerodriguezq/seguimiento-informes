@@ -45,25 +45,25 @@ Pasar de un control basado en registros dispersos a una plataforma operativa con
 
 ## 4. Usuarios
 
-| Rol | Necesidad | Acciones principales |
-|---|---|---|
-| Coordinador | Visión consolidada y control de cumplimiento | Consultar, configurar, asignar, revisar alertas y seguimiento |
-| Supervisor | Seguimiento operativo de informes asignados | Consultar, actualizar estado, registrar observaciones/evidencias |
-| Usuario | Ejecutar tareas y mantener información asignada | Consultar, registrar y actualizar lo permitido |
+| Rol         | Necesidad                                       | Acciones principales                                             |
+| ----------- | ----------------------------------------------- | ---------------------------------------------------------------- |
+| Coordinador | Visión consolidada y control de cumplimiento    | Consultar, configurar, asignar, revisar alertas y seguimiento    |
+| Supervisor  | Seguimiento operativo de informes asignados     | Consultar, actualizar estado, registrar observaciones/evidencias |
+| Usuario     | Ejecutar tareas y mantener información asignada | Consultar, registrar y actualizar lo permitido                   |
 
 ## 5. Módulos
 
-| Módulo | Prioridad | Descripción |
-|---|---:|---|
-| Dashboard | P0 | Indicadores, vencimientos, alertas y acciones prioritarias |
-| Proyectos | P0 | Inventario y acceso a configuración/seguimiento |
-| Detalle de Proyecto | P0 | Tipos aplicables, alertas e informes del proyecto |
-| Informes | P0 | Búsqueda, filtros, estados y seguimiento |
-| Nuevo Informe | P0 | Alta guiada y validaciones |
-| Detalle de Informe | P0 | Ciclo de vida, responsables, historial y observaciones |
-| Alertas | P1 | Reglas automáticas y destinatarios |
-| Listas | P1 | Catálogos maestros |
-| Centro de notificaciones | P1 | Alertas próximas, activas y vencidas |
+| Módulo                   | Prioridad | Descripción                                                |
+| ------------------------ | --------: | ---------------------------------------------------------- |
+| Dashboard                |        P0 | Indicadores, vencimientos, alertas y acciones prioritarias |
+| Proyectos                |        P0 | Inventario y acceso a configuración/seguimiento            |
+| Detalle de Proyecto      |        P0 | Tipos aplicables, alertas e informes del proyecto          |
+| Informes                 |        P0 | Búsqueda, filtros, estados y seguimiento                   |
+| Nuevo Informe            |        P0 | Alta guiada y validaciones                                 |
+| Detalle de Informe       |        P0 | Ciclo de vida, responsables, historial y observaciones     |
+| Alertas                  |        P1 | Reglas automáticas y destinatarios                         |
+| Listas                   |        P1 | Catálogos maestros                                         |
+| Centro de notificaciones |        P1 | Alertas próximas, activas y vencidas                       |
 
 ## 6. Pantalla clave actual
 
@@ -216,6 +216,32 @@ https://<tu-dominio>/api/health
 ```
 
 El esquema inicial para ejecutar en Neon está en `database/schema.sql`.
+
+El primer endpoint de datos está disponible en `GET /api/projects` y consulta
+proyectos, empresas y sus tipos de informe directamente en Neon.
+
+### Envío de correos con Google Apps Script
+
+El botón **Probar Envío** no usa Gmail API. Vercel envía el evento al Web App de
+Google Apps Script y el script usa `GmailApp.sendEmail` con la cuenta que lo
+publicó. El código está en `integrations/google-apps-script/Code.gs`.
+
+Configuración:
+
+1. Abre [script.google.com](https://script.google.com) y crea un proyecto.
+2. Copia el contenido de `integrations/google-apps-script/Code.gs` en el editor.
+3. En **Project Settings → Script Properties**, crea `APP_SCRIPT_SHARED_SECRET`.
+4. Usa un valor secreto largo y guárdalo también en Vercel con el mismo nombre.
+5. En **Deploy → New deployment**, selecciona **Web app**.
+6. Configura **Execute as: Me** y **Who has access: Anyone**.
+7. Autoriza el acceso a Gmail cuando Google lo solicite.
+8. Copia la URL `/exec` del deployment y guárdala en Vercel como
+    `APP_SCRIPT_WEBHOOK_URL`.
+9. Redeploya Vercel.
+
+El endpoint interno `POST /api/alerts/send` valida destinatarios y mantiene el
+secreto fuera del navegador. Si Apps Script no está configurado, la aplicación
+mostrará un error controlado en lugar de afirmar que el correo fue enviado.
 
 ## 13. Comandos sugeridos
 

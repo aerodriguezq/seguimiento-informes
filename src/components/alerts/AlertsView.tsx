@@ -22,7 +22,7 @@ interface AlertsViewProps {
   contacts: Contact[];
   onToggleAlertActive: (alertId: string) => void;
   onAddNewAlert: (alert: ScheduledAlert) => void;
-  onSimulateTrigger: (alert: ScheduledAlert) => void;
+  onSimulateTrigger: (alert: ScheduledAlert) => Promise<void>;
 }
 
 export const AlertsView: React.FC<AlertsViewProps> = ({

@@ -270,7 +270,24 @@ export default function App() {
     showToast(`Regla de alerta "${newAlert.name}" programada exitosamente.`, 'success');
   };
 
-  const handleSimulateAlertTrigger = (alert: ScheduledAlert) => {
+  const handleSimulateAlertTrigger = async (alert: ScheduledAlert) => {
+    const recipients = alert.recipientIds
+      .map((id) => contacts.find((contact) => contact.id === id))
+      .filter((contact): contact is Contact => Boolean(contact?.email))
+      .map((contact) => ({ email: contact.email, name: contact.name }));
+
+    const response = await fetch('/api/alerts/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ alert, recipients }),
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      showToast(payload.errors?.[0] || 'No fue posible enviar la alerta.', 'info');
+      return;
+    }
+
     const newNotif: SystemNotification = {
       id: `notif-${Date.now()}`,
       title: `Disparo de Alerta: ${alert.name}`,
@@ -281,7 +298,7 @@ export default function App() {
       relatedProjectId: alert.projectId,
     };
     setNotifications([newNotif, ...notifications]);
-    showToast(`Prueba de envío exitosa. Notificación generada y enviada a los destinatarios.`, 'success');
+    showToast(`Correo enviado por Google Apps Script a ${payload.data.recipientCount} destinatario(s).`, 'success');
   };
 
   // Notifications
