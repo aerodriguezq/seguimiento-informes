@@ -14,7 +14,7 @@ export default async function handler(
   }
 
   try {
-    const sql = getSql();
+    const sql = await getSql();
     const result = await sql`SELECT NOW() AS connected_at`;
 
     return response.status(200).json({
