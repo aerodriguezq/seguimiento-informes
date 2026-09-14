@@ -2,7 +2,7 @@
 
 Sistema web para controlar informes asociados a proyectos, estados, responsables/contactos y alertas automáticas.
 
-> **Estado del repositorio:** contexto funcional y UX preparado para iniciar diseño de mockups y desarrollo.
+> **Estado del repositorio:** contexto funcional, UX y aplicación frontend integrada en la raíz del proyecto.
 
 ## 1. Propósito
 
@@ -186,23 +186,37 @@ También debe confirmarse:
 - Reportes avanzados.
 - Configuración avanzada por proyecto.
 
-## 12. Comandos sugeridos
+## 12. Aplicación local
+
+La aplicación frontend vive en la raíz del repositorio y usa los datos de demostración de `src/data/mockData.ts`.
+
+```bash
+npm install
+npm run dev
+```
+
+Comandos de validación y producción:
+
+```bash
+npm run lint
+npm run build
+npm run preview
+```
+
+## 13. Comandos sugeridos
 
 ```bash
 # crear rama
  git checkout -b feat/dashboard
 
-# instalar dependencias (según stack)
+# instalar dependencias
  npm install
-
-# ejecutar tests
- npm test
 
 # ejecutar aplicación
  npm run dev
 ```
 
-## 13. Estructura
+## 14. Estructura
 
 ```text
 seguimiento-informes-context/
@@ -222,18 +236,27 @@ seguimiento-informes-context/
 │       └── api-contracts.md
 ├── database/
 │   └── schema.sql
+├── src/
+│   ├── App.tsx
+│   ├── types.ts
+│   ├── data/
+│   └── components/
+├── index.html
+├── package.json
+├── tsconfig.json
 ├── reference/
 │   ├── pantalla-detalle-proyecto.png
 │   ├── Control Informes - fuente.xlsx
 │   ├── Control Informes - normalizado y correcciones.xlsx
 │   ├── modelo-relacional-normalizado.drawio
 │   └── informe-funcional-ux.docx
+├── vite.config.ts
 └── .github/
     ├── pull_request_template.md
     └── ISSUE_TEMPLATE/
 ```
 
-## 14. Instrucción para agentes de IA
+## 15. Instrucción para agentes de IA
 
 Antes de modificar el producto, leer en este orden:
 

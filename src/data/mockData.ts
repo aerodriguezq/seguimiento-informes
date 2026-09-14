@@ -1,0 +1,668 @@
+import {
+  Project,
+  Report,
+  ReportType,
+  Contact,
+  ScheduledAlert,
+  SystemNotification,
+  ReportStatus,
+  SemaforoStatus,
+} from '../types';
+
+export const CURRENT_DATE_STR = '2026-09-14';
+
+export const INITIAL_REPORT_TYPES: ReportType[] = [
+  {
+    id: 'rt-1',
+    code: 'INF-TEC',
+    name: 'Informe Técnico de Avance',
+    periodicity: 'Mensual',
+    description: 'Seguimiento mensual de metas físicas y avance constructivo/operativo de obra.',
+    active: true,
+  },
+  {
+    id: 'rt-2',
+    code: 'INF-FIN',
+    name: 'Informe Financiero y Presupuestal',
+    periodicity: 'Mensual',
+    description: 'Conciliación de pagos, desembolsos fiduciarios, actas de recibo y balance presupuestal.',
+    active: true,
+  },
+  {
+    id: 'rt-3',
+    code: 'INF-INT',
+    name: 'Informe Mensual de Interventoría',
+    periodicity: 'Mensual',
+    description: 'Dictamen técnico, administrativo y jurídico emitido por la interventoría externa.',
+    active: true,
+  },
+  {
+    id: 'rt-4',
+    code: 'INF-AMB',
+    name: 'Informe de Gestión Ambiental (PMA)',
+    periodicity: 'Trimestral',
+    description: 'Cumplimiento de fichas del Plan de Manejo Ambiental y permisos de vertimientos/aprovechamiento.',
+    active: true,
+  },
+  {
+    id: 'rt-5',
+    code: 'INF-SST',
+    name: 'Informe de Seguridad y Salud en el Trabajo',
+    periodicity: 'Mensual',
+    description: 'Registro de accidentalidad, capacitaciones, inspecciones y matriz SG-SST.',
+    active: true,
+  },
+  {
+    id: 'rt-6',
+    code: 'INF-LIQ',
+    name: 'Informe Final de Liquidación',
+    periodicity: 'Único',
+    description: 'Balance definitivo físico-financiero, garantías poscontractuales y acta de cierre.',
+    active: true,
+  },
+];
+
+export const INITIAL_CONTACTS: Contact[] = [
+  {
+    id: 'c-1',
+    name: 'Ing. Alejandro Rodríguez',
+    email: 'a.rodriguez@gdm.com.co',
+    role: 'Gerente de Proyectos',
+    company: 'GDM Consultoría e Infraestructura',
+    phone: '+57 310 445 8890',
+    hasNotificationAlarm: true,
+    active: true,
+  },
+  {
+    id: 'c-2',
+    name: 'Dra. Claudia Marcela Pérez',
+    email: 'cperez@consorciovial.co',
+    role: 'Directora de Interventoría',
+    company: 'Consorcio Vial Andino',
+    phone: '+57 312 889 1234',
+    hasNotificationAlarm: true,
+    active: true,
+  },
+  {
+    id: 'c-3',
+    name: 'Arq. Mateo Gómez V.',
+    email: 'mateo.gomez@infraestructurapacifico.com',
+    role: 'Residente Técnico de Obra',
+    company: 'Infraestructura del Pacífico S.A.S.',
+    phone: '+57 301 556 7812',
+    hasNotificationAlarm: true,
+    active: true,
+  },
+  {
+    id: 'c-4',
+    name: 'Dra. Sandra Milena Castro',
+    email: 'scastro@dnp.gov.co',
+    role: 'Supervisora DNP / Regalías',
+    company: 'Departamento Nacional de Planeación',
+    phone: '+57 315 778 9901',
+    hasNotificationAlarm: false,
+    active: true,
+  },
+  {
+    id: 'c-5',
+    name: 'Econ. Felipe Santander',
+    email: 'fsantander@fiduciaria.com.co',
+    role: 'Especialista Financiero',
+    company: 'Fiduciaria Central',
+    phone: '+57 318 443 2190',
+    hasNotificationAlarm: true,
+    active: true,
+  },
+  {
+    id: 'c-6',
+    name: 'Ing. Paola Andrea Duque',
+    email: 'pduque@ambientalurbano.org',
+    role: 'Coordinadora Ambiental y Social',
+    company: 'Consorcio Vial Andino',
+    phone: '+57 320 667 3345',
+    hasNotificationAlarm: false,
+    active: true,
+  },
+];
+
+export const INITIAL_PROJECTS: Project[] = [
+  {
+    id: 'proj-1',
+    name: 'Corredor Vial Conectividad Regional Cordillera',
+    bpin: '2024001000452',
+    company: 'Consorcio Vial Andino',
+    generalStatus: 'En Ejecución',
+    autoAlertsEnabled: true,
+    applicableTypeIds: ['rt-1', 'rt-2', 'rt-3', 'rt-4'], // Restringido
+    startDate: '2024-03-01',
+    endDate: '2027-12-31',
+    budget: '$ 148.500.000.000 COP',
+  },
+  {
+    id: 'proj-2',
+    name: 'Optimización Acueducto y Planta Potabilizadora Ribereña',
+    bpin: '2023002000891',
+    company: 'Infraestructura del Pacífico S.A.S.',
+    generalStatus: 'En Ejecución',
+    autoAlertsEnabled: true,
+    applicableTypeIds: ['rt-1', 'rt-2', 'rt-5'],
+    startDate: '2023-08-15',
+    endDate: '2026-11-30',
+    budget: '$ 32.400.000.000 COP',
+  },
+  {
+    id: 'proj-3',
+    name: 'Construcción Centro Hospitalario de Alta Complejidad Sur',
+    bpin: '2024003001124',
+    company: 'Construcciones e Ingeniería Hospitalaria',
+    generalStatus: 'En Ejecución',
+    autoAlertsEnabled: false,
+    applicableTypeIds: [], // Regla: sin tipos definidos -> permite TODOS los tipos disponibles
+    startDate: '2024-01-10',
+    endDate: '2028-06-30',
+    budget: '$ 210.000.000.000 COP',
+  },
+  {
+    id: 'proj-4',
+    name: 'Modernización de Infraestructura Educativa Digital Fase II',
+    bpin: '2025001000673',
+    company: 'Unión Temporal Educación Futuro',
+    generalStatus: 'En Inicio',
+    autoAlertsEnabled: true,
+    applicableTypeIds: ['rt-1', 'rt-2'],
+    startDate: '2025-06-01',
+    endDate: '2026-12-31',
+    budget: '$ 18.250.000.000 COP',
+  },
+  {
+    id: 'proj-5',
+    name: 'Adecuación Malecón Turístico y Obras de Protección Costera',
+    bpin: '2022005000318',
+    company: 'Dique & Costas S.A.',
+    generalStatus: 'En Cierre',
+    autoAlertsEnabled: true,
+    applicableTypeIds: ['rt-1', 'rt-3', 'rt-6'],
+    startDate: '2022-10-01',
+    endDate: '2026-10-15',
+    budget: '$ 45.800.000.000 COP',
+  },
+];
+
+export const INITIAL_SCHEDULED_ALERTS: ScheduledAlert[] = [
+  {
+    id: 'alert-1',
+    projectId: 'proj-1',
+    projectName: 'Corredor Vial Conectividad Regional Cordillera',
+    name: 'Alerta Preventiva - 5 días antes de vencimiento',
+    schedule: '5 días antes del vencimiento',
+    time: '08:00 AM',
+    type: 'Preventiva',
+    recipientIds: ['c-1', 'c-2'],
+    active: true,
+    nextExecution: '2026-09-15 08:00 AM',
+  },
+  {
+    id: 'alert-2',
+    projectId: 'proj-1',
+    projectName: 'Corredor Vial Conectividad Regional Cordillera',
+    name: 'Alerta Crítica - Día de vencimiento de informe',
+    schedule: 'El mismo día del vencimiento',
+    time: '07:30 AM',
+    type: 'Vencimiento',
+    recipientIds: ['c-1', 'c-2', 'c-3'],
+    active: true,
+    nextExecution: '2026-09-18 07:30 AM',
+  },
+  {
+    id: 'alert-3',
+    projectId: 'proj-1',
+    projectName: 'Corredor Vial Conectividad Regional Cordillera',
+    name: 'Recordatorio Semanal de Pendientes de Evidencias',
+    schedule: 'Semanal todos los Lunes',
+    time: '09:00 AM',
+    type: 'Seguimiento',
+    recipientIds: ['c-1', 'c-3'],
+    active: true,
+    nextExecution: '2026-09-21 09:00 AM',
+  },
+  {
+    id: 'alert-4',
+    projectId: 'proj-2',
+    projectName: 'Optimización Acueducto y Planta Potabilizadora Ribereña',
+    name: 'Alerta Preventiva Interventoría y Finanzas',
+    schedule: '3 días antes del vencimiento',
+    time: '08:30 AM',
+    type: 'Preventiva',
+    recipientIds: ['c-3', 'c-5'],
+    active: true,
+    nextExecution: '2026-09-17 08:30 AM',
+  },
+  {
+    id: 'alert-5',
+    projectId: 'proj-2',
+    projectName: 'Optimización Acueducto y Planta Potabilizadora Ribereña',
+    name: 'Aviso de Informe Vencido a Gerencia',
+    schedule: '1 día posterior al vencimiento si no está Enviado',
+    time: '07:00 AM',
+    type: 'Vencimiento',
+    recipientIds: ['c-1', 'c-3'],
+    active: true,
+    nextExecution: '2026-09-15 07:00 AM',
+  },
+  {
+    id: 'alert-6',
+    projectId: 'proj-3',
+    projectName: 'Construcción Centro Hospitalario de Alta Complejidad Sur',
+    name: 'Notificación de cambio a Entregado a Of. Proyectos',
+    schedule: 'Inmediata al transicionar estado',
+    time: 'Automático',
+    type: 'Confirmación',
+    recipientIds: ['c-1', 'c-4'],
+    active: false,
+    nextExecution: 'En espera de evento',
+  },
+];
+
+export const INITIAL_REPORTS: Report[] = [
+  {
+    id: 'rep-101',
+    consecutive: 'INF-2026-081',
+    projectId: 'proj-1',
+    projectName: 'Corredor Vial Conectividad Regional Cordillera',
+    projectBpin: '2024001000452',
+    typeId: 'rt-1',
+    typeName: 'Informe Técnico de Avance',
+    month: 'Agosto',
+    year: 2026,
+    dueDate: '2026-09-10', // Vencido (-4 días)
+    status: 'Pendientes Evidencias',
+    contactIds: ['c-1', 'c-2', 'c-3'],
+    primaryContactId: 'c-3',
+    observations: 'Faltan los ensayos de laboratorio del tramo K14+200 y registro fotográfico consolidado.',
+    attachments: [
+      { id: 'att-1', name: 'Borrador_Avance_Fisico_Ago2026.pdf', size: '3.4 MB', uploadedAt: '2026-09-08', uploadedBy: 'Arq. Mateo Gómez V.' },
+    ],
+    history: [
+      {
+        status: 'Pendientes Evidencias',
+        date: '2026-09-01 09:30',
+        userName: 'Ing. Alejandro Rodríguez',
+        comment: 'Apertura del informe para el período Agosto 2026. Se solicitan ensayos a laboratorio.',
+      },
+    ],
+    alertRulesCount: 2,
+    createdAt: '2026-09-01',
+  },
+  {
+    id: 'rep-102',
+    consecutive: 'INF-2026-082',
+    projectId: 'proj-1',
+    projectName: 'Corredor Vial Conectividad Regional Cordillera',
+    projectBpin: '2024001000452',
+    typeId: 'rt-3',
+    typeName: 'Informe Mensual de Interventoría',
+    month: 'Agosto',
+    year: 2026,
+    dueDate: '2026-09-16', // Próximo a vencer (+2 días)
+    status: 'Informe en Elaboración',
+    contactIds: ['c-1', 'c-2'],
+    primaryContactId: 'c-2',
+    observations: 'Revisión final de observaciones de interventoría al informe del contratista.',
+    attachments: [
+      { id: 'att-2', name: 'Acta_Comite_Tecnico_14.pdf', size: '1.8 MB', uploadedAt: '2026-09-12', uploadedBy: 'Dra. Claudia Marcela Pérez' },
+    ],
+    history: [
+      {
+        status: 'Pendientes Evidencias',
+        date: '2026-09-02 10:15',
+        userName: 'Dra. Claudia Marcela Pérez',
+        comment: 'Recepción de planillas de interventoría.',
+      },
+      {
+        status: 'Informe en Elaboración',
+        date: '2026-09-09 16:40',
+        userName: 'Dra. Claudia Marcela Pérez',
+        comment: 'Consolidando capítulo de aseguramiento de calidad y trazabilidad.',
+      },
+    ],
+    alertRulesCount: 2,
+    createdAt: '2026-09-02',
+  },
+  {
+    id: 'rep-103',
+    consecutive: 'INF-2026-083',
+    projectId: 'proj-1',
+    projectName: 'Corredor Vial Conectividad Regional Cordillera',
+    projectBpin: '2024001000452',
+    typeId: 'rt-2',
+    typeName: 'Informe Financiero y Presupuestal',
+    month: 'Agosto',
+    year: 2026,
+    dueDate: '2026-09-18', // Próximo a vencer (+4 días)
+    status: 'Entregado a Of. Proyectos',
+    contactIds: ['c-1', 'c-5'],
+    primaryContactId: 'c-5',
+    observations: 'Radicado en oficina de proyectos para validación de pólizas y retenciones fiduciarias.',
+    attachments: [
+      { id: 'att-3', name: 'Balance_Fiduciario_Ago2026.xlsx', size: '890 KB', uploadedAt: '2026-09-13', uploadedBy: 'Econ. Felipe Santander' },
+      { id: 'att-4', name: 'Radicado_Oficina_Proyectos_661.pdf', size: '420 KB', uploadedAt: '2026-09-13', uploadedBy: 'Econ. Felipe Santander' },
+    ],
+    history: [
+      {
+        status: 'Pendientes Evidencias',
+        date: '2026-09-01 11:00',
+        userName: 'Econ. Felipe Santander',
+        comment: 'Solicitud de extractos a Fiduciaria.',
+      },
+      {
+        status: 'Informe en Elaboración',
+        date: '2026-09-08 14:20',
+        userName: 'Econ. Felipe Santander',
+        comment: 'Conciliación de pagos de amortización de anticipo.',
+      },
+      {
+        status: 'Entregado a Of. Proyectos',
+        date: '2026-09-13 17:05',
+        userName: 'Econ. Felipe Santander',
+        comment: 'Entregado formalmente con radicado para visto bueno gerencial.',
+      },
+    ],
+    alertRulesCount: 1,
+    createdAt: '2026-09-01',
+  },
+  {
+    id: 'rep-104',
+    consecutive: 'INF-2026-078',
+    projectId: 'proj-1',
+    projectName: 'Corredor Vial Conectividad Regional Cordillera',
+    projectBpin: '2024001000452',
+    typeId: 'rt-4',
+    typeName: 'Informe de Gestión Ambiental (PMA)',
+    month: 'Julio - Septiembre',
+    year: 2026,
+    dueDate: '2026-09-30', // En tiempo (+16 días)
+    status: 'Informe en Elaboración',
+    contactIds: ['c-1', 'c-6'],
+    primaryContactId: 'c-6',
+    observations: 'En medición de fuentes de ruido y disposición de material en ZODME 3.',
+    attachments: [
+      { id: 'att-5', name: 'Monitoreo_Ruido_Trimestre3.pdf', size: '5.1 MB', uploadedAt: '2026-09-11', uploadedBy: 'Ing. Paola Andrea Duque' },
+    ],
+    history: [
+      {
+        status: 'Pendientes Evidencias',
+        date: '2026-09-05 08:00',
+        userName: 'Ing. Paola Andrea Duque',
+        comment: 'Inicio de recolección de indicadores de sostenibilidad.',
+      },
+      {
+        status: 'Informe en Elaboración',
+        date: '2026-09-10 11:30',
+        userName: 'Ing. Paola Andrea Duque',
+        comment: 'Incorporando certificados de disposición autorizada.',
+      },
+    ],
+    alertRulesCount: 1,
+    createdAt: '2026-09-05',
+  },
+  {
+    id: 'rep-105',
+    consecutive: 'INF-2026-065',
+    projectId: 'proj-1',
+    projectName: 'Corredor Vial Conectividad Regional Cordillera',
+    projectBpin: '2024001000452',
+    typeId: 'rt-1',
+    typeName: 'Informe Técnico de Avance',
+    month: 'Julio',
+    year: 2026,
+    dueDate: '2026-08-15',
+    status: 'Enviado', // Cumplido
+    contactIds: ['c-1', 'c-2', 'c-3'],
+    primaryContactId: 'c-1',
+    observations: 'Aprobado y radicado satisfactoriamente ante el Ministerio de Transporte.',
+    attachments: [
+      { id: 'att-6', name: 'Informe_Tecnico_Jul2026_Final_Firmado.pdf', size: '12.4 MB', uploadedAt: '2026-08-14', uploadedBy: 'Ing. Alejandro Rodríguez' },
+      { id: 'att-7', name: 'Oficio_Remisorio_Mintransporte_0089.pdf', size: '310 KB', uploadedAt: '2026-08-15', uploadedBy: 'Ing. Alejandro Rodríguez' },
+    ],
+    history: [
+      {
+        status: 'Pendientes Evidencias',
+        date: '2026-08-01 08:00',
+        userName: 'Arq. Mateo Gómez V.',
+        comment: 'Carga inicial de actas parciales.',
+      },
+      {
+        status: 'Informe en Elaboración',
+        date: '2026-08-07 15:30',
+        userName: 'Arq. Mateo Gómez V.',
+        comment: 'Redacción de informe consolidado.',
+      },
+      {
+        status: 'Entregado a Of. Proyectos',
+        date: '2026-08-12 11:20',
+        userName: 'Dra. Claudia Marcela Pérez',
+        comment: 'Revisado y aprobado por Interventoría.',
+      },
+      {
+        status: 'Enviado',
+        date: '2026-08-15 16:10',
+        userName: 'Ing. Alejandro Rodríguez',
+        comment: 'Enviado al ente contratante con radicado oficial.',
+      },
+    ],
+    alertRulesCount: 0,
+    createdAt: '2026-08-01',
+  },
+  {
+    id: 'rep-201',
+    consecutive: 'INF-2026-085',
+    projectId: 'proj-2',
+    projectName: 'Optimización Acueducto y Planta Potabilizadora Ribereña',
+    projectBpin: '2023002000891',
+    typeId: 'rt-1',
+    typeName: 'Informe Técnico de Avance',
+    month: 'Agosto',
+    year: 2026,
+    dueDate: '2026-09-12', // Vencido (-2 días)
+    status: 'Pendientes Evidencias',
+    contactIds: ['c-3'],
+    primaryContactId: 'c-3',
+    observations: 'Pendiente registro de pruebas hidrostáticas en tanque de almacenamiento.',
+    attachments: [],
+    history: [
+      {
+        status: 'Pendientes Evidencias',
+        date: '2026-09-01 08:30',
+        userName: 'Arq. Mateo Gómez V.',
+        comment: 'Pendiente remisión de pruebas por parte del subcontratista.',
+      },
+    ],
+    alertRulesCount: 2,
+    createdAt: '2026-09-01',
+  },
+  {
+    id: 'rep-202',
+    consecutive: 'INF-2026-086',
+    projectId: 'proj-2',
+    projectName: 'Optimización Acueducto y Planta Potabilizadora Ribereña',
+    projectBpin: '2023002000891',
+    typeId: 'rt-5',
+    typeName: 'Informe de Seguridad y Salud en el Trabajo',
+    month: 'Agosto',
+    year: 2026,
+    dueDate: '2026-09-17', // Próximo a vencer (+3 días)
+    status: 'Informe en Elaboración',
+    contactIds: ['c-3', 'c-1'],
+    primaryContactId: 'c-3',
+    observations: 'Compilación de horas hombre trabajadas e inspecciones de trabajo en alturas.',
+    attachments: [
+      { id: 'att-8', name: 'Matriz_Accidentalidad_Ago2026.xlsx', size: '640 KB', uploadedAt: '2026-09-11', uploadedBy: 'Arq. Mateo Gómez V.' },
+    ],
+    history: [
+      {
+        status: 'Pendientes Evidencias',
+        date: '2026-09-03 09:00',
+        userName: 'Arq. Mateo Gómez V.',
+        comment: 'Recolección de firmas en libro de campo.',
+      },
+      {
+        status: 'Informe en Elaboración',
+        date: '2026-09-11 14:00',
+        userName: 'Arq. Mateo Gómez V.',
+        comment: 'Cargando registros fotográficos de charlas operacionales.',
+      },
+    ],
+    alertRulesCount: 1,
+    createdAt: '2026-09-03',
+  },
+  {
+    id: 'rep-301',
+    consecutive: 'INF-2026-087',
+    projectId: 'proj-3',
+    projectName: 'Construcción Centro Hospitalario de Alta Complejidad Sur',
+    projectBpin: '2024003001124',
+    typeId: 'rt-2',
+    typeName: 'Informe Financiero y Presupuestal',
+    month: 'Agosto',
+    year: 2026,
+    dueDate: '2026-09-25', // En tiempo (+11 días)
+    status: 'Informe en Elaboración',
+    contactIds: ['c-1', 'c-4', 'c-5'],
+    primaryContactId: 'c-5',
+    observations: 'Planilla de corte de pago de suministros electromecánicos y equipos médicos fase 1.',
+    attachments: [],
+    history: [
+      {
+        status: 'Pendientes Evidencias',
+        date: '2026-09-05 10:00',
+        userName: 'Econ. Felipe Santander',
+        comment: 'Revisando actas de recibo de maquinaria importada.',
+      },
+      {
+        status: 'Informe en Elaboración',
+        date: '2026-09-12 11:30',
+        userName: 'Econ. Felipe Santander',
+        comment: 'Calculando porcentaje de amortización.',
+      },
+    ],
+    alertRulesCount: 1,
+    createdAt: '2026-09-05',
+  },
+  {
+    id: 'rep-501',
+    consecutive: 'INF-2026-069',
+    projectId: 'proj-5',
+    projectName: 'Adecuación Malecón Turístico y Obras de Protección Costera',
+    projectBpin: '2022005000318',
+    typeId: 'rt-6',
+    typeName: 'Informe Final de Liquidación',
+    month: 'Cierre Definitivo',
+    year: 2026,
+    dueDate: '2026-09-08', // Vencido (-6 días)
+    status: 'Pendientes Evidencias',
+    contactIds: ['c-1', 'c-2'],
+    primaryContactId: 'c-2',
+    observations: 'Falta acta de entrega física a la Alcaldía y póliza de estabilidad de la obra.',
+    attachments: [
+      { id: 'att-9', name: 'Minuta_Acta_Cierre_Borrador.docx', size: '1.1 MB', uploadedAt: '2026-09-04', uploadedBy: 'Dra. Claudia Marcela Pérez' },
+    ],
+    history: [
+      {
+        status: 'Pendientes Evidencias',
+        date: '2026-08-25 10:00',
+        userName: 'Dra. Claudia Marcela Pérez',
+        comment: 'Se requiere certificado de paz y salvo del personal obrero.',
+      },
+    ],
+    alertRulesCount: 1,
+    createdAt: '2026-08-25',
+  },
+];
+
+export const INITIAL_NOTIFICATIONS: SystemNotification[] = [
+  {
+    id: 'notif-1',
+    title: 'Informe Vencido: INF-2026-081',
+    message: 'El Informe Técnico de Avance del proyecto Corredor Vial venció hace 4 días y continúa en "Pendientes Evidencias".',
+    severity: 'critical',
+    timestamp: 'Hoy, 08:00 AM',
+    read: false,
+    relatedReportId: 'rep-101',
+    relatedProjectId: 'proj-1',
+  },
+  {
+    id: 'notif-2',
+    title: 'Alerta Próxima: INF-2026-082 vence en 2 días',
+    message: 'El Informe Mensual de Interventoría tiene fecha límite el 16 de septiembre de 2026. Estado: Informe en Elaboración.',
+    severity: 'warning',
+    timestamp: 'Hoy, 07:30 AM',
+    read: false,
+    relatedReportId: 'rep-102',
+    relatedProjectId: 'proj-1',
+  },
+  {
+    id: 'notif-3',
+    title: 'Informe Entregado a Of. Proyectos',
+    message: 'El Informe Financiero INF-2026-083 fue radicado por Econ. Felipe Santander para revisión gerencial.',
+    severity: 'info',
+    timestamp: 'Ayer, 05:05 PM',
+    read: true,
+    relatedReportId: 'rep-103',
+    relatedProjectId: 'proj-1',
+  },
+  {
+    id: 'notif-4',
+    title: 'Informe Vencido: INF-2026-085',
+    message: 'Acueducto y Planta Ribereña tiene el informe técnico vencido por falta de pruebas hidrostáticas.',
+    severity: 'critical',
+    timestamp: 'Hace 2 días',
+    read: false,
+    relatedReportId: 'rep-201',
+    relatedProjectId: 'proj-2',
+  },
+];
+
+// Helper calculations
+export function calculateDaysRemaining(dueDateStr: string, status: ReportStatus): number {
+  if (status === 'Enviado') {
+    return 0; // Already fulfilled
+  }
+  const current = new Date(CURRENT_DATE_STR).getTime();
+  const due = new Date(dueDateStr).getTime();
+  const diffDays = Math.round((due - current) / (1000 * 60 * 60 * 24));
+  return diffDays;
+}
+
+export function getSemaforoStatus(dueDateStr: string, status: ReportStatus): SemaforoStatus {
+  if (status === 'Enviado') {
+    return 'en_tiempo';
+  }
+  const days = calculateDaysRemaining(dueDateStr, status);
+  if (days < 0) return 'vencido';
+  if (days <= 5) return 'proximo';
+  return 'en_tiempo';
+}
+
+export const MONTHS_LIST = [
+  'Enero',
+  'Febrero',
+  'Marzo',
+  'Abril',
+  'Mayo',
+  'Junio',
+  'Julio',
+  'Agosto',
+  'Septiembre',
+  'Octubre',
+  'Noviembre',
+  'Diciembre',
+];
+
+export const YEARS_LIST = [2024, 2025, 2026, 2027];
+
+export const STATUS_SEQUENCE: ReportStatus[] = [
+  'Pendientes Evidencias',
+  'Informe en Elaboración',
+  'Entregado a Of. Proyectos',
+  'Enviado',
+];

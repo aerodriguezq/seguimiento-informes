@@ -1,0 +1,6 @@
+{
+  "name": "Seguimiento de Informes y Alertas",
+  "description": "Sistema de gestión y seguimiento operacional de informes asociados a proyectos, estados, responsables y alertas automáticas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
