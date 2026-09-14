@@ -50,12 +50,17 @@ export default async function handler(
           FROM empresas
           WHERE nombre = ${company.trim()}
           LIMIT 1
+        ), company_insert AS (
+          INSERT INTO empresas (empresa_id, nombre)
+          SELECT
+            COALESCE((SELECT MAX(empresa_id) FROM empresas), 0) + 1,
+            ${company.trim()}
+          WHERE NOT EXISTS (SELECT 1 FROM existing_company)
+          RETURNING empresa_id
         ), company_row AS (
           SELECT empresa_id FROM existing_company
           UNION ALL
-          SELECT COALESCE(MAX(empresa_id), 0) + 1
-          FROM empresas
-          WHERE NOT EXISTS (SELECT 1 FROM existing_company)
+          SELECT empresa_id FROM company_insert
         ), created_project AS (
           INSERT INTO proyectos (proyecto_id, empresa_id, nombre, bpin)
           SELECT
