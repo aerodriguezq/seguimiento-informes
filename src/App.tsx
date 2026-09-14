@@ -93,6 +93,36 @@ export default function App() {
     setActiveModule('project_detail');
   };
 
+  const handleCreateProject = async (projectInput: { name: string; bpin: string; company: string }) => {
+    const response = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(projectInput),
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.errors?.[0] || 'No fue posible crear el proyecto.');
+    }
+
+    const project = payload.data;
+    setProjects((prev) => [
+      {
+        id: String(project.id),
+        name: project.name,
+        bpin: project.bpin,
+        company: project.company_name,
+        generalStatus: 'En Inicio',
+        autoAlertsEnabled: false,
+        applicableTypeIds: [],
+        startDate: '',
+        endDate: '',
+      },
+      ...prev,
+    ]);
+    showToast('Proyecto registrado en Neon.', 'success');
+  };
+
   // Report creation
   const handleSubmitNewReport = (newReport: Report) => {
     setReports([newReport, ...reports]);
@@ -316,6 +346,7 @@ export default function App() {
               reportTypes={reportTypes}
               onSelectProject={handleSelectProjectDetail}
               onOpenNewReportForProject={handleOpenNewReport}
+              onCreateProject={handleCreateProject}
             />
           )}
 

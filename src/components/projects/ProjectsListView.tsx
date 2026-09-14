@@ -22,6 +22,7 @@ interface ProjectsListViewProps {
   reportTypes: ReportType[];
   onSelectProject: (projectId: string) => void;
   onOpenNewReportForProject: (projectId: string) => void;
+  onCreateProject: (project: { name: string; bpin: string; company: string }) => Promise<void>;
 }
 
 export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
@@ -30,10 +31,31 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
   reportTypes,
   onSelectProject,
   onOpenNewReportForProject,
+  onCreateProject,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [isCreateFormOpen, setIsCreateFormOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [newProject, setNewProject] = useState({ name: '', bpin: '', company: '' });
+
+  const handleCreateProject = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setFormError('');
+
+    try {
+      await onCreateProject(newProject);
+      setNewProject({ name: '', bpin: '', company: '' });
+      setIsCreateFormOpen(false);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'No fue posible crear el proyecto.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const filteredProjects = useMemo(() => {
     return projects.filter((p) => {
@@ -84,6 +106,14 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
         {/* View mode toggle */}
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsCreateFormOpen((open) => !open)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Nuevo proyecto
+          </button>
           <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200">
             <button
               type="button"
@@ -112,6 +142,57 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
           </div>
         </div>
       </div>
+
+      {isCreateFormOpen && (
+        <form
+          onSubmit={handleCreateProject}
+          className="bg-white rounded-xl border border-indigo-200 p-4 shadow-xs"
+        >
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Registrar proyecto</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Los datos se guardarán directamente en Neon.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsCreateFormOpen(false)}
+              className="text-xs font-medium text-slate-500 hover:text-slate-900"
+            >
+              Cancelar
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {[
+              ['name', 'Nombre del proyecto', 'Ej. Mejoramiento vial regional'],
+              ['bpin', 'BPIN', 'Ej. 2024001000452'],
+              ['company', 'Empresa', 'Ej. Consorcio Vial Andino'],
+            ].map(([field, label, placeholder]) => (
+              <label key={field} className="text-xs font-medium text-slate-700">
+                {label}
+                <input
+                  required
+                  value={newProject[field as keyof typeof newProject]}
+                  onChange={(event) =>
+                    setNewProject((project) => ({ ...project, [field]: event.target.value }))
+                  }
+                  placeholder={placeholder}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:bg-white"
+                />
+              </label>
+            ))}
+          </div>
+          {formError && <p className="mt-3 text-xs font-medium text-rose-600">{formError}</p>}
+          <div className="mt-4 flex justify-end">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSubmitting ? 'Guardando...' : 'Guardar proyecto'}
+            </button>
+          </div>
+        </form>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-xs flex flex-col sm:flex-row items-center gap-3">
