@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { sql } from '../server/db';
+import { getSql } from '../server/db';
 
 export default async function handler(
   request: VercelRequest,
@@ -14,6 +14,7 @@ export default async function handler(
   }
 
   try {
+    const sql = getSql();
     const result = await sql`SELECT NOW() AS connected_at`;
 
     return response.status(200).json({
