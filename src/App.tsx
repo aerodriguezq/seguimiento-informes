@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActiveModule,
   Project,
@@ -11,13 +11,6 @@ import {
   ReportAttachment,
 } from './types';
 import {
-  INITIAL_PROJECTS,
-  INITIAL_REPORTS,
-  INITIAL_REPORT_TYPES,
-  INITIAL_CONTACTS,
-  INITIAL_SCHEDULED_ALERTS,
-  INITIAL_NOTIFICATIONS,
-  calculateDaysRemaining,
   getSemaforoStatus,
 } from './data/mockData';
 import { Header } from './components/layout/Header';
@@ -35,15 +28,15 @@ import { CheckCircle2, Info, X } from 'lucide-react';
 export default function App() {
   // Global State
   const [activeModule, setActiveModule] = useState<ActiveModule>('dashboard');
-  const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
-  const [reports, setReports] = useState<Report[]>(INITIAL_REPORTS);
-  const [reportTypes, setReportTypes] = useState<ReportType[]>(INITIAL_REPORT_TYPES);
-  const [contacts, setContacts] = useState<Contact[]>(INITIAL_CONTACTS);
-  const [alerts, setAlerts] = useState<ScheduledAlert[]>(INITIAL_SCHEDULED_ALERTS);
-  const [notifications, setNotifications] = useState<SystemNotification[]>(INITIAL_NOTIFICATIONS);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
+  const [notifications, setNotifications] = useState<SystemNotification[]>([]);
 
   // Context & Selections
-  const [currentProjectId, setCurrentProjectId] = useState<string>(INITIAL_PROJECTS[0].id);
+  const [currentProjectId, setCurrentProjectId] = useState<string>('');
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [reportsFilterStatus, setReportsFilterStatus] = useState<string>('all');
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
@@ -55,6 +48,44 @@ export default function App() {
       setToastMessage(null);
     }, 4000);
   };
+
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        const response = await fetch('/api/projects');
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload.errors?.[0] || 'No fue posible consultar los proyectos.');
+        }
+
+        const loadedProjects: Project[] = payload.data.map((project: {
+          id: string | number;
+          name: string;
+          bpin: string;
+          company_name: string;
+          applicable_type_ids: Array<string | number>;
+        }) => ({
+          id: String(project.id),
+          name: project.name,
+          bpin: project.bpin,
+          company: project.company_name,
+          generalStatus: 'En Inicio',
+          autoAlertsEnabled: false,
+          applicableTypeIds: project.applicable_type_ids.map(String),
+          startDate: '',
+          endDate: '',
+        }));
+
+        setProjects(loadedProjects);
+        setCurrentProjectId((currentId) => currentId || loadedProjects[0]?.id || '');
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'No fue posible consultar los proyectos.', 'info');
+      }
+    };
+
+    void loadProjects();
+  }, []);
 
   const currentProject = projects.find((p) => p.id === currentProjectId) || null;
 
