@@ -87,6 +87,23 @@ export default function App() {
     void loadProjects();
   }, []);
 
+  useEffect(() => {
+    const loadCatalogs = async () => {
+      try {
+        const response = await fetch('/api/catalogs');
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible consultar los catálogos.');
+
+        setReportTypes(payload.data.reportTypes);
+        setContacts(payload.data.contacts);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'No fue posible consultar los catálogos.', 'info');
+      }
+    };
+
+    void loadCatalogs();
+  }, []);
+
   const currentProject = projects.find((p) => p.id === currentProjectId) || null;
 
   // Counts for sidebar
@@ -280,13 +297,27 @@ export default function App() {
   };
 
   // Master Lists
-  const handleAddReportType = (newType: ReportType) => {
-    setReportTypes([...reportTypes, newType]);
+  const handleAddReportType = async (newType: ReportType) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'reportType', data: newType }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el tipo de informe.');
+    setReportTypes((prev) => [...prev, payload.data]);
     showToast(`Nuevo tipo de informe "${newType.code} - ${newType.name}" agregado.`, 'success');
   };
 
-  const handleAddContact = (newContact: Contact) => {
-    setContacts([...contacts, newContact]);
+  const handleAddContact = async (newContact: Contact) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'contact', data: newContact }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el contacto.');
+    setContacts((prev) => [...prev, payload.data]);
     showToast(`Contacto "${newContact.name}" registrado en la lista maestra.`, 'success');
   };
 

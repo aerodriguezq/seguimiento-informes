@@ -17,7 +17,10 @@ CREATE TABLE proyectos (
 
 CREATE TABLE tipos_informe (
   tipo_informe_id BIGINT PRIMARY KEY,
+  codigo VARCHAR(50),
   nombre VARCHAR(150) NOT NULL UNIQUE,
+  periodicidad VARCHAR(30) NOT NULL DEFAULT 'Mensual',
+  descripcion TEXT NOT NULL DEFAULT '',
   activo BOOLEAN NOT NULL DEFAULT TRUE
 );
 
@@ -36,6 +39,7 @@ CREATE TABLE roles (
 CREATE TABLE contactos (
   contacto_id BIGINT PRIMARY KEY,
   rol_id BIGINT REFERENCES roles(rol_id),
+  empresa_id BIGINT REFERENCES empresas(empresa_id),
   nombre VARCHAR(160) NOT NULL,
   email VARCHAR(200),
   telefono VARCHAR(50),

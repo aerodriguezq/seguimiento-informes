@@ -24,8 +24,8 @@ import {
 interface MasterListsViewProps {
   reportTypes: ReportType[];
   contacts: Contact[];
-  onAddReportType: (type: ReportType) => void;
-  onAddContact: (contact: Contact) => void;
+  onAddReportType: (type: ReportType) => Promise<void>;
+  onAddContact: (contact: Contact) => Promise<void>;
 }
 
 export const MasterListsView: React.FC<MasterListsViewProps> = ({
@@ -73,7 +73,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
     { id: 'r-5', name: 'Coordinador Ambiental & Social', description: 'Seguimiento al PMA y permisos con autoridades ambientales.', count: 2 },
   ];
 
-  const handleSaveType = (e: React.FormEvent) => {
+  const handleSaveType = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTypeCode.trim() || !newTypeName.trim()) return;
 
@@ -85,14 +85,14 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       description: newTypeDesc.trim() || 'Tipo de informe añadido a listas maestras.',
       active: true,
     };
-    onAddReportType(created);
+    await onAddReportType(created);
     setShowAddModal(false);
     setNewTypeCode('');
     setNewTypeName('');
     setNewTypeDesc('');
   };
 
-  const handleSaveContact = (e: React.FormEvent) => {
+  const handleSaveContact = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newContactName.trim() || !newContactEmail.trim()) return;
 
@@ -106,7 +106,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       hasNotificationAlarm: true,
       active: true,
     };
-    onAddContact(created);
+    await onAddContact(created);
     setShowAddModal(false);
     setNewContactName('');
     setNewContactEmail('');
