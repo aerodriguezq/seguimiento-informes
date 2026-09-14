@@ -4,7 +4,7 @@ export default async function handler(
   request: VercelRequest,
   response: VercelResponse,
 ) {
-  if (request.method !== 'GET' && request.method !== 'POST') {
+  if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'DELETE') {
     return response.status(405).json({
       data: null,
       meta: {},
@@ -25,6 +25,38 @@ export default async function handler(
 
     const { neon } = await import('@neondatabase/serverless');
     const sql = neon(databaseUrl);
+
+    if (request.method === 'DELETE') {
+      const projectId = Number(request.query.id);
+
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return response.status(400).json({
+          data: null,
+          meta: {},
+          errors: ['El id del proyecto es obligatorio.'],
+        });
+      }
+
+      const deletedProjects = await sql`
+        DELETE FROM proyectos
+        WHERE proyecto_id = ${projectId}
+        RETURNING proyecto_id AS id
+      `;
+
+      if (!deletedProjects[0]) {
+        return response.status(404).json({
+          data: null,
+          meta: {},
+          errors: ['Proyecto no encontrado.'],
+        });
+      }
+
+      return response.status(200).json({
+        data: deletedProjects[0],
+        meta: {},
+        errors: [],
+      });
+    }
 
     if (request.method === 'POST') {
       const { name, bpin, company } = request.body ?? {};
