@@ -44,47 +44,50 @@ export default async function handler(
         });
       }
 
-      const projects = await sql`
-        WITH existing_company AS (
-          SELECT empresa_id
-          FROM empresas
-          WHERE nombre = ${company.trim()}
-          LIMIT 1
-        ), company_insert AS (
-          INSERT INTO empresas (empresa_id, nombre)
-          SELECT
-            COALESCE((SELECT MAX(empresa_id) FROM empresas), 0) + 1,
-            ${company.trim()}
-          WHERE NOT EXISTS (SELECT 1 FROM existing_company)
-          RETURNING empresa_id
-        ), company_row AS (
-          SELECT empresa_id FROM existing_company
-          UNION ALL
-          SELECT empresa_id FROM company_insert
-        ), created_project AS (
-          INSERT INTO proyectos (proyecto_id, empresa_id, nombre, bpin)
-          SELECT
-            COALESCE((SELECT MAX(proyecto_id) FROM proyectos), 0) + 1,
-            empresa_id,
-            ${name.trim()},
-            ${bpin.trim()}
-          FROM company_row
-          RETURNING proyecto_id, empresa_id, nombre, bpin, activo
-        )
-        SELECT
-          p.proyecto_id AS id,
-          p.nombre AS name,
-          p.bpin,
-          p.activo AS active,
-          e.empresa_id AS company_id,
-          e.nombre AS company_name,
-          ARRAY[]::bigint[] AS applicable_type_ids
-        FROM created_project p
-        JOIN empresas e ON e.empresa_id = p.empresa_id
+      const existingCompanies = await sql`
+        SELECT empresa_id
+        FROM empresas
+        WHERE nombre = ${company.trim()}
+        LIMIT 1
       `;
 
+      let companyId = existingCompanies[0]?.empresa_id;
+
+      if (!companyId) {
+        const insertedCompanies = await sql`
+          INSERT INTO empresas (empresa_id, nombre)
+          VALUES (
+            COALESCE((SELECT MAX(empresa_id) FROM empresas), 0) + 1,
+            ${company.trim()}
+          )
+          RETURNING empresa_id
+        `;
+        companyId = insertedCompanies[0]?.empresa_id;
+      }
+
+      if (!companyId) {
+        throw new Error('No fue posible crear la empresa.');
+      }
+
+      const projects = await sql`
+        INSERT INTO proyectos (proyecto_id, empresa_id, nombre, bpin)
+        VALUES (
+          COALESCE((SELECT MAX(proyecto_id) FROM proyectos), 0) + 1,
+          ${companyId},
+          ${name.trim()},
+          ${bpin.trim()}
+        )
+        RETURNING proyecto_id AS id, nombre AS name, bpin, activo AS active, empresa_id AS company_id
+      `;
+
+      const project = projects[0];
+
       return response.status(201).json({
-        data: projects[0],
+        data: {
+          ...project,
+          company_name: company.trim(),
+          applicable_type_ids: [],
+        },
         meta: {},
         errors: [],
       });
