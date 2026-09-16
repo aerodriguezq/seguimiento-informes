@@ -28,7 +28,17 @@ def get_secret(name: str) -> str:
     )
 
 
-APP_URL = get_secret("APP_URL").rstrip("/")
+def get_app_url() -> str:
+    """Normaliza APP_URL si fue pegada junto con su nombre de configuración."""
+    raw_value = get_secret("APP_URL").strip()
+    for line in raw_value.splitlines():
+        candidate = line.strip()
+        if candidate.startswith("https://") or candidate.startswith("http://"):
+            return candidate.rstrip("/")
+    raise RuntimeError("APP_URL debe ser una URL, por ejemplo https://seguimiento-informes.vercel.app")
+
+
+APP_URL = get_app_url()
 SHARED_SECRET = get_secret("APP_SCRIPT_SHARED_SECRET")
 
 
