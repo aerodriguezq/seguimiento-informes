@@ -23,6 +23,7 @@ import { ProjectsListView } from './components/projects/ProjectsListView';
 import { ProjectDetailView } from './components/projects/ProjectDetailView';
 import { AlertsView } from './components/alerts/AlertsView';
 import { MasterListsView } from './components/master-lists/MasterListsView';
+import { DriveLinksView } from './components/drive/DriveLinksView';
 import { CheckCircle2, Info, X } from 'lucide-react';
 
 export default function App() {
@@ -481,6 +482,8 @@ export default function App() {
               onAddContact={handleAddContact}
             />
           )}
+
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'drive_links' && <DriveLinksView />}
         </main>
       </div>
 
