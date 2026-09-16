@@ -7,6 +7,7 @@ export const DriveLinksView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
+  const [copyProgress, setCopyProgress] = useState({ percent: 0, processed: 0, total: 0, phase: '' });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
@@ -48,12 +49,34 @@ export const DriveLinksView: React.FC = () => {
 
   const copyFolder = async () => {
     setIsCopying(true);
+    setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando copia...' });
     setMessage(null);
+    const jobId = crypto.randomUUID();
+    let polling = true;
+    const pollProgress = async () => {
+      while (polling) {
+        try {
+          const progressResponse = await fetch(`/api/drive-progress?jobId=${encodeURIComponent(jobId)}`);
+          const progressPayload = await progressResponse.json();
+          if (progressResponse.ok && progressPayload.data) setCopyProgress(progressPayload.data);
+        } catch {
+          // La petición principal conserva el resultado final si un sondeo falla.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+    };
+    void pollProgress();
     try {
-      const response = await fetch('/api/drive-copy', { method: 'POST' });
+      const response = await fetch('/api/drive-copy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible iniciar la copia.');
       const result = payload.data;
+      polling = false;
+      setCopyProgress({ percent: 100, processed: result.copiedFiles + result.skippedFiles, total: result.copiedFiles + result.skippedFiles, phase: 'Copia completada' });
       setMessage({
         type: 'success',
         text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} archivos omitidos.`,
@@ -61,6 +84,7 @@ export const DriveLinksView: React.FC = () => {
     } catch (error) {
       setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible iniciar la copia.' });
     } finally {
+      polling = false;
       setIsCopying(false);
     }
   };
@@ -96,6 +120,7 @@ export const DriveLinksView: React.FC = () => {
               <button type="button" onClick={copyFolder} disabled={isSaving || isCopying || !links.sourceUrl || !links.destinationUrl} className="inline-flex items-center gap-2 rounded-lg border border-teal-700 px-4 py-2.5 text-xs font-bold text-teal-800 transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50"><Copy className="h-3.5 w-3.5" />{isCopying ? 'Copiando carpeta...' : 'Copiar carpeta completa'}</button>
             </div>
           </div>
+          {isCopying && <div className="mt-4 rounded-lg border border-teal-100 bg-teal-50 p-3" role="status"><div className="flex items-center justify-between text-[11px] font-bold text-teal-900"><span>{copyProgress.phase}</span><span>{copyProgress.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-teal-600 transition-all duration-500" style={{ width: `${Math.max(copyProgress.percent, 3)}%` }} /></div><p className="mt-2 text-[11px] text-teal-800">{copyProgress.processed} de {copyProgress.total || '...'} elementos procesados</p></div>}
         </form>}
       </section>
 

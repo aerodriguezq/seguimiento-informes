@@ -17,10 +17,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
   }
 
   try {
+    const jobId = typeof request.body?.jobId === 'string' ? request.body.jobId : crypto.randomUUID();
     const scriptResponse = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'copy-drive', token: sharedSecret }),
+      body: JSON.stringify({ action: 'copy-drive', token: sharedSecret, jobId }),
     });
     const payload = await scriptResponse.json().catch(() => null);
 
@@ -37,7 +38,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       });
     }
 
-    return response.status(200).json({ data: payload.result, meta: {}, errors: [] });
+    return response.status(200).json({ data: { ...payload.result, jobId }, meta: {}, errors: [] });
   } catch (error) {
     console.error('Drive copy request failed', error);
     return response.status(502).json({

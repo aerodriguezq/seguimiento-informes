@@ -9,11 +9,15 @@ function doPost(e) {
 
     if (body.action === 'copy-drive') {
       try {
-        return jsonResponse({ ok: true, action: 'copy-drive', result: copyFilesFromSourceToDestination() });
+        return jsonResponse({ ok: true, action: 'copy-drive', result: copyFilesFromSourceToDestination(body.jobId) });
       } catch (copyError) {
         console.error(copyError);
         return jsonResponse({ ok: false, error: String(copyError.message || copyError) });
       }
+    }
+
+    if (body.action === 'drive-progress') {
+      return jsonResponse({ ok: true, progress: getDriveCopyProgress(body.jobId) });
     }
 
     var recipients = (body.recipients || [])
@@ -95,20 +99,26 @@ function getDriveLinksFromApp() {
   return payload.data;
 }
 
-function copyFilesFromSourceToDestination() {
+function copyFilesFromSourceToDestination(jobId) {
   var links = getDriveLinksFromApp();
   var sourceFolder = DriveApp.getFolderById(extractDriveFolderId(links.sourceUrl));
   var destinationFolder = DriveApp.getFolderById(extractDriveFolderId(links.destinationUrl));
   var summary = { copiedFiles: 0, skippedFiles: 0, createdFolders: 0, reusedFolders: 0 };
+  var progress = { percent: 5, processed: 0, total: 0, phase: 'Contando elementos...' };
+  saveDriveCopyProgress(jobId, progress);
+  progress.total = countFolderItems(sourceFolder);
+  progress.phase = 'Copiando carpeta...';
+  saveDriveCopyProgress(jobId, progress);
 
   // Replica la carpeta origen completa dentro de la carpeta destino.
-  copyFolderTree(sourceFolder, destinationFolder, summary);
+  copyFolderTree(sourceFolder, destinationFolder, summary, progress, jobId);
+  saveDriveCopyProgress(jobId, { percent: 100, processed: progress.processed, total: progress.total, phase: 'Copia completada' });
 
   Logger.log(JSON.stringify(summary));
   return summary;
 }
 
-function copyFolderTree(sourceFolder, destinationParent, summary) {
+function copyFolderTree(sourceFolder, destinationParent, summary, progress, jobId) {
   var destinationFolder = findFolder(destinationParent, sourceFolder.getName());
 
   if (destinationFolder) {
@@ -129,12 +139,35 @@ function copyFolderTree(sourceFolder, destinationParent, summary) {
       sourceFile.makeCopy(sourceFile.getName(), destinationFolder);
       summary.copiedFiles++;
     }
+    progress.processed++;
+    progress.percent = progress.total ? Math.min(99, Math.round((progress.processed / progress.total) * 100)) : 5;
+    saveDriveCopyProgress(jobId, progress);
   }
 
   var folders = sourceFolder.getFolders();
   while (folders.hasNext()) {
-    copyFolderTree(folders.next(), destinationFolder, summary);
+    copyFolderTree(folders.next(), destinationFolder, summary, progress, jobId);
   }
+}
+
+function countFolderItems(folder) {
+  var total = 0;
+  var files = folder.getFiles();
+  while (files.hasNext()) { files.next(); total++; }
+  var folders = folder.getFolders();
+  while (folders.hasNext()) { total++; total += countFolderItems(folders.next()); }
+  return total;
+}
+
+function saveDriveCopyProgress(jobId, progress) {
+  if (!jobId) return;
+  PropertiesService.getScriptProperties().setProperty('DRIVE_COPY_' + jobId, JSON.stringify(progress));
+}
+
+function getDriveCopyProgress(jobId) {
+  if (!jobId) return { percent: 0, processed: 0, total: 0, phase: 'Sin identificador' };
+  var value = PropertiesService.getScriptProperties().getProperty('DRIVE_COPY_' + jobId);
+  return value ? JSON.parse(value) : { percent: 0, processed: 0, total: 0, phase: 'Esperando Apps Script...' };
 }
 
 function findFolder(parentFolder, folderName) {
