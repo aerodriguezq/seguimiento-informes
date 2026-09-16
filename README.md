@@ -243,6 +243,25 @@ El endpoint interno `POST /api/alerts/send` valida destinatarios y mantiene el
 secreto fuera del navegador. Si Apps Script no está configurado, la aplicación
 mostrará un error controlado en lugar de afirmar que el correo fue enviado.
 
+### Espejo de Neon en Google Sheets
+
+El mismo Apps Script puede mantener una hoja espejo de Neon. Neon continúa siendo
+la fuente de verdad; Sheets es una copia para consulta y exportación a `.xlsx`.
+
+En **Project Settings → Script Properties** agrega:
+
+```text
+APP_URL=https://seguimiento-informes.vercel.app
+APP_SCRIPT_SHARED_SECRET=el-mismo-secreto-configurado-en-vercel
+SPREADSHEET_ID=el-id-de-la-hoja-de-google-sheets
+```
+
+Después ejecuta manualmente `syncDatabaseToSheet` una vez para autorizar Sheets y
+comprobar la copia. Luego ejecuta `installDatabaseSyncTrigger` una vez para crear
+un disparador cada 5 minutos. Se crearán pestañas con los nombres de las tablas
+de Neon. Los datos que todavía no tengan CRUD persistente en Neon aparecerán
+vacíos hasta que se conecten esos módulos.
+
 ## 13. Comandos sugeridos
 
 ```bash

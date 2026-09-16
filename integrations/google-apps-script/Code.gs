@@ -35,6 +35,69 @@ function doPost(e) {
   }
 }
 
+function syncDatabaseToSheet() {
+  var properties = PropertiesService.getScriptProperties();
+  var appUrl = properties.getProperty('APP_URL');
+  var token = properties.getProperty('APP_SCRIPT_SHARED_SECRET');
+  var spreadsheetId = properties.getProperty('SPREADSHEET_ID');
+
+  if (!appUrl || !token || !spreadsheetId) {
+    throw new Error('Configura APP_URL, APP_SCRIPT_SHARED_SECRET y SPREADSHEET_ID.');
+  }
+
+  var response = UrlFetchApp.fetch(appUrl + '/api/sync/snapshot', {
+    method: 'get',
+    headers: { Authorization: 'Bearer ' + token },
+    muteHttpExceptions: true
+  });
+  var payload = JSON.parse(response.getContentText());
+
+  if (response.getResponseCode() !== 200 || !payload.data) {
+    throw new Error('El snapshot de Neon no está disponible: ' + response.getContentText());
+  }
+
+  var spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+  payload.data.tables.forEach(function (table) {
+    replaceSheetContents(spreadsheet, table.name, table.rows);
+  });
+  properties.setProperty('LAST_SYNC_AT', payload.data.generatedAt);
+}
+
+function installDatabaseSyncTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === 'syncDatabaseToSheet') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  ScriptApp.newTrigger('syncDatabaseToSheet')
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+}
+
+function replaceSheetContents(spreadsheet, sheetName, rows) {
+  var sheet = spreadsheet.getSheetByName(sheetName) || spreadsheet.insertSheet(sheetName);
+  sheet.clearContents();
+
+  if (!rows || rows.length === 0) {
+    sheet.getRange(1, 1).setValue('Sin registros');
+    return;
+  }
+
+  var headers = Object.keys(rows[0]);
+  var values = [headers].concat(rows.map(function (row) {
+    return headers.map(function (header) {
+      var value = row[header];
+      return Array.isArray(value) ? value.join(', ') : value == null ? '' : value;
+    });
+  }));
+
+  sheet.getRange(1, 1, values.length, headers.length).setValues(values);
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, headers.length);
+}
+
 function jsonResponse(payload) {
   return ContentService
     .createTextOutput(JSON.stringify(payload))
