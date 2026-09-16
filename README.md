@@ -257,6 +257,18 @@ Script.
 Desde Colab puedes disparar la misma copia con `copy_drive_tree(...)` usando la
 URL del Web App de Apps Script en `APP_SCRIPT_WEBHOOK_URL`.
 
+Para carpetas pesadas se recomienda el ejecutor directo de Colab en
+`integrations/google-colab/drive_sync.py`. Ejecuta en una celda:
+
+```python
+!pip install -q google-api-python-client google-auth-httplib2 google-auth-oauthlib requests
+%run integrations/google-colab/drive_sync.py
+result = run_copy()
+```
+
+Colab solicitará autorización de Google Drive y copiará la estructura completa
+por paginación, omitiendo archivos ya existentes. En este modo no necesitas
+`APP_SCRIPT_WEBHOOK_URL`; solo `APP_SCRIPT_SHARED_SECRET` en Colab Secrets.
 ### Espejo de Neon en Google Sheets
 
 El mismo Apps Script puede mantener una hoja espejo de Neon. Neon continúa siendo
