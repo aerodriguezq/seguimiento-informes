@@ -248,6 +248,15 @@ carpeta compartida de origen y el enlace de la carpeta propia de destino. Su
 tabla se crea con `database/migrations/002_drive_links.sql`. Apps Script y Colab
 deben leer esta configuración, no guardar credenciales en el frontend.
 
+La función `copyFilesFromSourceToDestination` replica la carpeta de origen
+completa dentro de destino: incluye subcarpetas y archivos. Si se ejecuta de
+nuevo, reutiliza carpetas y omite archivos con el mismo nombre para evitar
+duplicados. El resultado queda disponible en el registro de ejecución de Apps
+Script.
+
+Desde Colab puedes disparar la misma copia con `copy_drive_tree(...)` usando la
+URL del Web App de Apps Script en `APP_SCRIPT_WEBHOOK_URL`.
+
 ### Espejo de Neon en Google Sheets
 
 El mismo Apps Script puede mantener una hoja espejo de Neon. Neon continúa siendo

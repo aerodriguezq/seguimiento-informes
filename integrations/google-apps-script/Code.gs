@@ -7,6 +7,10 @@ function doPost(e) {
       return jsonResponse({ ok: false, error: 'unauthorized' });
     }
 
+    if (body.action === 'copy-drive') {
+      return jsonResponse({ ok: true, action: 'copy-drive', result: copyFilesFromSourceToDestination() });
+    }
+
     var recipients = (body.recipients || [])
       .map(function (recipient) { return recipient.email; })
       .filter(function (email) { return email && email.indexOf('@') > 0; });
@@ -90,15 +94,52 @@ function copyFilesFromSourceToDestination() {
   var links = getDriveLinksFromApp();
   var sourceFolder = DriveApp.getFolderById(extractDriveFolderId(links.sourceUrl));
   var destinationFolder = DriveApp.getFolderById(extractDriveFolderId(links.destinationUrl));
-  var files = sourceFolder.getFiles();
-  var copied = 0;
+  var summary = { copiedFiles: 0, skippedFiles: 0, createdFolders: 0, reusedFolders: 0 };
 
-  while (files.hasNext()) {
-    files.next().makeCopy(destinationFolder);
-    copied++;
+  // Replica la carpeta origen completa dentro de la carpeta destino.
+  copyFolderTree(sourceFolder, destinationFolder, summary);
+
+  Logger.log(JSON.stringify(summary));
+  return summary;
+}
+
+function copyFolderTree(sourceFolder, destinationParent, summary) {
+  var destinationFolder = findFolder(destinationParent, sourceFolder.getName());
+
+  if (destinationFolder) {
+    summary.reusedFolders++;
+  } else {
+    destinationFolder = destinationParent.createFolder(sourceFolder.getName());
+    summary.createdFolders++;
   }
 
-  return { copied: copied, sourceUrl: links.sourceUrl, destinationUrl: links.destinationUrl };
+  var files = sourceFolder.getFiles();
+  while (files.hasNext()) {
+    var sourceFile = files.next();
+
+    // Evita duplicar archivos si se ejecuta de nuevo el proceso.
+    if (findFile(destinationFolder, sourceFile.getName())) {
+      summary.skippedFiles++;
+    } else {
+      sourceFile.makeCopy(sourceFile.getName(), destinationFolder);
+      summary.copiedFiles++;
+    }
+  }
+
+  var folders = sourceFolder.getFolders();
+  while (folders.hasNext()) {
+    copyFolderTree(folders.next(), destinationFolder, summary);
+  }
+}
+
+function findFolder(parentFolder, folderName) {
+  var folders = parentFolder.getFoldersByName(folderName);
+  return folders.hasNext() ? folders.next() : null;
+}
+
+function findFile(parentFolder, fileName) {
+  var files = parentFolder.getFilesByName(fileName);
+  return files.hasNext() ? files.next() : null;
 }
 
 function extractDriveFolderId(url) {
