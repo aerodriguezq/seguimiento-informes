@@ -74,13 +74,24 @@ export const DriveLinksView: React.FC = () => {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible iniciar la copia.');
-      const result = payload.data;
+      const startedJobId = payload.data.jobId || jobId;
+      let completed = false;
+      while (!completed) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        const progressResponse = await fetch(`/api/drive-progress?jobId=${encodeURIComponent(startedJobId)}`);
+        const progressPayload = await progressResponse.json();
+        if (!progressResponse.ok) throw new Error(progressPayload.errors?.[0] || 'No fue posible consultar el progreso.');
+        const result = progressPayload.data;
+        setCopyProgress(result);
+        completed = result.done === true;
+        if (completed) {
+          setMessage({
+            type: 'success',
+            text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} archivos omitidos.`,
+          });
+        }
+      }
       polling = false;
-      setCopyProgress({ percent: 100, processed: result.copiedFiles + result.skippedFiles, total: result.copiedFiles + result.skippedFiles, phase: 'Copia completada' });
-      setMessage({
-        type: 'success',
-        text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} archivos omitidos.`,
-      });
     } catch (error) {
       setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible iniciar la copia.' });
     } finally {

@@ -9,7 +9,8 @@ function doPost(e) {
 
     if (body.action === 'copy-drive') {
       try {
-        return jsonResponse({ ok: true, action: 'copy-drive', result: copyFilesFromSourceToDestination(body.jobId) });
+        startDriveCopyJob(body.jobId);
+        return jsonResponse({ ok: true, action: 'copy-drive', result: { jobId: body.jobId, started: true } });
       } catch (copyError) {
         console.error(copyError);
         return jsonResponse({ ok: false, error: String(copyError.message || copyError) });
@@ -118,6 +119,100 @@ function copyFilesFromSourceToDestination(jobId) {
   return summary;
 }
 
+function startDriveCopyJob(jobId) {
+  if (!jobId) throw new Error('Falta jobId.');
+  var links = getDriveLinksFromApp();
+  var sourceFolderId = extractDriveFolderId(links.sourceUrl);
+  var destinationFolderId = extractDriveFolderId(links.destinationUrl);
+  var state = {
+    jobId: jobId,
+    queue: [{ sourceId: sourceFolderId, destinationParentId: destinationFolderId }],
+    copiedFiles: 0,
+    skippedFiles: 0,
+    createdFolders: 0,
+    reusedFolders: 0,
+    processedFolders: 0,
+    done: false,
+    percent: 1,
+    phase: 'Trabajo iniciado',
+    updatedAt: new Date().toISOString()
+  };
+  saveDriveCopyState(state);
+  installDriveCopyTrigger();
+  processDriveCopyBatch();
+}
+
+function processDriveCopyBatch() {
+  var state = loadDriveCopyState();
+  if (!state || state.done) return;
+  var startedAt = new Date().getTime();
+  var batchLimitMs = 80000;
+  state.phase = 'Copiando por lotes...';
+
+  while (state.queue.length && new Date().getTime() - startedAt < batchLimitMs) {
+    var item = state.queue.shift();
+    var sourceFolder = DriveApp.getFolderById(item.sourceId);
+    var destinationParent = DriveApp.getFolderById(item.destinationParentId);
+    var destinationFolder = findFolder(destinationParent, sourceFolder.getName());
+
+    if (destinationFolder) state.reusedFolders++;
+    else {
+      destinationFolder = destinationParent.createFolder(sourceFolder.getName());
+      state.createdFolders++;
+    }
+
+    var files = sourceFolder.getFiles();
+    while (files.hasNext()) {
+      var sourceFile = files.next();
+      if (findFile(destinationFolder, sourceFile.getName())) state.skippedFiles++;
+      else {
+        sourceFile.makeCopy(sourceFile.getName(), destinationFolder);
+        state.copiedFiles++;
+      }
+    }
+
+    var folders = sourceFolder.getFolders();
+    while (folders.hasNext()) {
+      state.queue.push({ sourceId: folders.next().getId(), destinationParentId: destinationFolder.getId() });
+    }
+    state.processedFolders++;
+    state.percent = Math.min(99, Math.max(5, state.processedFolders % 95));
+    state.updatedAt = new Date().toISOString();
+    saveDriveCopyState(state);
+  }
+
+  if (!state.queue.length) {
+    state.done = true;
+    state.percent = 100;
+    state.phase = 'Copia completada';
+    removeDriveCopyTriggers();
+  }
+  state.updatedAt = new Date().toISOString();
+  saveDriveCopyState(state);
+}
+
+function saveDriveCopyState(state) {
+  PropertiesService.getScriptProperties().setProperty('DRIVE_COPY_STATE_' + state.jobId, JSON.stringify(state));
+}
+
+function loadDriveCopyState() {
+  var properties = PropertiesService.getScriptProperties();
+  var keys = properties.getProperties();
+  var stateKey = Object.keys(keys).filter(function (key) { return key.indexOf('DRIVE_COPY_STATE_') === 0; })[0];
+  return stateKey ? JSON.parse(keys[stateKey]) : null;
+}
+
+function installDriveCopyTrigger() {
+  removeDriveCopyTriggers();
+  ScriptApp.newTrigger('processDriveCopyBatch').timeBased().everyMinutes(1).create();
+}
+
+function removeDriveCopyTriggers() {
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === 'processDriveCopyBatch') ScriptApp.deleteTrigger(trigger);
+  });
+}
+
 function copyFolderTree(sourceFolder, destinationParent, summary, progress, jobId) {
   var destinationFolder = findFolder(destinationParent, sourceFolder.getName());
 
@@ -166,6 +261,20 @@ function saveDriveCopyProgress(jobId, progress) {
 
 function getDriveCopyProgress(jobId) {
   if (!jobId) return { percent: 0, processed: 0, total: 0, phase: 'Sin identificador' };
+  var state = PropertiesService.getScriptProperties().getProperty('DRIVE_COPY_STATE_' + jobId);
+  if (state) {
+    var parsedState = JSON.parse(state);
+    return {
+      percent: parsedState.percent,
+      processed: parsedState.copiedFiles + parsedState.skippedFiles,
+      total: parsedState.copiedFiles + parsedState.skippedFiles + parsedState.queue.length,
+      phase: parsedState.phase,
+      done: parsedState.done,
+      copiedFiles: parsedState.copiedFiles,
+      skippedFiles: parsedState.skippedFiles,
+      createdFolders: parsedState.createdFolders
+    };
+  }
   var value = PropertiesService.getScriptProperties().getProperty('DRIVE_COPY_' + jobId);
   return value ? JSON.parse(value) : { percent: 0, processed: 0, total: 0, phase: 'Esperando Apps Script...' };
 }
