@@ -8,7 +8,12 @@ function doPost(e) {
     }
 
     if (body.action === 'copy-drive') {
-      return jsonResponse({ ok: true, action: 'copy-drive', result: copyFilesFromSourceToDestination() });
+      try {
+        return jsonResponse({ ok: true, action: 'copy-drive', result: copyFilesFromSourceToDestination() });
+      } catch (copyError) {
+        console.error(copyError);
+        return jsonResponse({ ok: false, error: String(copyError.message || copyError) });
+      }
     }
 
     var recipients = (body.recipients || [])
@@ -35,7 +40,7 @@ function doPost(e) {
     return jsonResponse({ ok: true, recipientCount: recipients.length });
   } catch (error) {
     console.error(error);
-    return jsonResponse({ ok: false, error: 'send-failed' });
+    return jsonResponse({ ok: false, error: String(error.message || error) });
   }
 }
 

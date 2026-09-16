@@ -29,7 +29,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return response.status(502).json({
         data: null,
         meta: {},
-        errors: ['Apps Script no confirmó la copia de la carpeta.'],
+        errors: [
+          payload?.error
+            ? `Apps Script: ${payload.error}`
+            : 'Apps Script no confirmó la copia de la carpeta.',
+        ],
       });
     }
 
