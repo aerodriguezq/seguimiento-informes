@@ -42,6 +42,11 @@ export const Header: React.FC<HeaderProps> = ({
   onSearchGlobal,
   searchQuery,
 }) => {
+  const currentDateLabel = new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date());
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProjectSelector, setShowProjectSelector] = useState(false);
   const [activeNotifTab, setActiveNotifTab] = useState<'all' | 'critical' | 'unread'>('all');
@@ -150,10 +155,10 @@ export const Header: React.FC<HeaderProps> = ({
           <div
             id="current-system-date"
             className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg border border-slate-200"
-            title="Fecha del sistema: 14 de Septiembre de 2026"
+            title={`Fecha del sistema: ${currentDateLabel}`}
           >
             <Calendar className="w-3.5 h-3.5 text-slate-500" />
-            <span>14 Sep 2026</span>
+            <span>{currentDateLabel}</span>
           </div>
 
           {/* New Report quick action */}

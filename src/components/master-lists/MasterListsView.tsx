@@ -50,6 +50,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [newContactRole, setNewContactRole] = useState('Residente Técnico');
   const [newContactCompany, setNewContactCompany] = useState('');
   const [newContactPhone, setNewContactPhone] = useState('');
+  const [formError, setFormError] = useState('');
 
   const filteredTypes = reportTypes.filter(
     (t) =>
@@ -85,11 +86,16 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       description: newTypeDesc.trim() || 'Tipo de informe añadido a listas maestras.',
       active: true,
     };
-    await onAddReportType(created);
-    setShowAddModal(false);
-    setNewTypeCode('');
-    setNewTypeName('');
-    setNewTypeDesc('');
+    try {
+      setFormError('');
+      await onAddReportType(created);
+      setShowAddModal(false);
+      setNewTypeCode('');
+      setNewTypeName('');
+      setNewTypeDesc('');
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'No fue posible guardar el tipo de informe.');
+    }
   };
 
   const handleSaveContact = async (e: React.FormEvent) => {
@@ -106,12 +112,17 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       hasNotificationAlarm: true,
       active: true,
     };
-    await onAddContact(created);
-    setShowAddModal(false);
-    setNewContactName('');
-    setNewContactEmail('');
-    setNewContactCompany('');
-    setNewContactPhone('');
+    try {
+      setFormError('');
+      await onAddContact(created);
+      setShowAddModal(false);
+      setNewContactName('');
+      setNewContactEmail('');
+      setNewContactCompany('');
+      setNewContactPhone('');
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'No fue posible guardar el contacto.');
+    }
   };
 
   return (
@@ -455,6 +466,12 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {formError && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700" role="alert">
+                {formError}
+              </div>
+            )}
 
             {activeTab === 'types' ? (
               <form onSubmit={handleSaveType} className="space-y-3 text-xs">

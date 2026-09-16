@@ -44,6 +44,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenNewReport,
   onViewAllReports,
 }) => {
+  const currentDateLabel = new Intl.DateTimeFormat('es-CO', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date());
   // Compute counts
   const countPendientes = reports.filter((r) => r.status === 'Pendientes Evidencias').length;
   const countElaboracion = reports.filter((r) => r.status === 'Informe en Elaboración').length;
@@ -90,7 +95,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-indigo-300">
               <TrendingUp className="w-4 h-4" />
-              <span>Control Operacional • Estado al 14 de Septiembre 2026</span>
+              <span>Control Operacional • Estado al {currentDateLabel}</span>
             </div>
             <h2 className="text-xl font-bold mt-1 text-white tracking-tight">
               {vencidos.length > 0

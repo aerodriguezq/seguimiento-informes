@@ -34,6 +34,8 @@ export default function App() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
+  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
   // Context & Selections
   const [currentProjectId, setCurrentProjectId] = useState<string>('');
@@ -50,16 +52,23 @@ export default function App() {
   };
 
   useEffect(() => {
-    const loadProjects = async () => {
+    const loadWorkspace = async () => {
       try {
-        const response = await fetch('/api/projects');
-        const payload = await response.json();
+        const [projectsResponse, catalogsResponse] = await Promise.all([
+          fetch('/api/projects'),
+          fetch('/api/catalogs'),
+        ]);
+        const projectsPayload = await projectsResponse.json();
+        const catalogsPayload = await catalogsResponse.json();
 
-        if (!response.ok) {
-          throw new Error(payload.errors?.[0] || 'No fue posible consultar los proyectos.');
+        if (!projectsResponse.ok) {
+          throw new Error(projectsPayload.errors?.[0] || 'No fue posible consultar los proyectos.');
+        }
+        if (!catalogsResponse.ok) {
+          throw new Error(catalogsPayload.errors?.[0] || 'No fue posible consultar los catálogos.');
         }
 
-        const loadedProjects: Project[] = payload.data.map((project: {
+        const loadedProjects: Project[] = projectsPayload.data.map((project: {
           id: string | number;
           name: string;
           bpin: string;
@@ -78,30 +87,20 @@ export default function App() {
         }));
 
         setProjects(loadedProjects);
+        setReportTypes(catalogsPayload.data.reportTypes);
+        setContacts(catalogsPayload.data.contacts);
         setCurrentProjectId((currentId) => currentId || loadedProjects[0]?.id || '');
+        setWorkspaceError(null);
       } catch (error) {
-        showToast(error instanceof Error ? error.message : 'No fue posible consultar los proyectos.', 'info');
+        const message = error instanceof Error ? error.message : 'No fue posible cargar el espacio de trabajo.';
+        setWorkspaceError(message);
+        showToast(message, 'info');
+      } finally {
+        setIsLoadingWorkspace(false);
       }
     };
 
-    void loadProjects();
-  }, []);
-
-  useEffect(() => {
-    const loadCatalogs = async () => {
-      try {
-        const response = await fetch('/api/catalogs');
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible consultar los catálogos.');
-
-        setReportTypes(payload.data.reportTypes);
-        setContacts(payload.data.contacts);
-      } catch (error) {
-        showToast(error instanceof Error ? error.message : 'No fue posible consultar los catálogos.', 'info');
-      }
-    };
-
-    void loadCatalogs();
+    void loadWorkspace();
   }, []);
 
   const currentProject = projects.find((p) => p.id === currentProjectId) || null;
@@ -379,8 +378,21 @@ export default function App() {
 
         {/* Dynamic Main Content Container */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+          {isLoadingWorkspace && (
+            <div className="mx-auto max-w-7xl rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+              <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-teal-600" />
+              <p className="text-sm font-semibold text-slate-800">Cargando espacio de trabajo</p>
+              <p className="mt-1 text-xs text-slate-500">Conectando proyectos y catálogos con Neon.</p>
+            </div>
+          )}
+          {!isLoadingWorkspace && workspaceError && (
+            <div className="mx-auto max-w-7xl rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+              <p className="text-sm font-semibold text-rose-900">No se pudo cargar la información</p>
+              <p className="mt-1 text-xs text-rose-700">{workspaceError}</p>
+            </div>
+          )}
           {/* M01: Dashboard */}
-          {activeModule === 'dashboard' && (
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'dashboard' && (
             <DashboardView
               projects={projects}
               reports={reports}
@@ -393,7 +405,7 @@ export default function App() {
           )}
 
           {/* M02: Listado de Informes */}
-          {activeModule === 'reports' && (
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'reports' && (
             <ReportsListView
               reports={reports}
               projects={projects}
@@ -406,7 +418,7 @@ export default function App() {
           )}
 
           {/* M03: Nuevo Informe Wizard */}
-          {activeModule === 'new_report' && (
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'new_report' && (
             <NewReportWizard
               projects={projects}
               reportTypes={reportTypes}
@@ -418,7 +430,7 @@ export default function App() {
           )}
 
           {/* M05: Proyectos */}
-          {activeModule === 'projects' && (
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'projects' && (
             <ProjectsListView
               projects={projects}
               reports={reports}
@@ -430,7 +442,7 @@ export default function App() {
           )}
 
           {/* M06: Detalle de Proyecto (Rediseño de la pantalla analizada) */}
-          {activeModule === 'project_detail' && currentProject && (
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'project_detail' && currentProject && (
             <ProjectDetailView
               project={currentProject}
               reports={reports}
@@ -449,7 +461,7 @@ export default function App() {
           )}
 
           {/* M07: Alertas */}
-          {activeModule === 'alerts' && (
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'alerts' && (
             <AlertsView
               alerts={alerts}
               projects={projects}
@@ -461,7 +473,7 @@ export default function App() {
           )}
 
           {/* M08: Listas Maestras */}
-          {activeModule === 'lists' && (
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'lists' && (
             <MasterListsView
               reportTypes={reportTypes}
               contacts={contacts}
