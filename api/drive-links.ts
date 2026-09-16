@@ -39,5 +39,5 @@ export default async function handler(request: VercelRequest, response: VercelRe
 }
 
 function isDriveFolderUrl(value: unknown): value is string {
-  return typeof value === 'string' && /^https:\/\/drive\.google\.com\/drive\/folders\/[\w-]+/.test(value.trim());
+  return typeof value === 'string' && /^https:\/\/drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\/[\w-]+/.test(value.trim());
 }
