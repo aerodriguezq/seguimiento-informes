@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowUpRight, Cloud, ExternalLink, FolderInput, Save } from 'lucide-react';
+import { ArrowUpRight, Cloud, Copy, ExternalLink, FolderInput, Save } from 'lucide-react';
 import { DriveLinks } from '../../types';
 
 export const DriveLinksView: React.FC = () => {
   const [links, setLinks] = useState<DriveLinks>({ sourceUrl: '', destinationUrl: '' });
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isCopying, setIsCopying] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
@@ -45,6 +46,25 @@ export const DriveLinksView: React.FC = () => {
     }
   };
 
+  const copyFolder = async () => {
+    setIsCopying(true);
+    setMessage(null);
+    try {
+      const response = await fetch('/api/drive-copy', { method: 'POST' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible iniciar la copia.');
+      const result = payload.data;
+      setMessage({
+        type: 'success',
+        text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} archivos omitidos.`,
+      });
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible iniciar la copia.' });
+    } finally {
+      setIsCopying(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-4xl space-y-5">
       <section className="rounded-[10px] border border-slate-200 bg-white p-6 shadow-[0_12px_30px_rgba(20,32,43,0.06)]">
@@ -71,7 +91,10 @@ export const DriveLinksView: React.FC = () => {
           {message && <div role="status" className={`rounded-lg border px-3 py-2 text-xs font-semibold ${message.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{message.text}</div>}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <p className="max-w-md text-[11px] leading-5 text-slate-500">Solo se almacenan las URLs. Las credenciales y permisos permanecen en Google Apps Script/Colab.</p>
-            <button type="submit" disabled={isSaving} className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"><Save className="h-3.5 w-3.5" />{isSaving ? 'Guardando...' : 'Guardar enlaces'}</button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="submit" disabled={isSaving || isCopying} className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"><Save className="h-3.5 w-3.5" />{isSaving ? 'Guardando...' : 'Guardar enlaces'}</button>
+              <button type="button" onClick={copyFolder} disabled={isSaving || isCopying || !links.sourceUrl || !links.destinationUrl} className="inline-flex items-center gap-2 rounded-lg border border-teal-700 px-4 py-2.5 text-xs font-bold text-teal-800 transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50"><Copy className="h-3.5 w-3.5" />{isCopying ? 'Copiando carpeta...' : 'Copiar carpeta completa'}</button>
+            </div>
           </div>
         </form>}
       </section>
