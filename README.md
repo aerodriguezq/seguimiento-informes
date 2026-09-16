@@ -236,12 +236,17 @@ Configuración:
 6. Configura **Execute as: Me** y **Who has access: Anyone**.
 7. Autoriza el acceso a Gmail cuando Google lo solicite.
 8. Copia la URL `/exec` del deployment y guárdala en Vercel como
-    `APP_SCRIPT_WEBHOOK_URL`.
+   `APP_SCRIPT_WEBHOOK_URL`.
 9. Redeploya Vercel.
 
 El endpoint interno `POST /api/alerts/send` valida destinatarios y mantiene el
 secreto fuera del navegador. Si Apps Script no está configurado, la aplicación
 mostrará un error controlado en lugar de afirmar que el correo fue enviado.
+
+La aplicación incluye el módulo **Fuentes Drive** para guardar el enlace de la
+carpeta compartida de origen y el enlace de la carpeta propia de destino. Su
+tabla se crea con `database/migrations/002_drive_links.sql`. Apps Script y Colab
+deben leer esta configuración, no guardar credenciales en el frontend.
 
 ### Espejo de Neon en Google Sheets
 

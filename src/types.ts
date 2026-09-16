@@ -99,6 +99,12 @@ export interface SystemNotification {
   relatedProjectId?: string;
 }
 
+export interface DriveLinks {
+  sourceUrl: string;
+  destinationUrl: string;
+  updatedAt?: string;
+}
+
 export type ActiveModule =
   | 'dashboard'
   | 'reports'
@@ -106,4 +112,5 @@ export type ActiveModule =
   | 'projects'
   | 'project_detail'
   | 'alerts'
-  | 'lists';
+  | 'lists'
+  | 'drive_links';

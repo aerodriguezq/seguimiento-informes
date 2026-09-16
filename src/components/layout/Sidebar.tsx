@@ -7,6 +7,7 @@ import {
   Sliders,
   BellRing,
   Database,
+  ExternalLink,
   ShieldAlert,
   ChevronRight,
 } from 'lucide-react';
@@ -80,6 +81,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Listas Maestras',
       icon: Database,
       description: 'Catálogos, tipos y contactos',
+    },
+    {
+      id: 'drive_links',
+      label: 'Fuentes Drive',
+      icon: ExternalLink,
+      description: 'Origen y destino para automatizaciones',
     },
   ];
 
