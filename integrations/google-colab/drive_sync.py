@@ -8,8 +8,28 @@ import os
 import requests
 
 
-APP_URL = os.environ["APP_URL"].rstrip("/")
-SHARED_SECRET = os.environ["APP_SCRIPT_SHARED_SECRET"]
+def get_secret(name: str) -> str:
+    """Lee un secreto de Colab Secrets o de variables de entorno."""
+    try:
+        from google.colab import userdata
+
+        value = userdata.get(name)
+        if value:
+            return value
+    except (ImportError, KeyError):
+        pass
+
+    value = os.getenv(name)
+    if value:
+        return value
+
+    raise RuntimeError(
+        f"Falta configurar {name}. En Colab: panel Secrets > Add new secret."
+    )
+
+
+APP_URL = get_secret("APP_URL").rstrip("/")
+SHARED_SECRET = get_secret("APP_SCRIPT_SHARED_SECRET")
 
 
 def get_drive_links() -> dict:
@@ -43,8 +63,9 @@ links = get_drive_links()
 print("Origen:", links["sourceUrl"])
 print("Destino:", links["destinationUrl"])
 
-# Para ejecutar la copia desde Colab, define APP_SCRIPT_WEBHOOK_URL y descomenta:
-# summary = copy_drive_tree(os.environ["APP_SCRIPT_WEBHOOK_URL"])
+# Para ejecutar la copia desde Colab, agrega APP_SCRIPT_WEBHOOK_URL en Secrets
+# y descomenta estas líneas:
+# summary = copy_drive_tree(get_secret("APP_SCRIPT_WEBHOOK_URL"))
 # print("Resultado:", summary)
 
 # Desde aquí puedes usar PyDrive2 o la API de Drive autorizada en Colab.
