@@ -23,7 +23,14 @@ export default async function handler(request: VercelRequest, response: VercelRe
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'copy-drive', token: sharedSecret, jobId }),
     });
-    const payload = await scriptResponse.json().catch(() => null);
+    const responseText = await scriptResponse.text();
+    const payload = (() => {
+      try {
+        return JSON.parse(responseText);
+      } catch {
+        return null;
+      }
+    })();
 
     if (!scriptResponse.ok || payload?.ok !== true) {
       console.error('Google Apps Script copy failed', scriptResponse.status, payload);
@@ -33,7 +40,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
         errors: [
           payload?.error
             ? `Apps Script: ${payload.error}`
-            : 'Apps Script no confirmó la copia de la carpeta.',
+            : `Apps Script no devolvió una respuesta válida (${scriptResponse.status}): ${responseText.slice(0, 180)}`,
         ],
       });
     }
