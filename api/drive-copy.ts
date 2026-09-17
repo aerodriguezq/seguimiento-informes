@@ -17,11 +17,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
   }
 
   try {
+    const cancel = request.body?.action === 'cancel';
     const jobId = typeof request.body?.jobId === 'string' ? request.body.jobId : crypto.randomUUID();
+    if (cancel && !request.body?.jobId) {
+      return response.status(400).json({ data: null, meta: {}, errors: ['Falta jobId para cancelar la copia.'] });
+    }
     const scriptResponse = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'copy-drive', token: sharedSecret, jobId }),
+      body: JSON.stringify({ action: cancel ? 'drive-cancel' : 'copy-drive', token: sharedSecret, jobId }),
     });
     const responseText = await scriptResponse.text();
     const payload = (() => {

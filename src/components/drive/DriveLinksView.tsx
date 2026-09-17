@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { ArrowUpRight, Cloud, Copy, ExternalLink, FolderInput, LogIn, LogOut, Save } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowUpRight, Cloud, Copy, ExternalLink, FolderInput, LogIn, LogOut, Save, Square } from 'lucide-react';
 import { DriveLinks } from '../../types';
 
 export const DriveLinksView: React.FC = () => {
@@ -10,6 +10,9 @@ export const DriveLinksView: React.FC = () => {
   const [copyProgress, setCopyProgress] = useState({ percent: 0, processed: 0, total: 0, phase: '' });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [driveSession, setDriveSession] = useState<{ connected: boolean; email: string | null }>({ connected: false, email: null });
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const activeJobIdRef = useRef<string | null>(null);
+  const pollingRef = useRef(false);
 
   useEffect(() => {
     const loadLinks = async () => {
@@ -69,11 +72,14 @@ export const DriveLinksView: React.FC = () => {
     setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando copia...' });
     setMessage(null);
     if (driveSession.connected) {
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
       try {
         const response = await fetch('/api/drive-copy-direct', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(links),
+          signal: controller.signal,
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible copiar desde Google Drive.');
@@ -81,16 +87,23 @@ export const DriveLinksView: React.FC = () => {
         setCopyProgress({ percent: 100, processed: result.copiedFiles + result.skippedFiles, total: result.copiedFiles + result.skippedFiles, phase: 'Copia completada' });
         setMessage({ type: 'success', text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} omitidos.` });
       } catch (error) {
-        setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible copiar desde Google Drive.' });
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
+        } else {
+          setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible copiar desde Google Drive.' });
+        }
       } finally {
+        abortControllerRef.current = null;
         setIsCopying(false);
       }
       return;
     }
+
     const jobId = crypto.randomUUID();
-    let polling = true;
+    activeJobIdRef.current = jobId;
+    pollingRef.current = true;
     const pollProgress = async () => {
-      while (polling) {
+      while (pollingRef.current) {
         try {
           const progressResponse = await fetch(`/api/drive-progress?jobId=${encodeURIComponent(jobId)}`);
           const progressPayload = await progressResponse.json();
@@ -111,8 +124,9 @@ export const DriveLinksView: React.FC = () => {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible iniciar la copia.');
       const startedJobId = payload.data.jobId || jobId;
+      activeJobIdRef.current = startedJobId;
       let completed = false;
-      while (!completed) {
+      while (!completed && pollingRef.current) {
         await new Promise((resolve) => setTimeout(resolve, 1200));
         const progressResponse = await fetch(`/api/drive-progress?jobId=${encodeURIComponent(startedJobId)}`);
         const progressPayload = await progressResponse.json();
@@ -121,19 +135,46 @@ export const DriveLinksView: React.FC = () => {
         setCopyProgress(result);
         completed = result.done === true;
         if (completed) {
-          setMessage({
-            type: 'success',
-            text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} archivos omitidos.`,
-          });
+          setMessage(
+            result.cancelled
+              ? { type: 'error', text: 'Copiado detenido por el usuario.' }
+              : {
+                  type: 'success',
+                  text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} archivos omitidos.`,
+                }
+          );
         }
       }
-      polling = false;
     } catch (error) {
       setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible iniciar la copia.' });
     } finally {
-      polling = false;
+      pollingRef.current = false;
+      activeJobIdRef.current = null;
       setIsCopying(false);
     }
+  };
+
+  const stopCopy = async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      return;
+    }
+    const jobId = activeJobIdRef.current;
+    pollingRef.current = false;
+    if (jobId) {
+      try {
+        await fetch('/api/drive-copy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cancel', jobId }),
+        });
+      } catch {
+        // El sondeo ya se detuvo localmente aunque falle la petición de cancelación.
+      }
+    }
+    activeJobIdRef.current = null;
+    setIsCopying(false);
+    setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
   };
 
   return (
@@ -166,7 +207,11 @@ export const DriveLinksView: React.FC = () => {
             <p className="max-w-md text-[11px] leading-5 text-slate-500">Solo se almacenan las URLs. Las credenciales y permisos permanecen en Google Apps Script/Colab.</p>
             <div className="flex flex-wrap justify-end gap-2">
               <button type="submit" disabled={isSaving || isCopying} className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"><Save className="h-3.5 w-3.5" />{isSaving ? 'Guardando...' : 'Guardar enlaces'}</button>
-              <button type="button" onClick={copyFolder} disabled={isSaving || isCopying || !links.sourceUrl || !links.destinationUrl || !driveSession.connected} className="inline-flex items-center gap-2 rounded-lg border border-teal-700 px-4 py-2.5 text-xs font-bold text-teal-800 transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50"><Copy className="h-3.5 w-3.5" />{isCopying ? 'Copiando carpeta...' : 'Copiar carpeta completa'}</button>
+              {isCopying ? (
+                <button type="button" onClick={stopCopy} className="inline-flex items-center gap-2 rounded-lg border border-rose-600 bg-rose-50 px-4 py-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100"><Square className="h-3.5 w-3.5" /> Detener copiado</button>
+              ) : (
+                <button type="button" onClick={copyFolder} disabled={isSaving || !links.sourceUrl || !links.destinationUrl || !driveSession.connected} className="inline-flex items-center gap-2 rounded-lg border border-teal-700 px-4 py-2.5 text-xs font-bold text-teal-800 transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50"><Copy className="h-3.5 w-3.5" /> Copiar carpeta completa</button>
+              )}
             </div>
           </div>
           {isCopying && <div className="mt-4 rounded-lg border border-teal-100 bg-teal-50 p-3" role="status"><div className="flex items-center justify-between text-[11px] font-bold text-teal-900"><span>{copyProgress.phase}</span><span>{copyProgress.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-teal-600 transition-all duration-500" style={{ width: `${Math.max(copyProgress.percent, 3)}%` }} /></div><p className="mt-2 text-[11px] text-teal-800">{copyProgress.processed} de {copyProgress.total || '...'} elementos procesados</p></div>}

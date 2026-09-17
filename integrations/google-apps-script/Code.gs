@@ -21,6 +21,11 @@ function doPost(e) {
       return jsonResponse({ ok: true, progress: getDriveCopyProgress(body.jobId) });
     }
 
+    if (body.action === 'drive-cancel') {
+      cancelDriveCopyJob(body.jobId);
+      return jsonResponse({ ok: true, action: 'drive-cancel', result: { jobId: body.jobId, cancelled: true } });
+    }
+
     var recipients = (body.recipients || [])
       .map(function (recipient) { return recipient.email; })
       .filter(function (email) { return email && email.indexOf('@') > 0; });
@@ -191,6 +196,19 @@ function processDriveCopyBatch() {
   saveDriveCopyState(state);
 }
 
+function cancelDriveCopyJob(jobId) {
+  if (!jobId) return;
+  removeDriveCopyTriggers();
+  var state = loadDriveCopyState();
+  if (state && state.jobId === jobId && !state.done) {
+    state.done = true;
+    state.cancelled = true;
+    state.phase = 'Cancelado por el usuario';
+    state.updatedAt = new Date().toISOString();
+    saveDriveCopyState(state);
+  }
+}
+
 function saveDriveCopyState(state) {
   PropertiesService.getScriptProperties().setProperty('DRIVE_COPY_STATE_' + state.jobId, JSON.stringify(state));
 }
@@ -270,6 +288,7 @@ function getDriveCopyProgress(jobId) {
       total: parsedState.copiedFiles + parsedState.skippedFiles + parsedState.queue.length,
       phase: parsedState.phase,
       done: parsedState.done,
+      cancelled: parsedState.cancelled === true,
       copiedFiles: parsedState.copiedFiles,
       skippedFiles: parsedState.skippedFiles,
       createdFolders: parsedState.createdFolders

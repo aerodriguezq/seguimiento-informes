@@ -2,6 +2,13 @@ import { getGoogleOAuthClient } from './google-oauth.js';
 
 type DriveFile = { id: string; name: string; mimeType: string };
 
+export class DriveCopyCancelledError extends Error {
+  constructor() {
+    super('Copia cancelada por el usuario.');
+    this.name = 'DriveCopyCancelledError';
+  }
+}
+
 export async function getDriveAccessToken(tokenJson: string) {
   const client = await getGoogleOAuthClient();
   client.setCredentials(JSON.parse(tokenJson));
@@ -39,11 +46,17 @@ export async function listDriveChildren(accessToken: string, folderId: string) {
   return files;
 }
 
-export async function copyDriveTree(accessToken: string, sourceId: string, destinationParentId: string) {
+export async function copyDriveTree(
+  accessToken: string,
+  sourceId: string,
+  destinationParentId: string,
+  isCancelled: () => boolean = () => false,
+) {
   const queue: Array<{ sourceId: string; destinationParentId: string }> = [{ sourceId, destinationParentId }];
   const summary = { copiedFiles: 0, skippedFiles: 0, createdFolders: 0, reusedFolders: 0 };
 
   while (queue.length) {
+    if (isCancelled()) throw new DriveCopyCancelledError();
     const item = queue.shift()!;
     const source = await driveRequest<DriveFile>(accessToken, `/files/${item.sourceId}?fields=id,name,mimeType&supportsAllDrives=true`);
     const destinationItems = await listDriveChildren(accessToken, item.destinationParentId);
@@ -58,6 +71,7 @@ export async function copyDriveTree(accessToken: string, sourceId: string, desti
 
     const sourceItems = await listDriveChildren(accessToken, item.sourceId);
     for (const file of sourceItems) {
+      if (isCancelled()) throw new DriveCopyCancelledError();
       if (file.mimeType === 'application/vnd.google-apps.folder') {
         queue.push({ sourceId: file.id, destinationParentId: destinationFolderId });
       } else if (destinationItems.some((existing) => existing.name === file.name && existing.mimeType === file.mimeType)) {
