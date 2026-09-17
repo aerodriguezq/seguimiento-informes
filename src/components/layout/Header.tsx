@@ -338,20 +338,6 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
           </div>
-
-          {/* User badge */}
-          <div
-            id="user-profile-summary-badge"
-            className="flex items-center gap-2 pl-2 border-l border-slate-200"
-          >
-            <div className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs font-bold flex items-center justify-center">
-              AR
-            </div>
-            <div className="hidden xl:block text-left text-xs">
-              <div className="font-semibold text-slate-800 leading-none">Ing. A. Rodríguez</div>
-              <div className="text-[10px] text-slate-400 mt-0.5">Gerente de Proyectos</div>
-            </div>
-          </div>
         </div>
       </div>
     </header>
