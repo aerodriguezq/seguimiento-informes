@@ -1,6 +1,40 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Cloud, Copy, ExternalLink, FolderInput, LogIn, LogOut, Save, Square } from 'lucide-react';
+import { ArrowUpRight, Cloud, Copy, Download, ExternalLink, FolderInput, LogIn, LogOut, Save, Square } from 'lucide-react';
 import { DriveLinks } from '../../types';
+
+type DriveCopyLogEntry = {
+  path: string;
+  name: string;
+  type: 'folder' | 'file';
+  mimeType: string;
+  status: 'copied' | 'skipped' | 'created_folder' | 'reused_folder';
+};
+
+const STATUS_LABELS: Record<DriveCopyLogEntry['status'], string> = {
+  copied: 'Copiado',
+  skipped: 'Omitido (ya existía)',
+  created_folder: 'Carpeta creada',
+  reused_folder: 'Carpeta reutilizada',
+};
+
+const csvCell = (value: string) => `"${value.replace(/"/g, '""')}"`;
+
+const downloadCopyReportCsv = (log: DriveCopyLogEntry[]) => {
+  const rows = [
+    ['Ruta', 'Nombre', 'Tipo', 'Estado'],
+    ...log.map((entry) => [entry.path, entry.name, entry.type === 'folder' ? 'Carpeta' : 'Archivo', STATUS_LABELS[entry.status]]),
+  ];
+  const csvContent = rows.map((row) => row.map(csvCell).join(',')).join('\n');
+  const blob = new Blob([`﻿${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `informe-copiado-drive-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+};
 
 export const DriveLinksView: React.FC = () => {
   const [links, setLinks] = useState<DriveLinks>({ sourceUrl: '', destinationUrl: '' });
@@ -10,6 +44,7 @@ export const DriveLinksView: React.FC = () => {
   const [copyProgress, setCopyProgress] = useState({ percent: 0, processed: 0, total: 0, phase: '' });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [driveSession, setDriveSession] = useState<{ connected: boolean; email: string | null }>({ connected: false, email: null });
+  const [copyLog, setCopyLog] = useState<DriveCopyLogEntry[] | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
   const pollingRef = useRef(false);
@@ -71,6 +106,7 @@ export const DriveLinksView: React.FC = () => {
     setIsCopying(true);
     setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando copia...' });
     setMessage(null);
+    setCopyLog(null);
     if (driveSession.connected) {
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -85,6 +121,7 @@ export const DriveLinksView: React.FC = () => {
         if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible copiar desde Google Drive.');
         const result = payload.data;
         setCopyProgress({ percent: 100, processed: result.copiedFiles + result.skippedFiles, total: result.copiedFiles + result.skippedFiles, phase: 'Copia completada' });
+        setCopyLog(result.log || []);
         setMessage({ type: 'success', text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} omitidos.` });
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
@@ -202,7 +239,16 @@ export const DriveLinksView: React.FC = () => {
             <span className="mt-1 block text-[11px] text-slate-500">Tu carpeta de Drive donde se copiarán o procesarán los documentos.</span>
             <input required type="url" value={links.destinationUrl} onChange={(event) => setLinks((current) => ({ ...current, destinationUrl: event.target.value }))} placeholder="https://drive.google.com/drive/folders/..." className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-teal-600 focus:bg-white" />
           </label>
-          {message && <div role="status" className={`rounded-lg border px-3 py-2 text-xs font-semibold ${message.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{message.text}</div>}
+          {message && (
+            <div role="status" className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${message.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
+              <span>{message.text}</span>
+              {copyLog && copyLog.length > 0 && (
+                <button type="button" onClick={() => downloadCopyReportCsv(copyLog)} className="inline-flex items-center gap-1.5 rounded-md border border-current px-2.5 py-1 text-[11px] font-bold hover:bg-white/60">
+                  <Download className="h-3.5 w-3.5" /> Descargar informe (CSV)
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <p className="max-w-md text-[11px] leading-5 text-slate-500">Solo se almacenan las URLs. Las credenciales y permisos permanecen en Google Apps Script/Colab.</p>
             <div className="flex flex-wrap justify-end gap-2">
