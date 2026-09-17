@@ -43,8 +43,16 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
   const handleCreateProject = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setIsSubmitting(true);
     setFormError('');
+
+    const normalizedBpin = newProject.bpin.trim().toLowerCase();
+    const isDuplicateBpin = projects.some((p) => p.bpin.trim().toLowerCase() === normalizedBpin);
+    if (isDuplicateBpin) {
+      setFormError('Ya existe un proyecto registrado con este BPIN.');
+      return;
+    }
+
+    setIsSubmitting(true);
 
     try {
       await onCreateProject(newProject);

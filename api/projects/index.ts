@@ -76,6 +76,21 @@ export default async function handler(
         });
       }
 
+      const existingBpin = await sql`
+        SELECT proyecto_id
+        FROM proyectos
+        WHERE bpin = ${bpin.trim()}
+        LIMIT 1
+      `;
+
+      if (existingBpin[0]) {
+        return response.status(409).json({
+          data: null,
+          meta: {},
+          errors: ['Ya existe un proyecto registrado con este BPIN.'],
+        });
+      }
+
       const existingCompanies = await sql`
         SELECT empresa_id
         FROM empresas
@@ -151,6 +166,14 @@ export default async function handler(
     });
   } catch (error) {
     console.error('Projects query failed', error);
+
+    if ((error as { code?: string })?.code === '23505') {
+      return response.status(409).json({
+        data: null,
+        meta: {},
+        errors: ['Ya existe un proyecto registrado con este BPIN.'],
+      });
+    }
 
     return response.status(503).json({
       data: null,
