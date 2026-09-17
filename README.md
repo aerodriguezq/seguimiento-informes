@@ -286,6 +286,7 @@ El usuario pulsa **Conectar Google Drive**, autoriza su cuenta y después puede
 usar **Copiar carpeta completa** desde la web. Los tokens se guardan únicamente
 en Neon server-side. Para carpetas muy grandes, Colab sigue siendo la opción
 recomendada por los límites de ejecución de Vercel.
+
 ### Espejo de Neon en Google Sheets
 
 El mismo Apps Script puede mantener una hoja espejo de Neon. Neon continúa siendo
