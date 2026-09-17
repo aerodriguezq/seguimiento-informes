@@ -73,7 +73,7 @@ export interface StatusTransition {
 export interface ReportAttachment {
   id: string;
   name: string;
-  size: string;
+  driveUrl: string;
   uploadedAt: string;
   uploadedBy: string;
 }
@@ -100,6 +100,7 @@ export interface Report {
   currentStepId?: string;
   currentStepName?: string;
   currentStepIsFinal?: boolean;
+  currentStepEmailSubject?: string;
   isWorkflowCompleted?: boolean;
 }
 

@@ -176,12 +176,13 @@ export default function App() {
           primaryContactId: report.primaryContactId,
           observations: report.observations,
           history: report.history.map((h: any) => ({ status: h.status, date: h.date, userName: h.userName, comment: h.comment })),
-          attachments: report.attachments.map((a: any) => ({ id: String(a.id), name: a.name, size: a.size, uploadedAt: a.uploadedAt, uploadedBy: a.uploadedBy })),
+          attachments: report.attachments.map((a: any) => ({ id: String(a.id), name: a.name, driveUrl: a.driveUrl, uploadedAt: a.uploadedAt, uploadedBy: a.uploadedBy })),
           alertRulesCount: report.alertRulesCount,
           createdAt: report.createdAt,
           currentStepId: report.currentStepId ? String(report.currentStepId) : undefined,
           currentStepName: report.currentStepName || undefined,
           currentStepIsFinal: report.currentStepIsFinal ?? undefined,
+          currentStepEmailSubject: report.currentStepEmailSubject || undefined,
           isWorkflowCompleted: report.isWorkflowCompleted ?? undefined,
         }));
 

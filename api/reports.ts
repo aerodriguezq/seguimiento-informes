@@ -20,6 +20,14 @@ function addOneMonth(dateStr: string) {
   return date.toISOString().slice(0, 10);
 }
 
+// Compone el asunto real esperado a partir de la base configurada en el
+// paso más el número de secuencia del informe (01, 02, 03...), ej.
+// "Entrega Mensual Informe de Ejecución 02".
+function composeStepEmailSubject(baseSubject: string, sequenceNumber: number | null): string {
+  if (sequenceNumber == null) return baseSubject;
+  return `${baseSubject} ${String(sequenceNumber).padStart(2, '0')}`;
+}
+
 async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
   if (ids.length === 0) return [];
 
@@ -39,9 +47,11 @@ async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
       i.observaciones AS observations,
       i.created_at AS "createdAt",
       i.flujo_completado AS "isWorkflowCompleted",
+      i.numero_secuencia AS "sequenceNumber",
       wp.paso_id AS "currentStepId",
       wp.nombre AS "currentStepName",
-      wp.es_final AS "currentStepIsFinal"
+      wp.es_final AS "currentStepIsFinal",
+      wp.asunto_correo AS "currentStepEmailSubjectBase"
     FROM informes i
     JOIN proyectos p ON p.proyecto_id = i.proyecto_id
     JOIN tipos_informe ti ON ti.tipo_informe_id = i.tipo_informe_id
@@ -64,7 +74,7 @@ async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
   `) as any[];
 
   const attachmentRows = (await sql`
-    SELECT adjunto_id AS id, informe_id AS "reportId", nombre AS name, tamano AS size, subido_por AS "uploadedBy", subido_en AS "uploadedAt"
+    SELECT adjunto_id AS id, informe_id AS "reportId", nombre AS name, drive_url AS "driveUrl", subido_por AS "uploadedBy", subido_en AS "uploadedAt"
     FROM informe_adjuntos
     WHERE informe_id = ANY(${ids})
     ORDER BY subido_en ASC
@@ -87,6 +97,9 @@ async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
       history: historyRows.filter((h: any) => h.reportId === report.id),
       attachments: attachmentRows.filter((a: any) => a.reportId === report.id),
       alertRulesCount: stepAlerts.filter((a: any) => a.active).length,
+      currentStepEmailSubject: report.currentStepEmailSubjectBase
+        ? composeStepEmailSubject(report.currentStepEmailSubjectBase, report.sequenceNumber)
+        : null,
     };
   });
 }
@@ -157,7 +170,12 @@ async function createReportRow(sql: SqlClient, input: CreateReportInput): Promis
     SELECT COUNT(*) AS count FROM informes WHERE tipo_informe_id = ${input.typeId} AND anio = ${input.year}
   `) as any[];
   const consecutive = `${typeCode}-${input.year}-${String(count).padStart(3, '0')}`;
-  await sql`UPDATE informes SET consecutivo = ${consecutive} WHERE informe_id = ${reportId}`;
+
+  const [{ seqCount }] = (await sql`
+    SELECT COUNT(*) AS "seqCount" FROM informes WHERE tipo_informe_id = ${input.typeId} AND proyecto_id = ${input.projectId}
+  `) as any[];
+
+  await sql`UPDATE informes SET consecutivo = ${consecutive}, numero_secuencia = ${Number(seqCount)} WHERE informe_id = ${reportId}`;
 
   const primaryContactId = input.primaryContactId || input.contactIds[0];
   for (const contactId of input.contactIds) {
@@ -280,7 +298,8 @@ async function runDeliveryDetectionSweep(response: VercelResponse, sql: SqlClien
   }
 
   const pendingSteps = (await sql`
-    SELECT i.informe_id AS "reportId", wp.paso_id AS "stepId", wp.asunto_correo AS "emailSubject", i.updated_at AS "stepStartedAt"
+    SELECT i.informe_id AS "reportId", wp.paso_id AS "stepId", wp.asunto_correo AS "emailSubjectBase",
+           i.numero_secuencia AS "sequenceNumber", i.updated_at AS "stepStartedAt"
     FROM informes i
     JOIN tipo_informe_pasos wp ON wp.paso_id = i.paso_actual_id
     WHERE i.flujo_completado = FALSE AND i.paso_actual_id IS NOT NULL
@@ -288,6 +307,7 @@ async function runDeliveryDetectionSweep(response: VercelResponse, sql: SqlClien
 
   let advanced = 0;
   for (const step of pendingSteps) {
+    const expectedSubject = composeStepEmailSubject(step.emailSubjectBase, step.sequenceNumber);
     const contactRows = (await sql`
       SELECT c.email FROM tipo_informe_paso_contacto tpc
       JOIN contactos c ON c.contacto_id = tpc.contacto_id
@@ -295,13 +315,23 @@ async function runDeliveryDetectionSweep(response: VercelResponse, sql: SqlClien
     `) as any[];
 
     try {
-      const found = await findDeliveryEmail(
+      const match = await findDeliveryEmail(
         accessToken,
-        step.emailSubject,
+        expectedSubject,
         contactRows.map((c: any) => c.email),
         new Date(step.stepStartedAt),
       );
-      if (found) {
+      if (match.found) {
+        if (match.driveUrl) {
+          await sql`
+            INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
+            VALUES (
+              COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
+              ${step.reportId}, ${`Evidencia recibida por correo (${expectedSubject})`}, ${match.driveUrl},
+              ${match.fromEmail || 'Detección automática'}, NOW()
+            )
+          `;
+        }
         await advanceReportStep(sql, step.reportId);
         advanced++;
       }
@@ -386,13 +416,18 @@ export default async function handler(request: VercelRequest, response: VercelRe
       }
     } else if (action === 'attachment') {
       const { attachment, userName } = request.body ?? {};
-      if (!attachment?.name) return response.status(400).json({ data: null, meta: {}, errors: ['Falta el archivo a adjuntar.'] });
+      if (!attachment?.name || !attachment?.driveUrl) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Nombre y link de Google Drive son obligatorios.'] });
+      }
+      if (!/^https:\/\/(drive|docs)\.google\.com\//.test(attachment.driveUrl)) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El link debe ser de Google Drive o Docs.'] });
+      }
 
       await sql`
-        INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, tamano, subido_por, subido_en)
+        INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
         VALUES (
           COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
-          ${reportId}, ${attachment.name}, ${attachment.size || ''}, ${userName || attachment.uploadedBy || 'Usuario'}, NOW()
+          ${reportId}, ${attachment.name}, ${attachment.driveUrl}, ${userName || attachment.uploadedBy || 'Usuario'}, NOW()
         )
       `;
     } else {

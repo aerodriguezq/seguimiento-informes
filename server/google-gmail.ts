@@ -95,27 +95,67 @@ export function buildAlertEmailHtml(options: {
 </div>`;
 }
 
+const DRIVE_URL_PATTERN = /https:\/\/(?:drive|docs)\.google\.com\/[^\s"'<>)\]]+/;
+
+function fromBase64Url(value: string) {
+  return Buffer.from(value.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
+}
+
+function extractPlainText(payload: any): string {
+  if (!payload) return '';
+  if (payload.body?.data) return fromBase64Url(payload.body.data);
+  if (Array.isArray(payload.parts)) {
+    const textPart = payload.parts.find((p: any) => p.mimeType === 'text/plain') || payload.parts[0];
+    return payload.parts.map((p: any) => extractPlainText(p)).join('\n') || extractPlainText(textPart);
+  }
+  return '';
+}
+
+export type DeliveryEmailMatch = {
+  found: boolean;
+  driveUrl: string | null;
+  fromEmail: string | null;
+};
+
+// Busca un correo entrante con el asunto esperado de alguno de los
+// contactos responsables. Si lo encuentra, también intenta extraer un link
+// de Google Drive/Docs del cuerpo del mensaje para adjuntarlo como evidencia.
 export async function findDeliveryEmail(
   accessToken: string,
   subject: string,
   fromEmails: string[],
   afterDate: Date,
-): Promise<boolean> {
+): Promise<DeliveryEmailMatch> {
   const afterSeconds = Math.floor(afterDate.getTime() / 1000);
   const senderQuery = fromEmails.length > 0 ? `(${fromEmails.map((email) => `from:${email}`).join(' OR ')})` : '';
   const query = [`subject:"${subject}"`, senderQuery, `after:${afterSeconds}`].filter(Boolean).join(' ');
 
-  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=1`;
-  const response = await fetch(url, {
+  const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=1`;
+  const listResponse = await fetch(listUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
+  if (!listResponse.ok) {
+    const payload = await listResponse.json().catch(() => null);
     const detail = payload?.error?.message || payload?.error?.status || JSON.stringify(payload);
-    throw new Error(`Gmail respondió ${response.status} al buscar correos: ${detail}`);
+    throw new Error(`Gmail respondió ${listResponse.status} al buscar correos: ${detail}`);
   }
 
-  const payload = await response.json();
-  return Array.isArray(payload.messages) && payload.messages.length > 0;
+  const listPayload = await listResponse.json();
+  const messageId = listPayload.messages?.[0]?.id;
+  if (!messageId) return { found: false, driveUrl: null, fromEmail: null };
+
+  const detailUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`;
+  const detailResponse = await fetch(detailUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!detailResponse.ok) return { found: true, driveUrl: null, fromEmail: null };
+
+  const detail = await detailResponse.json();
+  const fromHeader = detail.payload?.headers?.find((h: any) => h.name === 'From')?.value || '';
+  const fromEmail = fromHeader.match(/<([^>]+)>/)?.[1] || fromHeader || null;
+  const bodyText = extractPlainText(detail.payload);
+  const driveUrl = bodyText.match(DRIVE_URL_PATTERN)?.[0] || null;
+
+  return { found: true, driveUrl, fromEmail };
 }

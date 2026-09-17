@@ -280,7 +280,7 @@ export const INITIAL_REPORTS: Report[] = [
     primaryContactId: 'c-3',
     observations: 'Faltan los ensayos de laboratorio del tramo K14+200 y registro fotográfico consolidado.',
     attachments: [
-      { id: 'att-1', name: 'Borrador_Avance_Fisico_Ago2026.pdf', size: '3.4 MB', uploadedAt: '2026-09-08', uploadedBy: 'Arq. Mateo Gómez V.' },
+      { id: 'att-1', name: 'Borrador_Avance_Fisico_Ago2026.pdf', driveUrl: 'https://drive.google.com/drive/folders/mock', uploadedAt: '2026-09-08', uploadedBy: 'Arq. Mateo Gómez V.' },
     ],
     history: [
       {
@@ -309,7 +309,7 @@ export const INITIAL_REPORTS: Report[] = [
     primaryContactId: 'c-2',
     observations: 'Revisión final de observaciones de interventoría al informe del contratista.',
     attachments: [
-      { id: 'att-2', name: 'Acta_Comite_Tecnico_14.pdf', size: '1.8 MB', uploadedAt: '2026-09-12', uploadedBy: 'Dra. Claudia Marcela Pérez' },
+      { id: 'att-2', name: 'Acta_Comite_Tecnico_14.pdf', driveUrl: 'https://drive.google.com/drive/folders/mock', uploadedAt: '2026-09-12', uploadedBy: 'Dra. Claudia Marcela Pérez' },
     ],
     history: [
       {
@@ -344,8 +344,8 @@ export const INITIAL_REPORTS: Report[] = [
     primaryContactId: 'c-5',
     observations: 'Radicado en oficina de proyectos para validación de pólizas y retenciones fiduciarias.',
     attachments: [
-      { id: 'att-3', name: 'Balance_Fiduciario_Ago2026.xlsx', size: '890 KB', uploadedAt: '2026-09-13', uploadedBy: 'Econ. Felipe Santander' },
-      { id: 'att-4', name: 'Radicado_Oficina_Proyectos_661.pdf', size: '420 KB', uploadedAt: '2026-09-13', uploadedBy: 'Econ. Felipe Santander' },
+      { id: 'att-3', name: 'Balance_Fiduciario_Ago2026.xlsx', driveUrl: 'https://drive.google.com/drive/folders/mock', uploadedAt: '2026-09-13', uploadedBy: 'Econ. Felipe Santander' },
+      { id: 'att-4', name: 'Radicado_Oficina_Proyectos_661.pdf', driveUrl: 'https://drive.google.com/drive/folders/mock', uploadedAt: '2026-09-13', uploadedBy: 'Econ. Felipe Santander' },
     ],
     history: [
       {
@@ -386,7 +386,7 @@ export const INITIAL_REPORTS: Report[] = [
     primaryContactId: 'c-6',
     observations: 'En medición de fuentes de ruido y disposición de material en ZODME 3.',
     attachments: [
-      { id: 'att-5', name: 'Monitoreo_Ruido_Trimestre3.pdf', size: '5.1 MB', uploadedAt: '2026-09-11', uploadedBy: 'Ing. Paola Andrea Duque' },
+      { id: 'att-5', name: 'Monitoreo_Ruido_Trimestre3.pdf', driveUrl: 'https://drive.google.com/drive/folders/mock', uploadedAt: '2026-09-11', uploadedBy: 'Ing. Paola Andrea Duque' },
     ],
     history: [
       {
@@ -421,8 +421,8 @@ export const INITIAL_REPORTS: Report[] = [
     primaryContactId: 'c-1',
     observations: 'Aprobado y radicado satisfactoriamente ante el Ministerio de Transporte.',
     attachments: [
-      { id: 'att-6', name: 'Informe_Tecnico_Jul2026_Final_Firmado.pdf', size: '12.4 MB', uploadedAt: '2026-08-14', uploadedBy: 'Ing. Alejandro Rodríguez' },
-      { id: 'att-7', name: 'Oficio_Remisorio_Mintransporte_0089.pdf', size: '310 KB', uploadedAt: '2026-08-15', uploadedBy: 'Ing. Alejandro Rodríguez' },
+      { id: 'att-6', name: 'Informe_Tecnico_Jul2026_Final_Firmado.pdf', driveUrl: 'https://drive.google.com/drive/folders/mock', uploadedAt: '2026-08-14', uploadedBy: 'Ing. Alejandro Rodríguez' },
+      { id: 'att-7', name: 'Oficio_Remisorio_Mintransporte_0089.pdf', driveUrl: 'https://drive.google.com/drive/folders/mock', uploadedAt: '2026-08-15', uploadedBy: 'Ing. Alejandro Rodríguez' },
     ],
     history: [
       {
@@ -496,7 +496,7 @@ export const INITIAL_REPORTS: Report[] = [
     primaryContactId: 'c-3',
     observations: 'Compilación de horas hombre trabajadas e inspecciones de trabajo en alturas.',
     attachments: [
-      { id: 'att-8', name: 'Matriz_Accidentalidad_Ago2026.xlsx', size: '640 KB', uploadedAt: '2026-09-11', uploadedBy: 'Arq. Mateo Gómez V.' },
+      { id: 'att-8', name: 'Matriz_Accidentalidad_Ago2026.xlsx', driveUrl: 'https://drive.google.com/drive/folders/mock', uploadedAt: '2026-09-11', uploadedBy: 'Arq. Mateo Gómez V.' },
     ],
     history: [
       {
@@ -564,7 +564,7 @@ export const INITIAL_REPORTS: Report[] = [
     primaryContactId: 'c-2',
     observations: 'Falta acta de entrega física a la Alcaldía y póliza de estabilidad de la obra.',
     attachments: [
-      { id: 'att-9', name: 'Minuta_Acta_Cierre_Borrador.docx', size: '1.1 MB', uploadedAt: '2026-09-04', uploadedBy: 'Dra. Claudia Marcela Pérez' },
+      { id: 'att-9', name: 'Minuta_Acta_Cierre_Borrador.docx', driveUrl: 'https://drive.google.com/drive/folders/mock', uploadedAt: '2026-09-04', uploadedBy: 'Dra. Claudia Marcela Pérez' },
     ],
     history: [
       {

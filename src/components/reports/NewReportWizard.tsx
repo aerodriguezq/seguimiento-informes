@@ -119,19 +119,28 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
     }));
   };
 
-  // Mock file attachment handler
-  const handleSimulatedFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const file = files[0];
+  const [linkName, setLinkName] = useState('');
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkError, setLinkError] = useState('');
+
+  const handleAddDriveLink = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkName.trim() || !linkUrl.trim()) return;
+    if (!/^https:\/\/(drive|docs)\.google\.com\//.test(linkUrl.trim())) {
+      setLinkError('El link debe ser de Google Drive o Docs.');
+      return;
+    }
     const newAtt: ReportAttachment = {
       id: `att-${Date.now()}`,
-      name: file.name,
-      size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+      name: linkName.trim(),
+      driveUrl: linkUrl.trim(),
       uploadedAt: new Date().toISOString().slice(0, 10),
       uploadedBy: 'Ing. Alejandro Rodríguez',
     };
     setAttachments([...attachments, newAtt]);
+    setLinkName('');
+    setLinkUrl('');
+    setLinkError('');
   };
 
   const removeAttachment = (id: string) => {
@@ -661,28 +670,36 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
                 />
               </div>
 
-              {/* Upload area */}
+              {/* Drive link area */}
               <div className="space-y-2">
                 <label className="block text-xs font-semibold text-slate-700">
-                  Evidencias adjuntas
+                  Evidencias adjuntas (link de Google Drive)
                 </label>
-                <label
-                  id="wizard-file-dropzone"
-                  className="border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-indigo-50/20"
-                >
-                  <UploadCloud className="w-8 h-8 text-indigo-600 mb-1" />
-                  <span className="text-xs font-semibold text-slate-800">
-                    Haga clic o arrastre archivos aquí
-                  </span>
-                  <span className="text-[11px] text-slate-400 mt-0.5">
-                    Formatos admitidos: PDF, XLSX, DOCX, ZIP (Máx. 50 MB)
-                  </span>
+                <div className="border border-slate-200 rounded-xl p-3 space-y-2 bg-slate-50/50">
                   <input
-                    type="file"
-                    className="hidden"
-                    onChange={handleSimulatedFileUpload}
+                    type="text"
+                    value={linkName}
+                    onChange={(e) => setLinkName(e.target.value)}
+                    placeholder="Nombre del documento (ej: Informe firmado)"
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
                   />
-                </label>
+                  <input
+                    type="url"
+                    value={linkUrl}
+                    onChange={(e) => setLinkUrl(e.target.value)}
+                    placeholder="https://drive.google.com/file/d/..."
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                  {linkError && <p className="text-xs text-rose-600">{linkError}</p>}
+                  <button
+                    type="button"
+                    onClick={handleAddDriveLink}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold"
+                  >
+                    <UploadCloud className="w-3.5 h-3.5" />
+                    Vincular archivo de Drive
+                  </button>
+                </div>
 
                 {/* Uploaded attachments list */}
                 {attachments.length > 0 && (
@@ -692,11 +709,15 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
                         key={att.id}
                         className="flex items-center justify-between p-2 bg-slate-100 rounded-lg text-xs"
                       >
-                        <div className="flex items-center gap-2 truncate">
+                        <a
+                          href={att.driveUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-2 truncate hover:text-indigo-700"
+                        >
                           <Paperclip className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                           <span className="font-medium text-slate-800 truncate">{att.name}</span>
-                          <span className="text-[10px] text-slate-400">({att.size})</span>
-                        </div>
+                        </a>
                         <button
                           type="button"
                           onClick={() => removeAttachment(att.id)}

@@ -96,18 +96,30 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
     setShowTransitionModal(false);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const file = files[0];
+  const [showLinkForm, setShowLinkForm] = useState(false);
+  const [linkName, setLinkName] = useState('');
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkError, setLinkError] = useState('');
+
+  const handleAddDriveLink = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkName.trim() || !linkUrl.trim()) return;
+    if (!/^https:\/\/(drive|docs)\.google\.com\//.test(linkUrl.trim())) {
+      setLinkError('El link debe ser de Google Drive o Docs (https://drive.google.com/... o https://docs.google.com/...).');
+      return;
+    }
     const newAtt: ReportAttachment = {
       id: `att-${Date.now()}`,
-      name: file.name,
-      size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+      name: linkName.trim(),
+      driveUrl: linkUrl.trim(),
       uploadedAt: new Date().toISOString().slice(0, 10),
       uploadedBy: 'Ing. Alejandro Rodríguez',
     };
     onAddAttachment(report.id, newAtt);
+    setLinkName('');
+    setLinkUrl('');
+    setLinkError('');
+    setShowLinkForm(false);
   };
 
   return (
@@ -233,10 +245,17 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                 {report.isWorkflowCompleted ? (
                   <p className="mt-1 text-sm font-bold text-emerald-700">Flujo completado — se entregó al contacto final.</p>
                 ) : (
-                  <p className="mt-1 text-sm font-bold text-indigo-950">
-                    Paso actual: {report.currentStepName}
-                    {report.currentStepIsFinal && <span className="ml-2 text-[11px] font-semibold text-emerald-700">(paso final)</span>}
-                  </p>
+                  <>
+                    <p className="mt-1 text-sm font-bold text-indigo-950">
+                      Paso actual: {report.currentStepName}
+                      {report.currentStepIsFinal && <span className="ml-2 text-[11px] font-semibold text-emerald-700">(paso final)</span>}
+                    </p>
+                    {report.currentStepEmailSubject && (
+                      <p className="mt-1 text-xs text-indigo-800">
+                        Asunto de correo esperado: <span className="font-mono font-bold">"{report.currentStepEmailSubject}"</span>
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
               {!report.isWorkflowCompleted && (
@@ -459,42 +478,71 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
                   Documentos y Evidencias Adjuntas
                 </h4>
-                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold cursor-pointer transition-colors">
+                <button
+                  type="button"
+                  onClick={() => setShowLinkForm((prev) => !prev)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+                >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>Adjuntar Archivo</span>
-                  <input type="file" className="hidden" onChange={handleFileUpload} />
-                </label>
+                  <span>Vincular archivo de Drive</span>
+                </button>
               </div>
+
+              {showLinkForm && (
+                <form onSubmit={handleAddDriveLink} className="p-3 border border-indigo-200 bg-indigo-50/50 rounded-xl space-y-2 text-xs">
+                  <input
+                    type="text"
+                    required
+                    value={linkName}
+                    onChange={(e) => setLinkName(e.target.value)}
+                    placeholder="Nombre del documento (ej: Informe firmado)"
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                  <input
+                    type="url"
+                    required
+                    value={linkUrl}
+                    onChange={(e) => setLinkUrl(e.target.value)}
+                    placeholder="https://drive.google.com/file/d/..."
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                  {linkError && <p className="text-rose-600">{linkError}</p>}
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setShowLinkForm(false)} className="px-3 py-1.5 text-slate-600 hover:bg-white rounded-lg">
+                      Cancelar
+                    </button>
+                    <button type="submit" className="px-3 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg">
+                      Vincular
+                    </button>
+                  </div>
+                </form>
+              )}
 
               {report.attachments.length === 0 ? (
                 <div className="py-8 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
-                  No se han adjuntado evidencias todavía. Puede subir archivos PDF, XLSX o DOCX.
+                  No se han vinculado evidencias todavía. Pega el link de Drive del documento (PDF, XLSX, DOCX, etc.).
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {report.attachments.map((att) => (
-                    <div
+                    <a
                       key={att.id}
-                      className="p-3 border border-slate-200 rounded-xl bg-white flex items-center justify-between gap-3 text-xs hover:border-slate-300 transition-colors"
+                      href={att.driveUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="p-3 border border-slate-200 rounded-xl bg-white flex items-center justify-between gap-3 text-xs hover:border-indigo-300 transition-colors"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <FileText className="w-5 h-5 text-indigo-600 shrink-0" />
                         <div className="min-w-0">
                           <div className="font-semibold text-slate-900 truncate">{att.name}</div>
                           <div className="text-[10px] text-slate-400 mt-0.5">
-                            {att.size} • Subido por {att.uploadedBy} el {att.uploadedAt}
+                            Subido por {att.uploadedBy} el {att.uploadedAt}
                           </div>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => alert(`Descargando documento de prueba: ${att.name}`)}
-                        className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition-colors shrink-0"
-                        title="Descargar archivo"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </div>
+                      <Download className="w-4 h-4 text-slate-400 shrink-0" />
+                    </a>
                   ))}
                 </div>
               )}
