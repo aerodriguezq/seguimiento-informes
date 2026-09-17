@@ -274,7 +274,7 @@ por paginación, omitiendo archivos ya existentes. En este modo no necesitas
 
 La aplicación también puede conectar Google Drive directamente desde **Fuentes
 Drive**. Configura en Vercel `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-`GOOGLE_REDIRECT_URI` y `SESSION_SECRET`, y ejecuta
+`GOOGLE_REDIRECT_URI`, y ejecuta
 `database/migrations/003_google_drive_sessions.sql` en Neon. En Google Cloud,
 la URI autorizada debe ser exactamente:
 
