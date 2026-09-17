@@ -1,6 +1,46 @@
-// Búsqueda de correos entrantes para detectar la entrega de un paso del
-// flujo de trabajo (Fase D). Usa el mismo token de la cuenta conectada que
-// ya se usa para copiar carpetas de Drive (requiere el scope gmail.readonly).
+// Envío y búsqueda de correos usando la cuenta de Google conectada
+// directamente vía la API de Gmail, sin pasar por Apps Script (cuyo
+// despliegue como app web puede estar restringido por políticas del
+// Workspace del usuario). Requiere los scopes gmail.send y gmail.readonly.
+
+function toBase64Url(value: string) {
+  return Buffer.from(value, 'utf-8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+export async function sendEmail(
+  accessToken: string,
+  options: { to: string[]; subject: string; body: string },
+): Promise<void> {
+  const rawMessage = [
+    `To: ${options.to.join(', ')}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'MIME-Version: 1.0',
+    `Subject: =?UTF-8?B?${Buffer.from(options.subject, 'utf-8').toString('base64')}?=`,
+    '',
+    options.body,
+  ].join('\r\n');
+
+  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ raw: toBase64Url(rawMessage) }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('La cuenta conectada no tiene permiso para enviar correo por Gmail. Reconéctala desde Fuentes Drive.');
+    }
+    throw new Error(payload?.error?.message || `Gmail respondió ${response.status} al enviar el correo.`);
+  }
+}
 
 export async function findDeliveryEmail(
   accessToken: string,

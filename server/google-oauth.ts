@@ -2,6 +2,7 @@ import { getSql } from './db.js';
 
 export const driveScope = 'https://www.googleapis.com/auth/drive';
 export const gmailReadScope = 'https://www.googleapis.com/auth/gmail.readonly';
+export const gmailSendScope = 'https://www.googleapis.com/auth/gmail.send';
 
 export async function getGoogleOAuthClient() {
   const clientId = process.env.GOOGLE_CLIENT_ID;

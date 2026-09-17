@@ -1,6 +1,29 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { getDriveAccessToken } from '../../server/google-drive.js';
+import { sendEmail } from '../../server/google-gmail.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
+
+async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
+  const session = (await sql`
+    SELECT token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
+  `) as any[];
+  if (!session[0]) return null;
+  return getDriveAccessToken(session[0].token_json);
+}
+
+function buildAlertEmailBody(alert: { name: string; projectName?: string; type?: string; schedule?: string }) {
+  return [
+    'Se activó una alerta de seguimiento.',
+    '',
+    `Alerta: ${alert.name}`,
+    `Proyecto: ${alert.projectName || 'Todos los proyectos'}`,
+    `Tipo: ${alert.type || 'Seguimiento'}`,
+    `Programación: ${alert.schedule || ''}`,
+    '',
+    'Este mensaje fue enviado automáticamente desde Seguimiento de Informes.',
+  ].join('\n');
+}
 
 async function fetchAlertsByIds(sql: SqlClient, ids: number[]) {
   if (ids.length === 0) return [];
@@ -38,12 +61,6 @@ async function fetchAlertsByIds(sql: SqlClient, ids: number[]) {
 }
 
 async function handleSend(request: VercelRequest, response: VercelResponse, sql: SqlClient) {
-  const webhookUrl = process.env.APP_SCRIPT_WEBHOOK_URL;
-  const sharedSecret = process.env.APP_SCRIPT_SHARED_SECRET;
-  if (!webhookUrl || !sharedSecret) {
-    return response.status(503).json({ data: null, meta: {}, errors: ['El envío por Google Apps Script no está configurado en Vercel.'] });
-  }
-
   const { alert, recipients } = request.body ?? {};
   const validRecipients = (Array.isArray(recipients) ? recipients : []).filter(
     (recipient: any) => typeof recipient?.email === 'string' && recipient.email.includes('@'),
@@ -53,27 +70,17 @@ async function handleSend(request: VercelRequest, response: VercelResponse, sql:
     return response.status(400).json({ data: null, meta: {}, errors: ['La alerta y al menos un destinatario válido son obligatorios.'] });
   }
 
-  try {
-    const scriptResponse = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token: sharedSecret,
-        alert: {
-          name: String(alert.name),
-          projectName: String(alert.projectName || 'Todos los proyectos'),
-          type: String(alert.type || 'Seguimiento'),
-          schedule: String(alert.schedule || ''),
-        },
-        recipients: validRecipients,
-      }),
-    });
-    const scriptPayload = await scriptResponse.json().catch(() => null);
+  const accessToken = await getConnectedAccessToken(sql);
+  if (!accessToken) {
+    return response.status(503).json({ data: null, meta: {}, errors: ['Conecta una cuenta de Google (Fuentes Drive) para poder enviar correos.'] });
+  }
 
-    if (!scriptResponse.ok || scriptPayload?.ok !== true) {
-      console.error('Google Apps Script rejected alert', scriptResponse.status, scriptPayload);
-      return response.status(502).json({ data: null, meta: {}, errors: ['Google Apps Script no confirmó el envío.'] });
-    }
+  try {
+    await sendEmail(accessToken, {
+      to: validRecipients.map((r: any) => r.email),
+      subject: `[Seguimiento] ${alert.name}`,
+      body: buildAlertEmailBody(alert),
+    });
 
     if (alert.id && /^\d+$/.test(String(alert.id))) {
       await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${Number(alert.id)}`;
@@ -82,15 +89,14 @@ async function handleSend(request: VercelRequest, response: VercelResponse, sql:
     return response.status(200).json({ data: { sent: true, recipientCount: validRecipients.length }, meta: {}, errors: [] });
   } catch (error) {
     console.error('Alert delivery failed', error);
-    return response.status(502).json({ data: null, meta: {}, errors: ['No fue posible contactar Google Apps Script.'] });
+    return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible enviar el correo.'] });
   }
 }
 
 async function handleCronSweep(response: VercelResponse, sql: SqlClient) {
-  const webhookUrl = process.env.APP_SCRIPT_WEBHOOK_URL;
-  const sharedSecret = process.env.APP_SCRIPT_SHARED_SECRET;
-  if (!webhookUrl || !sharedSecret) {
-    return response.status(200).json({ data: { evaluated: 0, sent: 0, skipped: 'apps-script-not-configured' }, meta: {}, errors: [] });
+  const accessToken = await getConnectedAccessToken(sql);
+  if (!accessToken) {
+    return response.status(200).json({ data: { evaluated: 0, sent: 0, skipped: 'no-connected-google-account' }, meta: {}, errors: [] });
   }
 
   const dueAlerts = (await sql`
@@ -104,28 +110,20 @@ async function handleCronSweep(response: VercelResponse, sql: SqlClient) {
   let sentCount = 0;
   for (const alert of dueAlerts) {
     const recipientRows = (await sql`
-      SELECT c.email, c.nombre AS name
-      FROM alerta_contacto ac
+      SELECT c.email FROM alerta_contacto ac
       JOIN contactos c ON c.contacto_id = ac.contacto_id
       WHERE ac.alerta_id = ${alert.id} AND c.email IS NOT NULL AND c.email <> ''
     `) as any[];
     if (recipientRows.length === 0) continue;
 
     try {
-      const scriptResponse = await fetch(webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: sharedSecret,
-          alert: { name: alert.name, projectName: alert.projectName, type: alert.type, schedule: alert.schedule },
-          recipients: recipientRows.map((r) => ({ email: r.email, name: r.name })),
-        }),
+      await sendEmail(accessToken, {
+        to: recipientRows.map((r: any) => r.email),
+        subject: `[Seguimiento] ${alert.name}`,
+        body: buildAlertEmailBody(alert),
       });
-      const payload = await scriptResponse.json().catch(() => null);
-      if (scriptResponse.ok && payload?.ok === true) {
-        await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alert.id}`;
-        sentCount++;
-      }
+      await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alert.id}`;
+      sentCount++;
     } catch (error) {
       console.error('Cron alert send failed', alert.id, error);
     }
