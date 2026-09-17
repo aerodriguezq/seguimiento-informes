@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ScheduledAlert, Project, Contact } from '../../types';
+import { ScheduleFrequencyField } from './ScheduleFrequencyField';
 import {
   BellRing,
   Plus,
@@ -302,17 +303,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                   <label className="block font-semibold text-slate-700 mb-1">
                     Frecuencia / Programación
                   </label>
-                  <select
-                    value={schedule}
-                    onChange={(e) => setSchedule(e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                  >
-                    <option value="5 días antes del vencimiento">5 días antes del vencimiento</option>
-                    <option value="3 días antes del vencimiento">3 días antes del vencimiento</option>
-                    <option value="El mismo día del vencimiento">El mismo día del vencimiento</option>
-                    <option value="Semanal todos los Lunes">Semanal todos los Lunes</option>
-                    <option value="Diario a las 08:00 AM">Diario a las 08:00 AM</option>
-                  </select>
+                  <ScheduleFrequencyField value={schedule} onChange={setSchedule} />
                 </div>
 
                 <div>

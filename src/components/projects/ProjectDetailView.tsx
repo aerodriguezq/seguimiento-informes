@@ -13,6 +13,7 @@ import {
 } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
+import { ScheduleFrequencyField } from '../alerts/ScheduleFrequencyField';
 import {
   ArrowLeft,
   Building2,
@@ -735,16 +736,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   <label className="block font-semibold text-slate-700 mb-1">
                     Frecuencia / Condición
                   </label>
-                  <select
-                    value={newAlertSchedule}
-                    onChange={(e) => setNewAlertSchedule(e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                  >
-                    <option value="5 días antes del vencimiento">5 días antes del vencimiento</option>
-                    <option value="3 días antes del vencimiento">3 días antes del vencimiento</option>
-                    <option value="El mismo día del vencimiento">El mismo día del vencimiento</option>
-                    <option value="Semanal todos los Lunes">Semanal todos los Lunes</option>
-                  </select>
+                  <ScheduleFrequencyField value={newAlertSchedule} onChange={setNewAlertSchedule} />
                 </div>
 
                 <div>
