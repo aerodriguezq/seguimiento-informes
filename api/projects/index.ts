@@ -4,7 +4,7 @@ export default async function handler(
   request: VercelRequest,
   response: VercelResponse,
 ) {
-  if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'PATCH' && request.method !== 'DELETE') {
+  if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'DELETE') {
     return response.status(405).json({
       data: null,
       meta: {},
@@ -58,36 +58,8 @@ export default async function handler(
       });
     }
 
-    if (request.method === 'PATCH') {
-      const projectId = Number(request.body?.id);
-      const { startDate, endDate } = request.body ?? {};
-
-      if (!Number.isInteger(projectId) || projectId <= 0) {
-        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
-      }
-      if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
-        return response.status(400).json({ data: null, meta: {}, errors: ['Fecha de inicio inválida.'] });
-      }
-      if (endDate && !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-        return response.status(400).json({ data: null, meta: {}, errors: ['Fecha de fin inválida.'] });
-      }
-
-      const updatedProjects = await sql`
-        UPDATE proyectos
-        SET fecha_inicio = ${startDate || null}, fecha_fin = ${endDate || null}
-        WHERE proyecto_id = ${projectId}
-        RETURNING proyecto_id AS id, fecha_inicio AS "startDate", fecha_fin AS "endDate"
-      `;
-
-      if (!updatedProjects[0]) {
-        return response.status(404).json({ data: null, meta: {}, errors: ['Proyecto no encontrado.'] });
-      }
-
-      return response.status(200).json({ data: updatedProjects[0], meta: {}, errors: [] });
-    }
-
     if (request.method === 'POST') {
-      const { name, bpin, company, startDate, endDate } = request.body ?? {};
+      const { name, bpin, company } = request.body ?? {};
 
       if (
         typeof name !== 'string' ||
@@ -145,16 +117,14 @@ export default async function handler(
       }
 
       const projects = await sql`
-        INSERT INTO proyectos (proyecto_id, empresa_id, nombre, bpin, fecha_inicio, fecha_fin)
+        INSERT INTO proyectos (proyecto_id, empresa_id, nombre, bpin)
         VALUES (
           COALESCE((SELECT MAX(proyecto_id) FROM proyectos), 0) + 1,
           ${companyId},
           ${name.trim()},
-          ${bpin.trim()},
-          ${startDate || null},
-          ${endDate || null}
+          ${bpin.trim()}
         )
-        RETURNING proyecto_id AS id, nombre AS name, bpin, activo AS active, empresa_id AS company_id, fecha_inicio AS "startDate", fecha_fin AS "endDate"
+        RETURNING proyecto_id AS id, nombre AS name, bpin, activo AS active, empresa_id AS company_id
       `;
 
       const project = projects[0];
@@ -176,8 +146,6 @@ export default async function handler(
         p.nombre AS name,
         p.bpin,
         p.activo AS active,
-        p.fecha_inicio AS "startDate",
-        p.fecha_fin AS "endDate",
         e.empresa_id AS company_id,
         e.nombre AS company_name,
         COALESCE(
