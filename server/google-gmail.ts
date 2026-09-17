@@ -35,10 +35,8 @@ export async function sendEmail(
 
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    if (response.status === 401 || response.status === 403) {
-      throw new Error('La cuenta conectada no tiene permiso para enviar correo por Gmail. Reconéctala desde Fuentes Drive.');
-    }
-    throw new Error(payload?.error?.message || `Gmail respondió ${response.status} al enviar el correo.`);
+    const detail = payload?.error?.message || payload?.error?.status || JSON.stringify(payload);
+    throw new Error(`Gmail respondió ${response.status} al enviar el correo: ${detail}`);
   }
 }
 
@@ -58,10 +56,9 @@ export async function findDeliveryEmail(
   });
 
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      throw new Error('La cuenta conectada no tiene permiso para leer Gmail. Reconéctala desde Fuentes Drive.');
-    }
-    throw new Error(`Gmail respondió ${response.status}.`);
+    const payload = await response.json().catch(() => null);
+    const detail = payload?.error?.message || payload?.error?.status || JSON.stringify(payload);
+    throw new Error(`Gmail respondió ${response.status} al buscar correos: ${detail}`);
   }
 
   const payload = await response.json();
