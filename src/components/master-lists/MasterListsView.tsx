@@ -11,7 +11,6 @@ import {
   Trash2,
   FileText,
   Users,
-  Shield,
   Calendar,
   Layers,
   X,
@@ -34,7 +33,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   onAddReportType,
   onAddContact,
 }) => {
-  const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'statuses' | 'roles' | 'periods'>('types');
+  const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'statuses' | 'periods'>('types');
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -65,14 +64,6 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       c.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
-
-  const rolesCatalog = [
-    { id: 'r-1', name: 'Gerente de Proyectos', description: 'Responsable de aprobación y supervisión contractual general.', count: 2 },
-    { id: 'r-2', name: 'Director de Interventoría', description: 'Emisión de conceptos técnicos, aval de avance físico y actas de recibo.', count: 4 },
-    { id: 'r-3', name: 'Residente Técnico de Obra', description: 'Consolidación de bitácoras, ensayos de laboratorio y soporte de avance.', count: 6 },
-    { id: 'r-4', name: 'Especialista Financiero', description: 'Verificación de amortizaciones, fiducias y conciliaciones bancarias.', count: 3 },
-    { id: 'r-5', name: 'Coordinador Ambiental & Social', description: 'Seguimiento al PMA y permisos con autoridades ambientales.', count: 2 },
-  ];
 
   const handleSaveType = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,7 +125,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
             Catálogos y Listas Maestras
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Mantenimiento y administración de entidades base: tipos de informe, estados del ciclo, contactos, roles y períodos.
+            Mantenimiento y administración de entidades base: tipos de informe, estados del ciclo, contactos y períodos.
           </p>
         </div>
 
@@ -191,19 +182,6 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
         >
           <Layers className="w-4 h-4" />
           <span>Estados del Ciclo (4)</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => { setActiveTab('roles'); setSearchTerm(''); }}
-          className={`px-4 py-2.5 font-bold border-b-2 transition-colors inline-flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-            activeTab === 'roles'
-              ? 'border-indigo-600 text-indigo-600'
-              : 'border-transparent text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          <Shield className="w-4 h-4" />
-          <span>Roles Operativos ({rolesCatalog.length})</span>
         </button>
 
         <button
@@ -377,30 +355,6 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* Tab: Roles Operativos */}
-      {activeTab === 'roles' && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                <th className="py-2.5 px-4">Rol / Cargo</th>
-                <th className="py-2.5 px-4">Descripción de Funciones</th>
-                <th className="py-2.5 px-4">Usuarios Asignados</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {rolesCatalog.map((role) => (
-                <tr key={role.id} className="hover:bg-slate-50">
-                  <td className="py-3 px-4 font-bold text-slate-900">{role.name}</td>
-                  <td className="py-3 px-4 text-slate-600">{role.description}</td>
-                  <td className="py-3 px-4 font-semibold text-slate-700">{role.count} usuarios</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
 
