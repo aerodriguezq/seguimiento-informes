@@ -6,8 +6,8 @@ import {
   clearOAuthStateCookie,
   clearSessionCookie,
   getDriveSession,
-} from '../../../server/google-oauth';
-import { getSql } from '../../../server/db';
+} from '../../../server/google-oauth.js';
+import { getSql } from '../../../server/db.js';
 
 async function status(request: VercelRequest, response: VercelResponse) {
   try {

@@ -1,4 +1,4 @@
-import { getGoogleOAuthClient } from './google-oauth';
+import { getGoogleOAuthClient } from './google-oauth.js';
 
 type DriveFile = { id: string; name: string; mimeType: string };
 

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getDriveSession } from '../server/google-oauth';
-import { getDriveAccessToken, copyDriveTree } from '../server/google-drive';
+import { getDriveSession } from '../server/google-oauth.js';
+import { getDriveAccessToken, copyDriveTree } from '../server/google-drive.js';
 
 function folderIdFromUrl(value: unknown) {
   if (typeof value !== 'string') return null;
