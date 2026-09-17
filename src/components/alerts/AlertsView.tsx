@@ -61,7 +61,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || selectedContactIds.length === 0) return;
 
     const proj = projects.find((p) => p.id === projectId);
     const created: ScheduledAlert = {
@@ -362,6 +362,9 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                     );
                   })}
                 </div>
+                {selectedContactIds.length === 0 && (
+                  <p className="mt-1 text-[11px] text-rose-600">Selecciona al menos un destinatario.</p>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
@@ -374,7 +377,8 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs"
+                  disabled={selectedContactIds.length === 0}
+                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Registrar Regla
                 </button>

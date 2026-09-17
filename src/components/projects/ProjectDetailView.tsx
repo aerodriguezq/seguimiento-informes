@@ -141,7 +141,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
   const handleCreateAlert = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAlertName.trim()) return;
+    if (!newAlertName.trim() || newAlertRecipients.length === 0) return;
 
     const created: ScheduledAlert = {
       id: `alert-${Date.now()}`,
@@ -151,12 +151,13 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       schedule: newAlertSchedule,
       time: newAlertTime,
       type: newAlertType,
-      recipientIds: newAlertRecipients.length > 0 ? newAlertRecipients : [contacts[0]?.id || 'c-1'],
+      recipientIds: newAlertRecipients,
       active: true,
       nextExecution: '2026-09-15 ' + newAlertTime,
     };
     onAddNewAlertRule(created);
     setShowNewAlertModal(false);
+    setNewAlertRecipients([]);
     setNewAlertName('');
   };
 
@@ -767,6 +768,39 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 </select>
               </div>
 
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Destinatarios
+                </label>
+                <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1.5">
+                  {contacts.map((c) => {
+                    const checked = newAlertRecipients.includes(c.id);
+                    return (
+                      <label key={c.id} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            if (checked) {
+                              setNewAlertRecipients(newAlertRecipients.filter((id) => id !== c.id));
+                            } else {
+                              setNewAlertRecipients([...newAlertRecipients, c.id]);
+                            }
+                          }}
+                          className="rounded text-indigo-600"
+                        />
+                        <span className="text-slate-800">
+                          {c.name} ({c.role})
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {newAlertRecipients.length === 0 && (
+                  <p className="mt-1 text-[11px] text-rose-600">Selecciona al menos un destinatario.</p>
+                )}
+              </div>
+
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -777,7 +811,8 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs"
+                  disabled={newAlertRecipients.length === 0}
+                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Crear Regla
                 </button>
