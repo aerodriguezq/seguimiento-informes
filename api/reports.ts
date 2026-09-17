@@ -19,10 +19,15 @@ async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
       i.estado AS status,
       i.consecutivo AS consecutive,
       i.observaciones AS observations,
-      i.created_at AS "createdAt"
+      i.created_at AS "createdAt",
+      i.flujo_completado AS "isWorkflowCompleted",
+      wp.paso_id AS "currentStepId",
+      wp.nombre AS "currentStepName",
+      wp.es_final AS "currentStepIsFinal"
     FROM informes i
     JOIN proyectos p ON p.proyecto_id = i.proyecto_id
     JOIN tipos_informe ti ON ti.tipo_informe_id = i.tipo_informe_id
+    LEFT JOIN tipo_informe_pasos wp ON wp.paso_id = i.paso_actual_id
     WHERE i.informe_id = ANY(${ids})
     ORDER BY i.created_at DESC
   `) as any[];
@@ -47,18 +52,59 @@ async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
     ORDER BY subido_en ASC
   `) as any[];
 
+  const stepAlertRows = (await sql`
+    SELECT alerta_id AS id, informe_id AS "reportId", nombre AS name, activa AS active
+    FROM alertas
+    WHERE informe_id = ANY(${ids})
+  `) as any[];
+
   return reportRows.map((report: any) => {
     const contacts = contactRows.filter((c: any) => c.reportId === report.id);
     const primary = contacts.find((c: any) => c.isPrimary);
+    const stepAlerts = stepAlertRows.filter((a: any) => a.reportId === report.id);
     return {
       ...report,
       contactIds: contacts.map((c: any) => String(c.contactId)),
       primaryContactId: primary ? String(primary.contactId) : (contacts[0] ? String(contacts[0].contactId) : ''),
       history: historyRows.filter((h: any) => h.reportId === report.id),
       attachments: attachmentRows.filter((a: any) => a.reportId === report.id),
-      alertRulesCount: 0,
+      alertRulesCount: stepAlerts.filter((a: any) => a.active).length,
     };
   });
+}
+
+// Crea la alerta del primer paso configurado para el tipo de informe (si existe)
+// y deja el informe apuntando a ese paso. Sin pasos configurados, no hace nada.
+async function seedFirstWorkflowStep(sql: SqlClient, reportId: number, typeId: number, projectId: number) {
+  const [firstStep] = (await sql`
+    SELECT paso_id AS id, nombre AS name, es_final AS "isFinal"
+    FROM tipo_informe_pasos
+    WHERE tipo_informe_id = ${typeId}
+    ORDER BY orden ASC
+    LIMIT 1
+  `) as any[];
+  if (!firstStep) return;
+
+  await sql`UPDATE informes SET paso_actual_id = ${firstStep.id} WHERE informe_id = ${reportId}`;
+  await createStepAlert(sql, reportId, projectId, firstStep.id, firstStep.name);
+}
+
+async function createStepAlert(sql: SqlClient, reportId: number, projectId: number, stepId: number, stepName: string) {
+  const stepContacts = (await sql`SELECT contacto_id AS "contactId" FROM tipo_informe_paso_contacto WHERE paso_id = ${stepId}`) as any[];
+  if (stepContacts.length === 0) return;
+
+  const insertedAlerts = await sql`
+    INSERT INTO alertas (alerta_id, proyecto_id, informe_id, paso_id, nombre, frecuencia, tipo, activa, created_at, updated_at)
+    VALUES (
+      COALESCE((SELECT MAX(alerta_id) FROM alertas), 0) + 1,
+      ${projectId}, ${reportId}, ${stepId}, ${`Recordatorio: ${stepName}`}, 'Diario hasta la entrega', 'Seguimiento', TRUE, NOW(), NOW()
+    )
+    RETURNING alerta_id AS id
+  `;
+  const alertId = insertedAlerts[0].id;
+  for (const contact of stepContacts) {
+    await sql`INSERT INTO alerta_contacto (alerta_id, contacto_id) VALUES (${alertId}, ${contact.contactId})`;
+  }
 }
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
@@ -131,6 +177,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
         )
       `;
 
+      await seedFirstWorkflowStep(sql, reportId, typeId, projectId);
+
       const [report] = await fetchReportsByIds(sql, [reportId]);
       return response.status(201).json({ data: report, meta: {}, errors: [] });
     }
@@ -153,6 +201,39 @@ export default async function handler(request: VercelRequest, response: VercelRe
           ${reportId}, ${status}, NOW(), ${userName || 'Usuario'}, ${comment || ''}
         )
       `;
+    } else if (action === 'advance_step') {
+      const [current] = (await sql`
+        SELECT i.proyecto_id AS "projectId", i.tipo_informe_id AS "typeId", i.paso_actual_id AS "currentStepId",
+               p.orden AS "currentOrder", p.es_final AS "isFinal"
+        FROM informes i
+        LEFT JOIN tipo_informe_pasos p ON p.paso_id = i.paso_actual_id
+        WHERE i.informe_id = ${reportId}
+      `) as any[];
+
+      if (!current?.currentStepId) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Este informe no tiene un flujo de pasos configurado.'] });
+      }
+
+      await sql`UPDATE alertas SET activa = FALSE, updated_at = NOW() WHERE informe_id = ${reportId} AND paso_id = ${current.currentStepId}`;
+
+      if (current.isFinal) {
+        await sql`UPDATE informes SET flujo_completado = TRUE, updated_at = NOW() WHERE informe_id = ${reportId}`;
+      } else {
+        const [nextStep] = (await sql`
+          SELECT paso_id AS id, nombre AS name
+          FROM tipo_informe_pasos
+          WHERE tipo_informe_id = ${current.typeId} AND orden > ${current.currentOrder}
+          ORDER BY orden ASC
+          LIMIT 1
+        `) as any[];
+
+        if (nextStep) {
+          await sql`UPDATE informes SET paso_actual_id = ${nextStep.id}, updated_at = NOW() WHERE informe_id = ${reportId}`;
+          await createStepAlert(sql, reportId, current.projectId, nextStep.id, nextStep.name);
+        } else {
+          await sql`UPDATE informes SET flujo_completado = TRUE, updated_at = NOW() WHERE informe_id = ${reportId}`;
+        }
+      }
     } else if (action === 'attachment') {
       const { attachment, userName } = request.body ?? {};
       if (!attachment?.name) return response.status(400).json({ data: null, meta: {}, errors: ['Falta el archivo a adjuntar.'] });

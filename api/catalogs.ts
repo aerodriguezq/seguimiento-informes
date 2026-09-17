@@ -4,7 +4,7 @@ export default async function handler(
   request: VercelRequest,
   response: VercelResponse,
 ) {
-  if (request.method !== 'GET' && request.method !== 'POST') {
+  if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'DELETE') {
     return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
   }
 
@@ -17,8 +17,18 @@ export default async function handler(
     const { neon } = await import('@neondatabase/serverless');
     const sql = neon(databaseUrl);
 
+    if (request.method === 'DELETE') {
+      const stepId = Number(request.query.stepId);
+      if (!Number.isInteger(stepId) || stepId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del paso es obligatorio.'] });
+      }
+      const deleted = await sql`DELETE FROM tipo_informe_pasos WHERE paso_id = ${stepId} RETURNING paso_id AS id`;
+      if (!deleted[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Paso no encontrado.'] });
+      return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+    }
+
     if (request.method === 'GET') {
-      const [reportTypes, contacts] = await Promise.all([
+      const [reportTypes, contacts, steps, stepContacts] = await Promise.all([
         sql`
           SELECT tipo_informe_id AS id, COALESCE(codigo, '') AS code, nombre AS name,
             periodicidad AS periodicity, descripcion AS description, activo AS active
@@ -33,9 +43,20 @@ export default async function handler(
           LEFT JOIN empresas e ON e.empresa_id = c.empresa_id
           ORDER BY c.nombre ASC
         `,
+        sql`
+          SELECT paso_id AS id, tipo_informe_id AS "typeId", orden AS "order", nombre AS name,
+            asunto_correo AS "emailSubject", es_final AS "isFinal"
+          FROM tipo_informe_pasos ORDER BY tipo_informe_id ASC, orden ASC
+        `,
+        sql`SELECT paso_id AS "stepId", contacto_id AS "contactId" FROM tipo_informe_paso_contacto`,
       ]);
 
-      return response.status(200).json({ data: { reportTypes, contacts }, meta: {}, errors: [] });
+      const reportTypeSteps = (steps as any[]).map((step) => ({
+        ...step,
+        contactIds: (stepContacts as any[]).filter((sc) => sc.stepId === step.id).map((sc) => String(sc.contactId)),
+      }));
+
+      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps }, meta: {}, errors: [] });
     }
 
     const { kind, data } = request.body ?? {};
@@ -93,6 +114,35 @@ export default async function handler(
 
       return response.status(201).json({
         data: { ...rows[0], role: String(data.role).trim(), company: String(data.company).trim(), hasNotificationAlarm: true },
+        meta: {}, errors: [],
+      });
+    }
+
+    if (kind === 'reportTypeStep') {
+      const { typeId, name, emailSubject, isFinal, contactIds } = data ?? {};
+      if (!typeId || !name || !emailSubject || !Array.isArray(contactIds) || contactIds.length === 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Tipo de informe, nombre, asunto de correo y al menos un contacto son obligatorios.'] });
+      }
+
+      const stepRows = await sql`
+        INSERT INTO tipo_informe_pasos (paso_id, tipo_informe_id, orden, nombre, asunto_correo, es_final)
+        VALUES (
+          COALESCE((SELECT MAX(paso_id) FROM tipo_informe_pasos), 0) + 1,
+          ${typeId},
+          COALESCE((SELECT MAX(orden) FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId}), 0) + 1,
+          ${String(name).trim()}, ${String(emailSubject).trim()}, ${Boolean(isFinal)}
+        )
+        RETURNING paso_id AS id, tipo_informe_id AS "typeId", orden AS "order", nombre AS name,
+          asunto_correo AS "emailSubject", es_final AS "isFinal"
+      `;
+      const stepId = stepRows[0].id;
+
+      for (const contactId of contactIds) {
+        await sql`INSERT INTO tipo_informe_paso_contacto (paso_id, contacto_id) VALUES (${stepId}, ${contactId})`;
+      }
+
+      return response.status(201).json({
+        data: { ...stepRows[0], contactIds: contactIds.map(String) },
         meta: {}, errors: [],
       });
     }
