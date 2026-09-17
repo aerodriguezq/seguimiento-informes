@@ -262,7 +262,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
             </span>
           </div>
 
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
@@ -271,7 +271,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                   <th className="py-2.5 px-4">Periodicidad</th>
                   <th className="py-2.5 px-4">Descripción del Alcance</th>
                   <th className="py-2.5 px-4">Estado</th>
-                  <th className="py-2.5 px-4">Flujo de entrega</th>
+                  <th className="py-2.5 px-4 whitespace-nowrap">Flujo de entrega (asunto de correo)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -290,7 +290,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                           {type.periodicity}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-slate-600 max-w-md">
+                      <td className="py-3 px-4 text-slate-600 max-w-xs truncate" title={type.description}>
                         {type.description}
                       </td>
                       <td className="py-3 px-4">
@@ -299,7 +299,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                           Activo
                         </span>
                       </td>
-                      <td className="py-3 px-4">
+                      <td className="py-3 px-4 whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => setStepsModalTypeId(type.id)}
