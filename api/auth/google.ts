@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getGoogleOAuthClient, driveScope, sessionCookie } from '../../server/google-oauth';
 
-export default function handler(request: VercelRequest, response: VercelResponse) {
+export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {
-    const client = getGoogleOAuthClient();
+    const client = await getGoogleOAuthClient();
     const state = crypto.randomUUID();
     response.setHeader('Set-Cookie', sessionCookie(state, 600, 'oauth_state'));
     const url = client.generateAuthUrl({

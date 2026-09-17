@@ -40,7 +40,7 @@ async function callback(request: VercelRequest, response: VercelResponse) {
     const code = typeof request.query.code === 'string' ? request.query.code : '';
     if (!code) return response.status(400).send('Google no devolvió un código OAuth.');
 
-    const client = getGoogleOAuthClient();
+    const client = await getGoogleOAuthClient();
     const { tokens } = await client.getToken(code);
     client.setCredentials(tokens);
     const userResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {

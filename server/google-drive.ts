@@ -3,7 +3,7 @@ import { getGoogleOAuthClient } from './google-oauth';
 type DriveFile = { id: string; name: string; mimeType: string };
 
 export async function getDriveAccessToken(tokenJson: string) {
-  const client = getGoogleOAuthClient();
+  const client = await getGoogleOAuthClient();
   client.setCredentials(JSON.parse(tokenJson));
   const token = await client.getAccessToken();
   if (!token.token) throw new Error('La sesión de Google Drive expiró.');

@@ -1,9 +1,8 @@
-import { OAuth2Client } from 'google-auth-library';
 import { getSql } from './db';
 
 export const driveScope = 'https://www.googleapis.com/auth/drive';
 
-export function getGoogleOAuthClient() {
+export async function getGoogleOAuthClient() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const redirectUri = process.env.GOOGLE_REDIRECT_URI;
@@ -12,6 +11,7 @@ export function getGoogleOAuthClient() {
     throw new Error('Faltan GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET o GOOGLE_REDIRECT_URI.');
   }
 
+  const { OAuth2Client } = await import('google-auth-library');
   return new OAuth2Client(clientId, clientSecret, redirectUri);
 }
 
