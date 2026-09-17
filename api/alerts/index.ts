@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../../server/google-drive.js';
-import { sendEmail } from '../../server/google-gmail.js';
+import { sendEmail, buildAlertEmailHtml } from '../../server/google-gmail.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -12,17 +12,40 @@ async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
   return getDriveAccessToken(session[0].token_json);
 }
 
-function buildAlertEmailBody(alert: { name: string; projectName?: string; type?: string; schedule?: string }) {
-  return [
-    'Se activó una alerta de seguimiento.',
-    '',
-    `Alerta: ${alert.name}`,
-    `Proyecto: ${alert.projectName || 'Todos los proyectos'}`,
-    `Tipo: ${alert.type || 'Seguimiento'}`,
-    `Programación: ${alert.schedule || ''}`,
-    '',
-    'Este mensaje fue enviado automáticamente desde Seguimiento de Informes.',
-  ].join('\n');
+// Busca el tipo de informe y calcula los días restantes hasta la fecha
+// límite del informe vinculado a la alerta (si la alerta viene de un paso
+// de flujo). Sin informe vinculado, no hay urgencia que calcular.
+async function resolveReportContext(sql: SqlClient, reportId: unknown) {
+  const id = Number(reportId);
+  if (!Number.isInteger(id) || id <= 0) return { typeName: null as string | null, daysRemaining: null as number | null };
+
+  const [row] = (await sql`
+    SELECT ti.nombre AS "typeName", i.fecha AS "dueDate"
+    FROM informes i
+    JOIN tipos_informe ti ON ti.tipo_informe_id = i.tipo_informe_id
+    WHERE i.informe_id = ${id}
+  `) as any[];
+  if (!row) return { typeName: null, daysRemaining: null };
+
+  const due = new Date(row.dueDate);
+  due.setUTCHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const daysRemaining = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  return { typeName: row.typeName as string | null, daysRemaining };
+}
+
+async function buildAlertEmail(sql: SqlClient, alert: { name: string; projectName?: string; type?: string; schedule?: string; reportId?: unknown }) {
+  const context = await resolveReportContext(sql, alert.reportId);
+  const actionUrl = `${(process.env.APP_URL || 'https://seguimiento-informes.vercel.app').replace(/\/$/, '')}/reports`;
+  return buildAlertEmailHtml({
+    subtitle: context.typeName || alert.type || 'Seguimiento',
+    projectName: alert.projectName || 'Todos los proyectos',
+    type: alert.type || 'Seguimiento',
+    schedule: alert.schedule || '',
+    daysRemaining: context.daysRemaining,
+    actionUrl,
+  });
 }
 
 async function fetchAlertsByIds(sql: SqlClient, ids: number[]) {
@@ -76,10 +99,12 @@ async function handleSend(request: VercelRequest, response: VercelResponse, sql:
   }
 
   try {
+    const html = await buildAlertEmail(sql, alert);
     await sendEmail(accessToken, {
       to: validRecipients.map((r: any) => r.email),
       subject: `[Seguimiento] ${alert.name}`,
-      body: buildAlertEmailBody(alert),
+      body: html,
+      html: true,
     });
 
     if (alert.id && /^\d+$/.test(String(alert.id))) {
@@ -101,6 +126,7 @@ async function handleCronSweep(response: VercelResponse, sql: SqlClient) {
 
   const dueAlerts = (await sql`
     SELECT a.alerta_id AS id, a.nombre AS name, a.frecuencia AS schedule, a.tipo AS type,
+           a.informe_id AS "reportId",
            COALESCE(p.nombre, 'Todos los proyectos') AS "projectName"
     FROM alertas a
     LEFT JOIN proyectos p ON p.proyecto_id = a.proyecto_id
@@ -117,10 +143,12 @@ async function handleCronSweep(response: VercelResponse, sql: SqlClient) {
     if (recipientRows.length === 0) continue;
 
     try {
+      const html = await buildAlertEmail(sql, alert);
       await sendEmail(accessToken, {
         to: recipientRows.map((r: any) => r.email),
         subject: `[Seguimiento] ${alert.name}`,
-        body: buildAlertEmailBody(alert),
+        body: html,
+        html: true,
       });
       await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alert.id}`;
       sentCount++;
