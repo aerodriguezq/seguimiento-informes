@@ -15,6 +15,16 @@ export interface ReportType {
   active: boolean;
 }
 
+export interface ReportTypeStep {
+  id: string;
+  typeId: string;
+  order: number;
+  name: string;
+  emailSubject: string;
+  isFinal: boolean;
+  contactIds: string[];
+}
+
 export interface Contact {
   id: string;
   name: string;
@@ -43,6 +53,7 @@ export interface ScheduledAlert {
   id: string;
   projectId?: string;
   projectName?: string;
+  reportId?: string;
   name: string;
   schedule: string; // e.g. "5 días antes del vencimiento", "Semanal Lunes"
   time: string; // e.g. "08:00 AM"
@@ -86,6 +97,10 @@ export interface Report {
   attachments: ReportAttachment[];
   alertRulesCount: number;
   createdAt: string;
+  currentStepId?: string;
+  currentStepName?: string;
+  currentStepIsFinal?: boolean;
+  isWorkflowCompleted?: boolean;
 }
 
 export interface SystemNotification {

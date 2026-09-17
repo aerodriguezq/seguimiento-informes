@@ -10,6 +10,7 @@ import {
   SystemNotification,
   ReportStatus,
   ReportAttachment,
+  ReportTypeStep,
 } from './types';
 import {
   getSemaforoStatus,
@@ -39,6 +40,22 @@ const MODULE_ROUTES: Partial<Record<ActiveModule, string>> = {
 const PATH_TO_MODULE: Partial<Record<string, ActiveModule>> = Object.fromEntries(
   Object.entries(MODULE_ROUTES).map(([mod, path]) => [path, mod as ActiveModule])
 );
+
+function mapAlert(a: any): ScheduledAlert {
+  return {
+    id: String(a.id),
+    projectId: a.projectId ? String(a.projectId) : undefined,
+    projectName: a.projectName || undefined,
+    reportId: a.reportId ? String(a.reportId) : undefined,
+    name: a.name,
+    schedule: a.schedule,
+    time: a.time,
+    type: a.type,
+    recipientIds: a.recipientIds,
+    active: a.active,
+    nextExecution: a.nextExecution,
+  };
+}
 
 export default function App() {
   const location = useLocation();
@@ -75,6 +92,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
+  const [reportTypeSteps, setReportTypeSteps] = useState<ReportTypeStep[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
@@ -98,14 +116,16 @@ export default function App() {
   useEffect(() => {
     const loadWorkspace = async () => {
       try {
-        const [projectsResponse, catalogsResponse, reportsResponse] = await Promise.all([
+        const [projectsResponse, catalogsResponse, reportsResponse, alertsResponse] = await Promise.all([
           fetch('/api/projects'),
           fetch('/api/catalogs'),
           fetch('/api/reports'),
+          fetch('/api/alerts'),
         ]);
         const projectsPayload = await projectsResponse.json();
         const catalogsPayload = await catalogsResponse.json();
         const reportsPayload = await reportsResponse.json();
+        const alertsPayload = await alertsResponse.json();
 
         if (!projectsResponse.ok) {
           throw new Error(projectsPayload.errors?.[0] || 'No fue posible consultar los proyectos.');
@@ -115,6 +135,9 @@ export default function App() {
         }
         if (!reportsResponse.ok) {
           throw new Error(reportsPayload.errors?.[0] || 'No fue posible consultar los informes.');
+        }
+        if (!alertsResponse.ok) {
+          throw new Error(alertsPayload.errors?.[0] || 'No fue posible consultar las alertas.');
         }
 
         const loadedProjects: Project[] = projectsPayload.data.map((project: {
@@ -156,12 +179,20 @@ export default function App() {
           attachments: report.attachments.map((a: any) => ({ id: String(a.id), name: a.name, size: a.size, uploadedAt: a.uploadedAt, uploadedBy: a.uploadedBy })),
           alertRulesCount: report.alertRulesCount,
           createdAt: report.createdAt,
+          currentStepId: report.currentStepId ? String(report.currentStepId) : undefined,
+          currentStepName: report.currentStepName || undefined,
+          currentStepIsFinal: report.currentStepIsFinal ?? undefined,
+          isWorkflowCompleted: report.isWorkflowCompleted ?? undefined,
         }));
+
+        const loadedAlerts: ScheduledAlert[] = alertsPayload.data.map(mapAlert);
 
         setProjects(loadedProjects);
         setReportTypes(catalogsPayload.data.reportTypes);
+        setReportTypeSteps(catalogsPayload.data.reportTypeSteps || []);
         setContacts(catalogsPayload.data.contacts);
         setReports(loadedReports);
+        setAlerts(loadedAlerts);
         setCurrentProjectId((currentId) => currentId || loadedProjects[0]?.id || '');
         setWorkspaceError(null);
       } catch (error) {
@@ -326,6 +357,28 @@ export default function App() {
     }
   };
 
+  const handleAdvanceReportStep = async (reportId: string) => {
+    try {
+      const response = await fetch('/api/reports', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'advance_step', reportId }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible avanzar el paso.');
+      setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+
+      const alertsResponse = await fetch('/api/alerts');
+      const alertsPayload = await alertsResponse.json();
+      if (alertsResponse.ok) {
+        setAlerts(alertsPayload.data.map(mapAlert));
+      }
+      showToast('Paso del flujo actualizado. Las alertas del paso anterior se detuvieron.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible avanzar el paso.', 'info');
+    }
+  };
+
   // Project settings
   const handleToggleProjectAutoAlerts = (projectId: string) => {
     setProjects((prev) =>
@@ -372,20 +425,47 @@ export default function App() {
   };
 
   // Alerts
-  const handleToggleAlertActive = (alertId: string) => {
-    setAlerts((prev) =>
-      prev.map((a) => {
-        if (a.id !== alertId) return a;
-        const next = !a.active;
-        showToast(next ? `Regla "${a.name}" activada.` : `Regla "${a.name}" pausada.`, 'info');
-        return { ...a, active: next };
-      })
-    );
+  const handleToggleAlertActive = async (alertId: string) => {
+    const current = alerts.find((a) => a.id === alertId);
+    if (!current) return;
+    const nextActive = !current.active;
+    try {
+      const response = await fetch('/api/alerts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alertId, active: nextActive }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar la alerta.');
+      setAlerts((prev) => prev.map((a) => (a.id === alertId ? payload.data : a)));
+      showToast(nextActive ? `Regla "${current.name}" activada.` : `Regla "${current.name}" pausada.`, 'info');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible actualizar la alerta.', 'info');
+    }
   };
 
-  const handleAddNewAlert = (newAlert: ScheduledAlert) => {
-    setAlerts([newAlert, ...alerts]);
-    showToast(`Regla de alerta "${newAlert.name}" programada exitosamente.`, 'success');
+  const handleAddNewAlert = async (draft: {
+    projectId?: string;
+    name: string;
+    schedule: string;
+    time: string;
+    type: ScheduledAlert['type'];
+    recipientIds: string[];
+  }) => {
+    try {
+      const response = await fetch('/api/alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible crear la alerta.');
+      setAlerts((prev) => [payload.data, ...prev]);
+      showToast(`Regla de alerta "${draft.name}" programada exitosamente.`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible crear la alerta.', 'info');
+      throw error;
+    }
   };
 
   const handleSimulateAlertTrigger = async (alert: ScheduledAlert) => {
@@ -394,10 +474,10 @@ export default function App() {
       .filter((contact): contact is Contact => Boolean(contact?.email))
       .map((contact) => ({ email: contact.email, name: contact.name }));
 
-    const response = await fetch('/api/alerts/send', {
+    const response = await fetch('/api/alerts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ alert, recipients }),
+      body: JSON.stringify({ action: 'send', alert, recipients }),
     });
     const payload = await response.json();
 
@@ -454,6 +534,30 @@ export default function App() {
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el contacto.');
     setContacts((prev) => [...prev, payload.data]);
     showToast(`Contacto "${newContact.name}" registrado en la lista maestra.`, 'success');
+  };
+
+  const handleAddReportTypeStep = async (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[] }) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'reportTypeStep', data: step }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el paso.');
+    setReportTypeSteps((prev) => [...prev, payload.data]);
+    showToast(`Paso "${step.name}" agregado al flujo.`, 'success');
+  };
+
+  const handleDeleteReportTypeStep = async (stepId: string) => {
+    try {
+      const response = await fetch(`/api/catalogs?stepId=${encodeURIComponent(stepId)}`, { method: 'DELETE' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el paso.');
+      setReportTypeSteps((prev) => prev.filter((s) => s.id !== stepId));
+      showToast('Paso eliminado del flujo.', 'info');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible eliminar el paso.', 'info');
+    }
   };
 
   const activeReportForModal = reports.find((r) => r.id === selectedReportId);
@@ -610,8 +714,11 @@ export default function App() {
             <MasterListsView
               reportTypes={reportTypes}
               contacts={contacts}
+              reportTypeSteps={reportTypeSteps}
               onAddReportType={handleAddReportType}
               onAddContact={handleAddContact}
+              onAddReportTypeStep={handleAddReportTypeStep}
+              onDeleteReportTypeStep={handleDeleteReportTypeStep}
             />
           )}
 
@@ -628,6 +735,7 @@ export default function App() {
           onClose={() => setSelectedReportId(null)}
           onUpdateStatus={handleUpdateReportStatus}
           onAddAttachment={handleAddReportAttachment}
+          onAdvanceStep={handleAdvanceReportStep}
         />
       )}
 

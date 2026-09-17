@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ReportType, Contact, ReportStatus } from '../../types';
+import { ReportType, Contact, ReportStatus, ReportTypeStep } from '../../types';
 import { STATUS_SEQUENCE, MONTHS_LIST, YEARS_LIST } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import {
@@ -18,21 +18,36 @@ import {
   Mail,
   Phone,
   Bell,
+  GitBranch,
+  Flag,
 } from 'lucide-react';
 
 interface MasterListsViewProps {
   reportTypes: ReportType[];
   contacts: Contact[];
+  reportTypeSteps: ReportTypeStep[];
   onAddReportType: (type: ReportType) => Promise<void>;
   onAddContact: (contact: Contact) => Promise<void>;
+  onAddReportTypeStep: (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[] }) => Promise<void>;
+  onDeleteReportTypeStep: (stepId: string) => Promise<void>;
 }
 
 export const MasterListsView: React.FC<MasterListsViewProps> = ({
   reportTypes,
   contacts,
+  reportTypeSteps,
   onAddReportType,
   onAddContact,
+  onAddReportTypeStep,
+  onDeleteReportTypeStep,
 }) => {
+  const [stepsModalTypeId, setStepsModalTypeId] = useState<string | null>(null);
+  const [newStepName, setNewStepName] = useState('');
+  const [newStepSubject, setNewStepSubject] = useState('');
+  const [newStepIsFinal, setNewStepIsFinal] = useState(false);
+  const [newStepContactIds, setNewStepContactIds] = useState<string[]>([]);
+  const [stepError, setStepError] = useState('');
+  const [isSavingStep, setIsSavingStep] = useState(false);
   const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'statuses' | 'periods'>('types');
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -115,6 +130,36 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       setFormError(error instanceof Error ? error.message : 'No fue posible guardar el contacto.');
     }
   };
+
+  const handleSaveStep = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stepsModalTypeId || !newStepName.trim() || !newStepSubject.trim() || newStepContactIds.length === 0) return;
+
+    setIsSavingStep(true);
+    setStepError('');
+    try {
+      await onAddReportTypeStep({
+        typeId: stepsModalTypeId,
+        name: newStepName.trim(),
+        emailSubject: newStepSubject.trim(),
+        isFinal: newStepIsFinal,
+        contactIds: newStepContactIds,
+      });
+      setNewStepName('');
+      setNewStepSubject('');
+      setNewStepIsFinal(false);
+      setNewStepContactIds([]);
+    } catch (error) {
+      setStepError(error instanceof Error ? error.message : 'No fue posible guardar el paso.');
+    } finally {
+      setIsSavingStep(false);
+    }
+  };
+
+  const stepsForModalType = reportTypeSteps
+    .filter((s) => s.typeId === stepsModalTypeId)
+    .sort((a, b) => a.order - b.order);
+  const typeForStepsModal = reportTypes.find((t) => t.id === stepsModalTypeId);
 
   return (
     <div id="view-master-lists" className="space-y-5 max-w-7xl mx-auto">
@@ -226,33 +271,47 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                   <th className="py-2.5 px-4">Periodicidad</th>
                   <th className="py-2.5 px-4">Descripción del Alcance</th>
                   <th className="py-2.5 px-4">Estado</th>
+                  <th className="py-2.5 px-4">Flujo de entrega</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredTypes.map((type) => (
-                  <tr key={type.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-3 px-4 font-mono font-bold text-indigo-700">
-                      {type.code}
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-slate-900">
-                      {type.name}
-                    </td>
-                    <td className="py-3 px-4 text-slate-600">
-                      <span className="px-2 py-0.5 rounded bg-slate-100 font-medium text-[11px]">
-                        {type.periodicity}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-slate-600 max-w-md">
-                      {type.description}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        Activo
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {filteredTypes.map((type) => {
+                  const typeSteps = reportTypeSteps.filter((s) => s.typeId === type.id);
+                  return (
+                    <tr key={type.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="py-3 px-4 font-mono font-bold text-indigo-700">
+                        {type.code}
+                      </td>
+                      <td className="py-3 px-4 font-semibold text-slate-900">
+                        {type.name}
+                      </td>
+                      <td className="py-3 px-4 text-slate-600">
+                        <span className="px-2 py-0.5 rounded bg-slate-100 font-medium text-[11px]">
+                          {type.periodicity}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-slate-600 max-w-md">
+                        {type.description}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          Activo
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <button
+                          type="button"
+                          onClick={() => setStepsModalTypeId(type.id)}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100"
+                        >
+                          <GitBranch className="h-3.5 w-3.5" />
+                          {typeSteps.length > 0 ? `${typeSteps.length} paso(s)` : 'Configurar pasos'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -590,6 +649,128 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Steps Modal */}
+      {stepsModalTypeId && typeForStepsModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-lg w-full space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                  <GitBranch className="h-4 w-4 text-indigo-600" />
+                  Flujo de entrega: {typeForStepsModal.name}
+                </h3>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  Define el orden de responsables. Al crear un informe de este tipo, se avisa al paso 1; al confirmar la entrega de cada paso se avanza al siguiente hasta llegar al paso final.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStepsModalTypeId(null)}
+                className="text-slate-400 hover:text-slate-600 shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {stepsForModalType.length === 0 ? (
+              <p className="text-xs text-slate-500">Este tipo de informe todavía no tiene pasos configurados.</p>
+            ) : (
+              <ol className="space-y-2 text-xs">
+                {stepsForModalType.map((step, idx) => (
+                  <li key={step.id} className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 p-2.5">
+                    <div>
+                      <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-100 text-[10px] text-indigo-700">{idx + 1}</span>
+                        {step.name}
+                        {step.isFinal && (
+                          <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                            <Flag className="h-3 w-3" /> Final
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-500">Asunto esperado: "{step.emailSubject}"</p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">
+                        {step.contactIds.map((id) => contacts.find((c) => c.id === id)?.name).filter(Boolean).join(', ') || 'Sin contactos'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteReportTypeStep(step.id)}
+                      className="text-slate-400 hover:text-rose-600 shrink-0"
+                      title="Eliminar paso"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            )}
+
+            {stepError && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700" role="alert">
+                {stepError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveStep} className="space-y-2.5 border-t border-slate-100 pt-3 text-xs">
+              <p className="font-semibold text-slate-700">Agregar paso {stepsForModalType.length + 1}</p>
+              <input
+                type="text"
+                required
+                value={newStepName}
+                onChange={(e) => setNewStepName(e.target.value)}
+                placeholder="Nombre del paso (ej: Entrega de interventoría)"
+                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+              />
+              <input
+                type="text"
+                required
+                value={newStepSubject}
+                onChange={(e) => setNewStepSubject(e.target.value)}
+                placeholder="Asunto de correo que confirma la entrega"
+                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+              />
+              <div className="max-h-28 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1.5">
+                {contacts.map((c) => {
+                  const checked = newStepContactIds.includes(c.id);
+                  return (
+                    <label key={c.id} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          setNewStepContactIds((prev) => (checked ? prev.filter((id) => id !== c.id) : [...prev, c.id]));
+                        }}
+                        className="rounded text-indigo-600"
+                      />
+                      <span className="text-slate-800">{c.name} ({c.role})</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={newStepIsFinal}
+                  onChange={(e) => setNewStepIsFinal(e.target.checked)}
+                  className="rounded text-indigo-600"
+                />
+                Este es el paso final (al entregarlo, se cierra el informe)
+              </label>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="submit"
+                  disabled={isSavingStep || newStepContactIds.length === 0}
+                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSavingStep ? 'Guardando...' : 'Agregar paso'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

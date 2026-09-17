@@ -50,7 +50,14 @@ interface ProjectDetailViewProps {
   onToggleProjectAutoAlerts: (projectId: string) => void;
   onUpdateProjectApplicableTypes: (projectId: string, newTypeIds: string[]) => void;
   onToggleAlertRuleActive: (alertId: string) => void;
-  onAddNewAlertRule: (newAlert: ScheduledAlert) => void;
+  onAddNewAlertRule: (draft: {
+    projectId?: string;
+    name: string;
+    schedule: string;
+    time: string;
+    type: ScheduledAlert['type'];
+    recipientIds: string[];
+  }) => Promise<void>;
   onViewAllReports: () => void;
   onUpdateProjectVigencia: (projectId: string, startDate: string, endDate: string) => Promise<void>;
 }
@@ -139,26 +146,30 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     setIsManagingTypes(false);
   };
 
-  const handleCreateAlert = (e: React.FormEvent) => {
+  const [isCreatingAlert, setIsCreatingAlert] = useState(false);
+
+  const handleCreateAlert = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAlertName.trim() || newAlertRecipients.length === 0) return;
 
-    const created: ScheduledAlert = {
-      id: `alert-${Date.now()}`,
-      projectId: project.id,
-      projectName: project.name,
-      name: newAlertName.trim(),
-      schedule: newAlertSchedule,
-      time: newAlertTime,
-      type: newAlertType,
-      recipientIds: newAlertRecipients,
-      active: true,
-      nextExecution: '2026-09-15 ' + newAlertTime,
-    };
-    onAddNewAlertRule(created);
-    setShowNewAlertModal(false);
-    setNewAlertRecipients([]);
-    setNewAlertName('');
+    setIsCreatingAlert(true);
+    try {
+      await onAddNewAlertRule({
+        projectId: project.id,
+        name: newAlertName.trim(),
+        schedule: newAlertSchedule,
+        time: newAlertTime,
+        type: newAlertType,
+        recipientIds: newAlertRecipients,
+      });
+      setShowNewAlertModal(false);
+      setNewAlertRecipients([]);
+      setNewAlertName('');
+    } catch {
+      // El toast de error ya lo muestra App.tsx; dejamos el modal abierto para reintentar.
+    } finally {
+      setIsCreatingAlert(false);
+    }
   };
 
   const allowsAll = project.applicableTypeIds.length === 0;
@@ -811,10 +822,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={newAlertRecipients.length === 0}
+                  disabled={newAlertRecipients.length === 0 || isCreatingAlert}
                   className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Crear Regla
+                  {isCreatingAlert ? 'Guardando...' : 'Crear Regla'}
                 </button>
               </div>
             </form>

@@ -40,6 +40,7 @@ interface ReportDetailModalProps {
   onClose: () => void;
   onUpdateStatus: (reportId: string, newStatus: ReportStatus, comment: string) => void;
   onAddAttachment: (reportId: string, attachment: ReportAttachment) => void;
+  onAdvanceStep: (reportId: string) => Promise<void>;
 }
 
 export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
@@ -49,7 +50,18 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   onClose,
   onUpdateStatus,
   onAddAttachment,
+  onAdvanceStep,
 }) => {
+  const [isAdvancingStep, setIsAdvancingStep] = useState(false);
+
+  const handleAdvanceStep = async () => {
+    setIsAdvancingStep(true);
+    try {
+      await onAdvanceStep(report.id);
+    } finally {
+      setIsAdvancingStep(false);
+    }
+  };
   const [showTransitionModal, setShowTransitionModal] = useState(false);
   const [targetStatus, setTargetStatus] = useState<ReportStatus>(report.status);
   const [transitionComment, setTransitionComment] = useState('');
@@ -62,8 +74,9 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const assignedContacts = contacts.filter((c) => report.contactIds.includes(c.id));
   const primaryContact = contacts.find((c) => c.id === report.primaryContactId);
 
-  // Related project alerts
-  const projectAlerts = alerts.filter((a) => a.projectId === report.projectId);
+  // Alertas ligadas específicamente al flujo de este informe (más las generales del proyecto)
+  const reportStepAlerts = alerts.filter((a) => a.reportId === report.id);
+  const projectAlerts = reportStepAlerts.length > 0 ? reportStepAlerts : alerts.filter((a) => a.projectId === report.projectId);
 
   // Current state index in cycle
   const currentStepIndex = STATUS_SEQUENCE.indexOf(report.status);
@@ -211,6 +224,35 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
               })}
             </div>
           </div>
+
+          {/* Flujo de entrega por correo (pasos configurados en el tipo de informe) */}
+          {(report.currentStepId || report.isWorkflowCompleted) && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">Flujo de entrega por correo</span>
+                {report.isWorkflowCompleted ? (
+                  <p className="mt-1 text-sm font-bold text-emerald-700">Flujo completado — se entregó al contacto final.</p>
+                ) : (
+                  <p className="mt-1 text-sm font-bold text-indigo-950">
+                    Paso actual: {report.currentStepName}
+                    {report.currentStepIsFinal && <span className="ml-2 text-[11px] font-semibold text-emerald-700">(paso final)</span>}
+                  </p>
+                )}
+              </div>
+              {!report.isWorkflowCompleted && (
+                <button
+                  type="button"
+                  onClick={handleAdvanceStep}
+                  disabled={isAdvancingStep}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Marca este paso como entregado manualmente (hasta que la detección automática de correo esté lista)"
+                >
+                  <span>{isAdvancingStep ? 'Actualizando...' : report.currentStepIsFinal ? 'Confirmar entrega final' : 'Confirmar entrega y avanzar'}</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Navigation Tabs */}
           <div className="flex items-center gap-2 border-b border-slate-200 pb-1 text-xs">

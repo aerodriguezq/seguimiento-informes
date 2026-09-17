@@ -22,7 +22,14 @@ interface AlertsViewProps {
   projects: Project[];
   contacts: Contact[];
   onToggleAlertActive: (alertId: string) => void;
-  onAddNewAlert: (alert: ScheduledAlert) => void;
+  onAddNewAlert: (draft: {
+    projectId?: string;
+    name: string;
+    schedule: string;
+    time: string;
+    type: ScheduledAlert['type'];
+    recipientIds: string[];
+  }) => Promise<void>;
   onSimulateTrigger: (alert: ScheduledAlert) => Promise<void>;
 }
 
@@ -59,26 +66,29 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
     return true;
   });
 
-  const handleCreate = (e: React.FormEvent) => {
+  const [isCreating, setIsCreating] = useState(false);
+
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || selectedContactIds.length === 0) return;
 
-    const proj = projects.find((p) => p.id === projectId);
-    const created: ScheduledAlert = {
-      id: `alert-${Date.now()}`,
-      projectId: proj?.id,
-      projectName: proj?.name || 'Todos los proyectos',
-      name: name.trim(),
-      schedule,
-      time,
-      type,
-      recipientIds: selectedContactIds,
-      active: true,
-      nextExecution: '2026-09-15 ' + time,
-    };
-    onAddNewAlert(created);
-    setShowModal(false);
-    setName('');
+    setIsCreating(true);
+    try {
+      await onAddNewAlert({
+        projectId,
+        name: name.trim(),
+        schedule,
+        time,
+        type,
+        recipientIds: selectedContactIds,
+      });
+      setShowModal(false);
+      setName('');
+    } catch {
+      // El toast de error ya lo muestra App.tsx; dejamos el modal abierto para reintentar.
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
@@ -377,10 +387,10 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={selectedContactIds.length === 0}
+                  disabled={selectedContactIds.length === 0 || isCreating}
                   className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Registrar Regla
+                  {isCreating ? 'Guardando...' : 'Registrar Regla'}
                 </button>
               </div>
             </form>
