@@ -60,6 +60,8 @@ export default async function handler(
 
     if (request.method === 'PATCH') {
       const projectId = Number(request.body?.id);
+      const hasStartDate = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'startDate');
+      const hasEndDate = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'endDate');
       const { startDate, endDate } = request.body ?? {};
 
       if (!Number.isInteger(projectId) || projectId <= 0) {
@@ -72,16 +74,20 @@ export default async function handler(
         return response.status(400).json({ data: null, meta: {}, errors: ['Fecha de fin inválida.'] });
       }
 
+      const currentProjects = await sql`SELECT fecha_inicio, fecha_fin FROM proyectos WHERE proyecto_id = ${projectId}`;
+      if (!currentProjects[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Proyecto no encontrado.'] });
+      }
+
+      const nextStartDate = hasStartDate ? (startDate || null) : currentProjects[0].fecha_inicio;
+      const nextEndDate = hasEndDate ? (endDate || null) : currentProjects[0].fecha_fin;
+
       const updatedProjects = await sql`
         UPDATE proyectos
-        SET fecha_inicio = ${startDate || null}, fecha_fin = ${endDate || null}
+        SET fecha_inicio = ${nextStartDate}, fecha_fin = ${nextEndDate}
         WHERE proyecto_id = ${projectId}
         RETURNING proyecto_id AS id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate"
       `;
-
-      if (!updatedProjects[0]) {
-        return response.status(404).json({ data: null, meta: {}, errors: ['Proyecto no encontrado.'] });
-      }
 
       return response.status(200).json({ data: updatedProjects[0], meta: {}, errors: [] });
     }
