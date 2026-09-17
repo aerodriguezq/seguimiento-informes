@@ -176,7 +176,7 @@ async function createReportRow(sql: SqlClient, input: CreateReportInput): Promis
     )
   `;
 
-  await seedFirstWorkflowStep(sql, reportId, input.projectId, input.typeId);
+  await seedFirstWorkflowStep(sql, reportId, input.typeId, input.projectId);
   return reportId;
 }
 
