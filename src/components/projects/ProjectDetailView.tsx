@@ -51,6 +51,7 @@ interface ProjectDetailViewProps {
   onToggleAlertRuleActive: (alertId: string) => void;
   onAddNewAlertRule: (newAlert: ScheduledAlert) => void;
   onViewAllReports: () => void;
+  onUpdateProjectVigencia: (projectId: string, startDate: string, endDate: string) => Promise<void>;
 }
 
 export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
@@ -67,7 +68,22 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onToggleAlertRuleActive,
   onAddNewAlertRule,
   onViewAllReports,
+  onUpdateProjectVigencia,
 }) => {
+  const [isEditingVigencia, setIsEditingVigencia] = useState(false);
+  const [vigenciaStart, setVigenciaStart] = useState(project.startDate);
+  const [vigenciaEnd, setVigenciaEnd] = useState(project.endDate);
+  const [isSavingVigencia, setIsSavingVigencia] = useState(false);
+
+  const handleSaveVigencia = async () => {
+    setIsSavingVigencia(true);
+    try {
+      await onUpdateProjectVigencia(project.id, vigenciaStart, vigenciaEnd);
+      setIsEditingVigencia(false);
+    } finally {
+      setIsSavingVigencia(false);
+    }
+  };
   const [reportFilterStatus, setReportFilterStatus] = useState<string>('all');
   const [reportSearchQuery, setReportSearchQuery] = useState('');
   const [isManagingTypes, setIsManagingTypes] = useState(false);
@@ -179,11 +195,63 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               {project.name}
             </h1>
 
-            <div className="flex items-center gap-2 text-xs text-slate-500">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
               <Building2 className="w-4 h-4 text-slate-400" />
               <span>Empresa Contratista: <strong className="text-slate-700">{project.company}</strong></span>
               <span>•</span>
-              <span>Vigencia: {project.startDate} al {project.endDate}</span>
+              {isEditingVigencia ? (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span>Vigencia:</span>
+                  <input
+                    type="date"
+                    value={vigenciaStart}
+                    onChange={(e) => setVigenciaStart(e.target.value)}
+                    className="rounded border border-slate-200 px-1.5 py-0.5 text-xs outline-none focus:border-indigo-500"
+                  />
+                  <span>al</span>
+                  <input
+                    type="date"
+                    value={vigenciaEnd}
+                    onChange={(e) => setVigenciaEnd(e.target.value)}
+                    className="rounded border border-slate-200 px-1.5 py-0.5 text-xs outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveVigencia}
+                    disabled={isSavingVigencia}
+                    className="text-emerald-600 hover:text-emerald-800 disabled:opacity-50"
+                    title="Guardar vigencia"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVigenciaStart(project.startDate);
+                      setVigenciaEnd(project.endDate);
+                      setIsEditingVigencia(false);
+                    }}
+                    className="text-slate-400 hover:text-slate-700"
+                    title="Cancelar"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <span className="inline-flex items-center gap-1.5">
+                  <span>
+                    Vigencia: {project.startDate || 'sin definir'} al {project.endDate || 'sin definir'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingVigencia(true)}
+                    className="text-slate-400 hover:text-indigo-600"
+                    title="Editar vigencia"
+                  >
+                    <Edit2 className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
             </div>
           </div>
 

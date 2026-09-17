@@ -4,7 +4,6 @@ import {
   ReportType,
   Contact,
   ReportStatus,
-  Report,
   ReportAttachment,
 } from '../../types';
 import { MONTHS_LIST, YEARS_LIST, STATUS_SEQUENCE } from '../../data/mockData';
@@ -32,7 +31,18 @@ interface NewReportWizardProps {
   contacts: Contact[];
   preselectedProjectId?: string;
   onCancel: () => void;
-  onSubmitReport: (newReport: Report) => void;
+  onSubmitReport: (input: {
+    projectId: string;
+    typeId: string;
+    month: string;
+    year: number;
+    dueDate: string;
+    status: ReportStatus;
+    contactIds: string[];
+    primaryContactId: string;
+    observations: string;
+    attachments: ReportAttachment[];
+  }) => Promise<void>;
 }
 
 export const NewReportWizard: React.FC<NewReportWizardProps> = ({
@@ -118,7 +128,7 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
       id: `att-${Date.now()}`,
       name: file.name,
       size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
-      uploadedAt: '2026-09-14',
+      uploadedAt: new Date().toISOString().slice(0, 10),
       uploadedBy: 'Ing. Alejandro Rodríguez',
     };
     setAttachments([...attachments, newAtt]);
@@ -164,40 +174,30 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
     setCurrentStep((prev) => Math.max(prev - 1, 1));
   };
 
-  const handleSubmit = () => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
     if (!currentProject) return;
-    const selectedType = reportTypes.find((t) => t.id === selectedTypeId);
-    const newConsecutive = `INF-2026-${Math.floor(100 + Math.random() * 900)}`;
-
-    const newReport: Report = {
-      id: `rep-${Date.now()}`,
-      consecutive: newConsecutive,
-      projectId: currentProject.id,
-      projectName: currentProject.name,
-      projectBpin: currentProject.bpin,
-      typeId: selectedTypeId,
-      typeName: selectedType ? selectedType.name : 'Informe General',
-      month: selectedMonth,
-      year: selectedYear,
-      dueDate: dueDate,
-      status: status,
-      contactIds: selectedContactIds,
-      primaryContactId: primaryContactId || selectedContactIds[0] || '',
-      observations: observations.trim() || 'Apertura de informe para seguimiento del cronograma contractual.',
-      attachments: attachments,
-      alertRulesCount: 2,
-      createdAt: '2026-09-14',
-      history: [
-        {
-          status: status,
-          date: '2026-09-14 09:30',
-          userName: 'Ing. Alejandro Rodríguez',
-          comment: observations.trim() || 'Creación inicial del informe mediante el asistente guiado.',
-        },
-      ],
-    };
-
-    onSubmitReport(newReport);
+    setIsSubmitting(true);
+    setErrorMsg('');
+    try {
+      await onSubmitReport({
+        projectId: currentProject.id,
+        typeId: selectedTypeId,
+        month: selectedMonth,
+        year: selectedYear,
+        dueDate: dueDate,
+        status: status,
+        contactIds: selectedContactIds,
+        primaryContactId: primaryContactId || selectedContactIds[0] || '',
+        observations: observations.trim() || 'Apertura de informe para seguimiento del cronograma contractual.',
+        attachments: attachments,
+      });
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'No fue posible crear el informe.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -739,10 +739,11 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
               id="wizard-submit-report-btn"
               type="button"
               onClick={handleSubmit}
-              className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors shadow-xs cursor-pointer"
+              disabled={isSubmitting}
+              className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors shadow-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Check className="w-4 h-4" />
-              <span>Crear y Registrar Informe</span>
+              <span>{isSubmitting ? 'Guardando...' : 'Crear y Registrar Informe'}</span>
             </button>
           )}
         </div>

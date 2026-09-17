@@ -98,18 +98,23 @@ export default function App() {
   useEffect(() => {
     const loadWorkspace = async () => {
       try {
-        const [projectsResponse, catalogsResponse] = await Promise.all([
+        const [projectsResponse, catalogsResponse, reportsResponse] = await Promise.all([
           fetch('/api/projects'),
           fetch('/api/catalogs'),
+          fetch('/api/reports'),
         ]);
         const projectsPayload = await projectsResponse.json();
         const catalogsPayload = await catalogsResponse.json();
+        const reportsPayload = await reportsResponse.json();
 
         if (!projectsResponse.ok) {
           throw new Error(projectsPayload.errors?.[0] || 'No fue posible consultar los proyectos.');
         }
         if (!catalogsResponse.ok) {
           throw new Error(catalogsPayload.errors?.[0] || 'No fue posible consultar los catálogos.');
+        }
+        if (!reportsResponse.ok) {
+          throw new Error(reportsPayload.errors?.[0] || 'No fue posible consultar los informes.');
         }
 
         const loadedProjects: Project[] = projectsPayload.data.map((project: {
@@ -118,6 +123,8 @@ export default function App() {
           bpin: string;
           company_name: string;
           applicable_type_ids: Array<string | number>;
+          startDate: string | null;
+          endDate: string | null;
         }) => ({
           id: String(project.id),
           name: project.name,
@@ -126,13 +133,35 @@ export default function App() {
           generalStatus: 'En Inicio',
           autoAlertsEnabled: false,
           applicableTypeIds: project.applicable_type_ids.map(String),
-          startDate: '',
-          endDate: '',
+          startDate: project.startDate || '',
+          endDate: project.endDate || '',
+        }));
+
+        const loadedReports: Report[] = reportsPayload.data.map((report: any) => ({
+          id: String(report.id),
+          consecutive: report.consecutive || '',
+          projectId: String(report.projectId),
+          projectName: report.projectName,
+          projectBpin: report.projectBpin,
+          typeId: String(report.typeId),
+          typeName: report.typeName,
+          month: report.month,
+          year: report.year,
+          dueDate: report.dueDate,
+          status: report.status,
+          contactIds: report.contactIds,
+          primaryContactId: report.primaryContactId,
+          observations: report.observations,
+          history: report.history.map((h: any) => ({ status: h.status, date: h.date, userName: h.userName, comment: h.comment })),
+          attachments: report.attachments.map((a: any) => ({ id: String(a.id), name: a.name, size: a.size, uploadedAt: a.uploadedAt, uploadedBy: a.uploadedBy })),
+          alertRulesCount: report.alertRulesCount,
+          createdAt: report.createdAt,
         }));
 
         setProjects(loadedProjects);
         setReportTypes(catalogsPayload.data.reportTypes);
         setContacts(catalogsPayload.data.contacts);
+        setReports(loadedReports);
         setCurrentProjectId((currentId) => currentId || loadedProjects[0]?.id || '');
         setWorkspaceError(null);
       } catch (error) {
@@ -215,13 +244,42 @@ export default function App() {
   };
 
   // Report creation
-  const handleSubmitNewReport = (newReport: Report) => {
-    setReports([newReport, ...reports]);
+  const handleSubmitNewReport = async (input: {
+    projectId: string;
+    typeId: string;
+    month: string;
+    year: number;
+    dueDate: string;
+    status: ReportStatus;
+    contactIds: string[];
+    primaryContactId: string;
+    observations: string;
+    attachments: ReportAttachment[];
+  }) => {
+    const response = await fetch('/api/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible crear el informe.');
+
+    let newReport: Report = payload.data;
+    for (const attachment of input.attachments) {
+      const attachResponse = await fetch('/api/reports', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'attachment', reportId: newReport.id, attachment }),
+      });
+      const attachPayload = await attachResponse.json();
+      if (attachResponse.ok) newReport = attachPayload.data;
+    }
+
+    setReports((prev) => [newReport, ...prev]);
     goToModule('reports');
     setSelectedReportId(newReport.id);
     showToast(`Informe ${newReport.consecutive} creado y registrado con éxito.`, 'success');
 
-    // Add notification
     const newNotif: SystemNotification = {
       id: `notif-${Date.now()}`,
       title: `Nuevo Informe Registrado: ${newReport.consecutive}`,
@@ -236,37 +294,36 @@ export default function App() {
   };
 
   // Report status transition
-  const handleUpdateReportStatus = (reportId: string, newStatus: ReportStatus, comment: string) => {
-    setReports((prev) =>
-      prev.map((rep) => {
-        if (rep.id !== reportId) return rep;
-        const newHistoryItem = {
-          status: newStatus,
-          date: '2026-09-14 10:15',
-          userName: 'Ing. Alejandro Rodríguez',
-          comment,
-        };
-        return {
-          ...rep,
-          status: newStatus,
-          history: [...rep.history, newHistoryItem],
-        };
-      })
-    );
-    showToast(`Estado del informe actualizado a "${newStatus}" con trazabilidad.`, 'success');
+  const handleUpdateReportStatus = async (reportId: string, newStatus: ReportStatus, comment: string) => {
+    try {
+      const response = await fetch('/api/reports', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'status', reportId, status: newStatus, comment }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el estado.');
+      setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+      showToast(`Estado del informe actualizado a "${newStatus}" con trazabilidad.`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible actualizar el estado.', 'info');
+    }
   };
 
-  const handleAddReportAttachment = (reportId: string, attachment: ReportAttachment) => {
-    setReports((prev) =>
-      prev.map((rep) => {
-        if (rep.id !== reportId) return rep;
-        return {
-          ...rep,
-          attachments: [...rep.attachments, attachment],
-        };
-      })
-    );
-    showToast(`Archivo "${attachment.name}" adjuntado correctamente.`, 'success');
+  const handleAddReportAttachment = async (reportId: string, attachment: ReportAttachment) => {
+    try {
+      const response = await fetch('/api/reports', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'attachment', reportId, attachment }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible adjuntar el archivo.');
+      setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+      showToast(`Archivo "${attachment.name}" adjuntado correctamente.`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible adjuntar el archivo.', 'info');
+    }
   };
 
   // Project settings
@@ -294,6 +351,24 @@ export default function App() {
       })
     );
     showToast('Configuración de tipos aplicables actualizada para el proyecto.', 'success');
+  };
+
+  const handleUpdateProjectVigencia = async (projectId: string, startDate: string, endDate: string) => {
+    try {
+      const response = await fetch('/api/projects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: projectId, startDate, endDate }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar la vigencia.');
+      setProjects((prev) =>
+        prev.map((p) => (p.id === projectId ? { ...p, startDate: payload.data.startDate || '', endDate: payload.data.endDate || '' } : p))
+      );
+      showToast('Vigencia del proyecto actualizada.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible actualizar la vigencia.', 'info');
+    }
   };
 
   // Alerts
@@ -511,6 +586,7 @@ export default function App() {
               onSelectReport={handleNavigateToReport}
               onToggleProjectAutoAlerts={handleToggleProjectAutoAlerts}
               onUpdateProjectApplicableTypes={handleUpdateProjectApplicableTypes}
+              onUpdateProjectVigencia={handleUpdateProjectVigencia}
               onToggleAlertRuleActive={handleToggleAlertActive}
               onAddNewAlertRule={handleAddNewAlert}
               onViewAllReports={() => handleViewAllReports()}

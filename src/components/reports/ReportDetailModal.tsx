@@ -91,7 +91,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
       id: `att-${Date.now()}`,
       name: file.name,
       size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
-      uploadedAt: '2026-09-14',
+      uploadedAt: new Date().toISOString().slice(0, 10),
       uploadedBy: 'Ing. Alejandro Rodríguez',
     };
     onAddAttachment(report.id, newAtt);
