@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { getDriveSession } from '../server/google-oauth.js';
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'GET' && request.method !== 'PUT') {
@@ -16,21 +17,26 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const { neon } = await import('@neondatabase/serverless');
     const sql = neon(databaseUrl);
 
+    // Cada cuenta de Google conectada guarda y recupera sus propios últimos
+    // enlaces. Apps Script/Colab (sin cookie de sesión) usan el bucket 'default'.
+    const session = await getDriveSession(request).catch(() => null);
+    const googleEmail = session?.google_email ?? 'default';
+
     if (request.method === 'PUT') {
       const { sourceUrl, destinationUrl } = request.body ?? {};
       if (!isDriveFolderUrl(sourceUrl) || !isDriveFolderUrl(destinationUrl)) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Ambos enlaces deben ser URLs válidas de carpetas de Google Drive.'] });
       }
       const rows = await sql`
-        INSERT INTO drive_links (config_id, source_url, destination_url, updated_at)
-        VALUES (1, ${sourceUrl.trim()}, ${destinationUrl.trim()}, NOW())
-        ON CONFLICT (config_id) DO UPDATE SET source_url = EXCLUDED.source_url, destination_url = EXCLUDED.destination_url, updated_at = NOW()
+        INSERT INTO drive_links (google_email, source_url, destination_url, updated_at)
+        VALUES (${googleEmail}, ${sourceUrl.trim()}, ${destinationUrl.trim()}, NOW())
+        ON CONFLICT (google_email) DO UPDATE SET source_url = EXCLUDED.source_url, destination_url = EXCLUDED.destination_url, updated_at = NOW()
         RETURNING source_url AS "sourceUrl", destination_url AS "destinationUrl", updated_at AS "updatedAt"
       `;
       return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
     }
 
-    const rows = await sql`SELECT source_url AS "sourceUrl", destination_url AS "destinationUrl", updated_at AS "updatedAt" FROM drive_links WHERE config_id = 1`;
+    const rows = await sql`SELECT source_url AS "sourceUrl", destination_url AS "destinationUrl", updated_at AS "updatedAt" FROM drive_links WHERE google_email = ${googleEmail}`;
     return response.status(200).json({ data: rows[0] || { sourceUrl: '', destinationUrl: '' }, meta: {}, errors: [] });
   } catch (error) {
     console.error('Drive links query failed', error);

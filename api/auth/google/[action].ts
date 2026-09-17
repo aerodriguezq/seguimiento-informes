@@ -55,8 +55,6 @@ async function callback(request: VercelRequest, response: VercelResponse) {
       INSERT INTO google_drive_sessions (session_id, google_email, token_json, expires_at)
       VALUES (${sessionId}, ${user.email}, ${JSON.stringify(tokens)}, NOW() + INTERVAL '30 days')
     `;
-    // Cada nueva conexión de Drive empieza sin carpetas configuradas.
-    await sql`DELETE FROM drive_links WHERE config_id = 1`;
     response.setHeader('Set-Cookie', [sessionCookie(sessionId), clearOAuthStateCookie()]);
     return response.redirect(302, '/?drive=connected');
   } catch (error) {

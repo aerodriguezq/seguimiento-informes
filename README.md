@@ -287,6 +287,11 @@ usar **Copiar carpeta completa** desde la web. Los tokens se guardan únicamente
 en Neon server-side. Para carpetas muy grandes, Colab sigue siendo la opción
 recomendada por los límites de ejecución de Vercel.
 
+Los enlaces de origen/destino se guardan por cuenta de Google conectada (no de
+forma global): cada cuenta ve y recupera sus propios últimos enlaces al volver
+a conectarse. Ejecuta `database/migrations/004_drive_links_per_account.sql` en
+Neon para migrar la tabla `drive_links` a esta clave por cuenta.
+
 ### Espejo de Neon en Google Sheets
 
 El mismo Apps Script puede mantener una hoja espejo de Neon. Neon continúa siendo
