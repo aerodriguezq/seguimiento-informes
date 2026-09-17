@@ -8,7 +8,7 @@ const PRESET_OPTIONS = [
   'Diario a las 08:00 AM',
 ];
 
-const RANGE_PATTERN = /^Del (\d{4}-\d{2}-\d{2}) al (\d{4}-\d{2}-\d{2})$/;
+const RANGE_PATTERN = /^Del día (\d{1,2}) al día (\d{1,2}) de cada mes$/;
 
 interface ScheduleFrequencyFieldProps {
   value: string;
@@ -18,8 +18,10 @@ interface ScheduleFrequencyFieldProps {
 export const ScheduleFrequencyField: React.FC<ScheduleFrequencyFieldProps> = ({ value, onChange }) => {
   const rangeMatch = value.match(RANGE_PATTERN);
   const [mode, setMode] = useState<'preset' | 'range'>(rangeMatch ? 'range' : 'preset');
-  const [rangeStart, setRangeStart] = useState(rangeMatch?.[1] || '');
-  const [rangeEnd, setRangeEnd] = useState(rangeMatch?.[2] || '');
+  const [rangeStartDay, setRangeStartDay] = useState(rangeMatch?.[1] || '1');
+  const [rangeEndDay, setRangeEndDay] = useState(rangeMatch?.[2] || '5');
+
+  const composeRange = (start: string, end: string) => `Del día ${start} al día ${end} de cada mes`;
 
   const switchToPreset = () => {
     setMode('preset');
@@ -28,13 +30,13 @@ export const ScheduleFrequencyField: React.FC<ScheduleFrequencyFieldProps> = ({ 
 
   const switchToRange = () => {
     setMode('range');
-    onChange(rangeStart && rangeEnd ? `Del ${rangeStart} al ${rangeEnd}` : '');
+    onChange(composeRange(rangeStartDay, rangeEndDay));
   };
 
   const updateRange = (start: string, end: string) => {
-    setRangeStart(start);
-    setRangeEnd(end);
-    onChange(start && end ? `Del ${start} al ${end}` : '');
+    setRangeStartDay(start);
+    setRangeEndDay(end);
+    if (start && end) onChange(composeRange(start, end));
   };
 
   return (
@@ -52,7 +54,7 @@ export const ScheduleFrequencyField: React.FC<ScheduleFrequencyFieldProps> = ({ 
           onClick={switchToRange}
           className={`rounded-md px-2 py-1 transition-colors ${mode === 'range' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
         >
-          Rango de fechas
+          Rango mensual
         </button>
       </div>
 
@@ -70,19 +72,25 @@ export const ScheduleFrequencyField: React.FC<ScheduleFrequencyFieldProps> = ({ 
         </select>
       ) : (
         <div className="flex items-center gap-1.5">
+          <span className="whitespace-nowrap text-slate-500">Día</span>
           <input
-            type="date"
-            value={rangeStart}
-            onChange={(e) => updateRange(e.target.value, rangeEnd)}
-            className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+            type="number"
+            min={1}
+            max={31}
+            value={rangeStartDay}
+            onChange={(e) => updateRange(e.target.value, rangeEndDay)}
+            className="w-14 px-2 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
           />
-          <span className="text-slate-400">al</span>
+          <span className="whitespace-nowrap text-slate-400">al día</span>
           <input
-            type="date"
-            value={rangeEnd}
-            onChange={(e) => updateRange(rangeStart, e.target.value)}
-            className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+            type="number"
+            min={1}
+            max={31}
+            value={rangeEndDay}
+            onChange={(e) => updateRange(rangeStartDay, e.target.value)}
+            className="w-14 px-2 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
           />
+          <span className="whitespace-nowrap text-slate-500">de cada mes</span>
         </div>
       )}
     </div>
