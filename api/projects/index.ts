@@ -76,7 +76,7 @@ export default async function handler(
         UPDATE proyectos
         SET fecha_inicio = ${startDate || null}, fecha_fin = ${endDate || null}
         WHERE proyecto_id = ${projectId}
-        RETURNING proyecto_id AS id, fecha_inicio AS "startDate", fecha_fin AS "endDate"
+        RETURNING proyecto_id AS id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate"
       `;
 
       if (!updatedProjects[0]) {
@@ -154,7 +154,7 @@ export default async function handler(
           ${startDate || null},
           ${endDate || null}
         )
-        RETURNING proyecto_id AS id, nombre AS name, bpin, activo AS active, empresa_id AS company_id, fecha_inicio AS "startDate", fecha_fin AS "endDate"
+        RETURNING proyecto_id AS id, nombre AS name, bpin, activo AS active, empresa_id AS company_id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate"
       `;
 
       const project = projects[0];
@@ -176,8 +176,8 @@ export default async function handler(
         p.nombre AS name,
         p.bpin,
         p.activo AS active,
-        p.fecha_inicio AS "startDate",
-        p.fecha_fin AS "endDate",
+        TO_CHAR(p.fecha_inicio, 'YYYY-MM-DD') AS "startDate",
+        TO_CHAR(p.fecha_fin, 'YYYY-MM-DD') AS "endDate",
         e.empresa_id AS company_id,
         e.nombre AS company_name,
         COALESCE(

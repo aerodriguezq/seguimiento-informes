@@ -15,7 +15,7 @@ async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
       ti.nombre AS "typeName",
       i.mes_nombre AS month,
       i.anio AS year,
-      i.fecha AS "dueDate",
+      TO_CHAR(i.fecha, 'YYYY-MM-DD') AS "dueDate",
       i.estado AS status,
       i.consecutivo AS consecutive,
       i.observaciones AS observations,
