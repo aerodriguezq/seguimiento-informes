@@ -269,6 +269,23 @@ result = run_copy()
 Colab solicitará autorización de Google Drive y copiará la estructura completa
 por paginación, omitiendo archivos ya existentes. En este modo no necesitas
 `APP_SCRIPT_WEBHOOK_URL`; solo `APP_SCRIPT_SHARED_SECRET` en Colab Secrets.
+
+### Copia web con OAuth
+
+La aplicación también puede conectar Google Drive directamente desde **Fuentes
+Drive**. Configura en Vercel `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+`GOOGLE_REDIRECT_URI` y `SESSION_SECRET`, y ejecuta
+`database/migrations/003_google_drive_sessions.sql` en Neon. En Google Cloud,
+la URI autorizada debe ser exactamente:
+
+```text
+https://seguimiento-informes.vercel.app/api/auth/google/callback
+```
+
+El usuario pulsa **Conectar Google Drive**, autoriza su cuenta y después puede
+usar **Copiar carpeta completa** desde la web. Los tokens se guardan únicamente
+en Neon server-side. Para carpetas muy grandes, Colab sigue siendo la opción
+recomendada por los límites de ejecución de Vercel.
 ### Espejo de Neon en Google Sheets
 
 El mismo Apps Script puede mantener una hoja espejo de Neon. Neon continúa siendo
