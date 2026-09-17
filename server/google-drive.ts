@@ -17,7 +17,16 @@ export async function getDriveAccessToken(tokenJson: string) {
   return token.token;
 }
 
-async function driveRequest<T>(accessToken: string, path: string, options: RequestInit = {}) {
+const MAX_RATE_LIMIT_RETRIES = 6;
+
+function isRateLimitError(status: number, payload: unknown): boolean {
+  if (status === 429) return true;
+  if (status !== 403) return false;
+  const reason = (payload as { error?: { errors?: Array<{ reason?: string }> } })?.error?.errors?.[0]?.reason;
+  return reason === 'userRateLimitExceeded' || reason === 'rateLimitExceeded' || reason === 'quotaExceeded';
+}
+
+async function driveRequest<T>(accessToken: string, path: string, options: RequestInit = {}, attempt = 0): Promise<T> {
   const response = await fetch(`https://www.googleapis.com/drive/v3${path}`, {
     ...options,
     headers: {
@@ -27,7 +36,14 @@ async function driveRequest<T>(accessToken: string, path: string, options: Reque
     },
   });
   const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(payload?.error?.message || `Google Drive respondió ${response.status}.`);
+  if (!response.ok) {
+    if (isRateLimitError(response.status, payload) && attempt < MAX_RATE_LIMIT_RETRIES) {
+      const backoffMs = Math.min(16000, 500 * 2 ** attempt) + Math.floor(Math.random() * 300);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      return driveRequest<T>(accessToken, path, options, attempt + 1);
+    }
+    throw new Error(payload?.error?.message || `Google Drive respondió ${response.status}.`);
+  }
   return payload as T;
 }
 
