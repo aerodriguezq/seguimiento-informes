@@ -53,11 +53,10 @@ export default function App() {
   // primary sections) get a real path; sub-views like new_report/project_detail
   // stay internal state and don't change the URL.
   const goToModule = (mod: ActiveModule) => {
+    setActiveModule(mod);
     const path = MODULE_ROUTES[mod];
-    if (path) {
+    if (path && path !== location.pathname) {
       navigate(path);
-    } else {
-      setActiveModule(mod);
     }
   };
 
@@ -487,6 +486,19 @@ export default function App() {
           )}
 
           {/* M06: Detalle de Proyecto (Rediseño de la pantalla analizada) */}
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'project_detail' && !currentProject && (
+            <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+              <p className="text-sm font-semibold text-slate-800">Selecciona un proyecto primero</p>
+              <p className="mt-1 text-xs text-slate-500">Elige un proyecto desde la Cartera de Proyectos para ver su detalle.</p>
+              <button
+                type="button"
+                onClick={() => goToModule('projects')}
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-teal-800"
+              >
+                Ir a Proyectos
+              </button>
+            </div>
+          )}
           {!isLoadingWorkspace && !workspaceError && activeModule === 'project_detail' && currentProject && (
             <ProjectDetailView
               project={currentProject}
