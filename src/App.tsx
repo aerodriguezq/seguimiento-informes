@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ActiveModule,
   Project,
@@ -26,9 +27,52 @@ import { MasterListsView } from './components/master-lists/MasterListsView';
 import { DriveLinksView } from './components/drive/DriveLinksView';
 import { CheckCircle2, Info, X } from 'lucide-react';
 
+const MODULE_ROUTES: Partial<Record<ActiveModule, string>> = {
+  dashboard: '/dashboard',
+  reports: '/reports',
+  projects: '/projects',
+  alerts: '/alerts',
+  lists: '/lists',
+  drive_links: '/drive-links',
+};
+
+const PATH_TO_MODULE: Partial<Record<string, ActiveModule>> = Object.fromEntries(
+  Object.entries(MODULE_ROUTES).map(([mod, path]) => [path, mod as ActiveModule])
+);
+
 export default function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
   // Global State
-  const [activeModule, setActiveModule] = useState<ActiveModule>('dashboard');
+  const [activeModule, setActiveModule] = useState<ActiveModule>(
+    PATH_TO_MODULE[location.pathname] || 'dashboard'
+  );
+
+  // Keep the URL and the active module in sync: routable modules (sidebar's
+  // primary sections) get a real path; sub-views like new_report/project_detail
+  // stay internal state and don't change the URL.
+  const goToModule = (mod: ActiveModule) => {
+    const path = MODULE_ROUTES[mod];
+    if (path) {
+      navigate(path);
+    } else {
+      setActiveModule(mod);
+    }
+  };
+
+  useEffect(() => {
+    if (location.pathname === '/') {
+      navigate('/dashboard', { replace: true });
+      return;
+    }
+    const matched = PATH_TO_MODULE[location.pathname];
+    if (matched) {
+      setActiveModule(matched);
+    } else {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [location.pathname]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
@@ -128,17 +172,17 @@ export default function App() {
     if (preselectedProjId) {
       setCurrentProjectId(preselectedProjId);
     }
-    setActiveModule('new_report');
+    goToModule('new_report');
   };
 
   const handleViewAllReports = (filterStatus?: ReportStatus | 'vencidos' | 'proximos') => {
     setReportsFilterStatus(filterStatus || 'all');
-    setActiveModule('reports');
+    goToModule('reports');
   };
 
   const handleSelectProjectDetail = (projId: string) => {
     setCurrentProjectId(projId);
-    setActiveModule('project_detail');
+    goToModule('project_detail');
   };
 
   const handleCreateProject = async (projectInput: { name: string; bpin: string; company: string }) => {
@@ -174,7 +218,7 @@ export default function App() {
   // Report creation
   const handleSubmitNewReport = (newReport: Report) => {
     setReports([newReport, ...reports]);
-    setActiveModule('reports');
+    goToModule('reports');
     setSelectedReportId(newReport.id);
     showToast(`Informe ${newReport.consecutive} creado y registrado con éxito.`, 'success');
 
@@ -346,7 +390,7 @@ export default function App() {
       <Sidebar
         activeModule={activeModule}
         onSelectModule={(mod) => {
-          setActiveModule(mod);
+          goToModule(mod);
           if (mod === 'reports') {
             setReportsFilterStatus('all');
           }
@@ -371,7 +415,7 @@ export default function App() {
           onSearchGlobal={(q) => {
             setGlobalSearchQuery(q);
             if (activeModule !== 'reports' && q.trim()) {
-              setActiveModule('reports');
+              goToModule('reports');
             }
           }}
           searchQuery={globalSearchQuery}
@@ -425,7 +469,7 @@ export default function App() {
               reportTypes={reportTypes}
               contacts={contacts}
               preselectedProjectId={currentProjectId}
-              onCancel={() => setActiveModule('reports')}
+              onCancel={() => goToModule('reports')}
               onSubmitReport={handleSubmitNewReport}
             />
           )}
@@ -450,7 +494,7 @@ export default function App() {
               reportTypes={reportTypes}
               alerts={alerts}
               contacts={contacts}
-              onBackToProjects={() => setActiveModule('projects')}
+              onBackToProjects={() => goToModule('projects')}
               onOpenNewReport={handleOpenNewReport}
               onSelectReport={handleNavigateToReport}
               onToggleProjectAutoAlerts={handleToggleProjectAutoAlerts}
