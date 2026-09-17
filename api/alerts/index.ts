@@ -135,7 +135,7 @@ async function handleCronSweep(response: VercelResponse, sql: SqlClient) {
 }
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
-  if (!['GET', 'POST', 'PATCH'].includes(request.method || '')) {
+  if (!['GET', 'POST', 'PATCH', 'DELETE'].includes(request.method || '')) {
     return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
   }
 
@@ -159,12 +159,51 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return response.status(200).json({ data: alerts, meta: { total: alerts.length }, errors: [] });
     }
 
+    if (request.method === 'DELETE') {
+      const alertId = Number(request.query.alertId);
+      if (!Number.isInteger(alertId) || alertId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la alerta es obligatorio.'] });
+      }
+      await sql`DELETE FROM alerta_contacto WHERE alerta_id = ${alertId}`;
+      await sql`DELETE FROM alerta_dia WHERE alerta_id = ${alertId}`;
+      const deleted = await sql`DELETE FROM alertas WHERE alerta_id = ${alertId} RETURNING alerta_id AS id`;
+      if (!deleted[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Alerta no encontrada.'] });
+      return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+    }
+
     if (request.method === 'PATCH') {
-      const { alertId, active } = request.body ?? {};
-      if (!alertId) return response.status(400).json({ data: null, meta: {}, errors: ['Falta alertId.'] });
-      await sql`UPDATE alertas SET activa = ${Boolean(active)}, updated_at = NOW() WHERE alerta_id = ${alertId}`;
-      const [alert] = await fetchAlertsByIds(sql, [Number(alertId)]);
-      if (!alert) return response.status(404).json({ data: null, meta: {}, errors: ['Alerta no encontrada.'] });
+      const body = request.body ?? {};
+      const alertId = Number(body.alertId);
+      if (!Number.isInteger(alertId) || alertId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Falta alertId.'] });
+      }
+
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+      const current = await fetchAlertsByIds(sql, [alertId]);
+      if (!current[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Alerta no encontrada.'] });
+
+      const nextName = has('name') ? body.name : current[0].name;
+      const nextSchedule = has('schedule') ? body.schedule : current[0].schedule;
+      const nextTime = has('time') ? body.time : current[0].time;
+      const nextType = has('type') ? body.type : current[0].type;
+      const nextProjectId = has('projectId') ? (body.projectId || null) : current[0].projectId;
+      const nextActive = has('active') ? Boolean(body.active) : current[0].active;
+
+      await sql`
+        UPDATE alertas
+        SET nombre = ${nextName}, frecuencia = ${nextSchedule}, hora_texto = ${nextTime},
+            tipo = ${nextType}, proyecto_id = ${nextProjectId}, activa = ${nextActive}, updated_at = NOW()
+        WHERE alerta_id = ${alertId}
+      `;
+
+      if (has('recipientIds') && Array.isArray(body.recipientIds)) {
+        await sql`DELETE FROM alerta_contacto WHERE alerta_id = ${alertId}`;
+        for (const contactId of body.recipientIds) {
+          await sql`INSERT INTO alerta_contacto (alerta_id, contacto_id) VALUES (${alertId}, ${contactId})`;
+        }
+      }
+
+      const [alert] = await fetchAlertsByIds(sql, [alertId]);
       return response.status(200).json({ data: alert, meta: {}, errors: [] });
     }
 

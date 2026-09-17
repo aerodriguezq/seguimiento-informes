@@ -468,6 +468,46 @@ export default function App() {
     }
   };
 
+  const handleUpdateAlert = async (
+    alertId: string,
+    draft: {
+      projectId?: string;
+      name: string;
+      schedule: string;
+      time: string;
+      type: ScheduledAlert['type'];
+      recipientIds: string[];
+    }
+  ) => {
+    try {
+      const response = await fetch('/api/alerts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alertId, ...draft }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar la alerta.');
+      setAlerts((prev) => prev.map((a) => (a.id === alertId ? payload.data : a)));
+      showToast(`Regla de alerta "${draft.name}" actualizada.`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible actualizar la alerta.', 'info');
+      throw error;
+    }
+  };
+
+  const handleDeleteAlert = async (alertId: string) => {
+    try {
+      const response = await fetch(`/api/alerts?alertId=${encodeURIComponent(alertId)}`, { method: 'DELETE' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar la alerta.');
+      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+      showToast('Regla de alerta eliminada.', 'info');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible eliminar la alerta.', 'info');
+      throw error;
+    }
+  };
+
   const handleSimulateAlertTrigger = async (alert: ScheduledAlert) => {
     const recipients = alert.recipientIds
       .map((id) => contacts.find((contact) => contact.id === id))
@@ -705,6 +745,8 @@ export default function App() {
               contacts={contacts}
               onToggleAlertActive={handleToggleAlertActive}
               onAddNewAlert={handleAddNewAlert}
+              onUpdateAlert={handleUpdateAlert}
+              onDeleteAlert={handleDeleteAlert}
               onSimulateTrigger={handleSimulateAlertTrigger}
             />
           )}

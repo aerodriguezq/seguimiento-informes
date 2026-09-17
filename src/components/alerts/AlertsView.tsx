@@ -15,6 +15,8 @@ import {
   Building2,
   X,
   Sparkles,
+  Edit2,
+  Trash2,
 } from 'lucide-react';
 
 interface AlertsViewProps {
@@ -30,6 +32,15 @@ interface AlertsViewProps {
     type: ScheduledAlert['type'];
     recipientIds: string[];
   }) => Promise<void>;
+  onUpdateAlert: (alertId: string, draft: {
+    projectId?: string;
+    name: string;
+    schedule: string;
+    time: string;
+    type: ScheduledAlert['type'];
+    recipientIds: string[];
+  }) => Promise<void>;
+  onDeleteAlert: (alertId: string) => Promise<void>;
   onSimulateTrigger: (alert: ScheduledAlert) => Promise<void>;
 }
 
@@ -39,20 +50,57 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
   contacts,
   onToggleAlertActive,
   onAddNewAlert,
+  onUpdateAlert,
+  onDeleteAlert,
   onSimulateTrigger,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [filterProject, setFilterProject] = useState('all');
   const [showModal, setShowModal] = useState(false);
+  const [editingAlertId, setEditingAlertId] = useState<string | null>(null);
 
-  // Form states for new rule
+  // Form states for new/edit rule
   const [name, setName] = useState('');
   const [projectId, setProjectId] = useState(projects[0]?.id || '');
   const [schedule, setSchedule] = useState('5 días antes del vencimiento');
   const [time, setTime] = useState('08:00 AM');
   const [type, setType] = useState<'Preventiva' | 'Vencimiento' | 'Seguimiento' | 'Confirmación'>('Preventiva');
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([contacts[0]?.id || '']);
+
+  const openCreateModal = () => {
+    setEditingAlertId(null);
+    setName('');
+    setProjectId(projects[0]?.id || '');
+    setSchedule('5 días antes del vencimiento');
+    setTime('08:00 AM');
+    setType('Preventiva');
+    setSelectedContactIds([contacts[0]?.id || '']);
+    setShowModal(true);
+  };
+
+  const openEditModal = (alert: ScheduledAlert) => {
+    setEditingAlertId(alert.id);
+    setName(alert.name);
+    setProjectId(alert.projectId || projects[0]?.id || '');
+    setSchedule(alert.schedule);
+    setTime(alert.time);
+    setType(alert.type);
+    setSelectedContactIds(alert.recipientIds);
+    setShowModal(true);
+  };
+
+  const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
+
+  const handleDelete = async (alertId: string) => {
+    if (!window.confirm('¿Eliminar esta regla de alerta? Esta acción no se puede deshacer.')) return;
+    setIsDeletingId(alertId);
+    try {
+      await onDeleteAlert(alertId);
+    } finally {
+      setIsDeletingId(null);
+    }
+  };
 
   const filteredAlerts = alerts.filter((a) => {
     if (searchTerm.trim()) {
@@ -74,16 +122,22 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
 
     setIsCreating(true);
     try {
-      await onAddNewAlert({
+      const draft = {
         projectId,
         name: name.trim(),
         schedule,
         time,
         type,
         recipientIds: selectedContactIds,
-      });
+      };
+      if (editingAlertId) {
+        await onUpdateAlert(editingAlertId, draft);
+      } else {
+        await onAddNewAlert(draft);
+      }
       setShowModal(false);
       setName('');
+      setEditingAlertId(null);
     } catch {
       // El toast de error ya lo muestra App.tsx; dejamos el modal abierto para reintentar.
     } finally {
@@ -107,7 +161,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
         <button
           id="create-alert-rule-btn"
           type="button"
-          onClick={() => setShowModal(true)}
+          onClick={openCreateModal}
           className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-2xs transition-colors cursor-pointer"
         >
           <Plus className="w-4 h-4" />
@@ -239,15 +293,34 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                         </button>
                       </td>
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => onSimulateTrigger(alert)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-md transition-colors"
-                          title="Simular disparo de alerta y enviar notificación"
-                        >
-                          <Play className="w-3 h-3" />
-                          <span>Probar Envío</span>
-                        </button>
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => onSimulateTrigger(alert)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-md transition-colors"
+                            title="Simular disparo de alerta y enviar notificación"
+                          >
+                            <Play className="w-3 h-3" />
+                            <span>Probar Envío</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(alert)}
+                            className="p-1.5 text-slate-400 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+                            title="Editar regla"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(alert.id)}
+                            disabled={isDeletingId === alert.id}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors disabled:opacity-50"
+                            title="Eliminar regla"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -265,11 +338,11 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                 <BellRing className="w-4 h-4 text-indigo-600" />
-                Crear Regla de Alerta Automática
+                {editingAlertId ? 'Editar Regla de Alerta' : 'Crear Regla de Alerta Automática'}
               </h3>
               <button
                 type="button"
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); setEditingAlertId(null); }}
                 className="text-slate-400 hover:text-slate-600"
               >
                 <X className="w-4 h-4" />
@@ -380,7 +453,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
+                  onClick={() => { setShowModal(false); setEditingAlertId(null); }}
                   className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
                 >
                   Cancelar
@@ -390,7 +463,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                   disabled={selectedContactIds.length === 0 || isCreating}
                   className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isCreating ? 'Guardando...' : 'Registrar Regla'}
+                  {isCreating ? 'Guardando...' : editingAlertId ? 'Guardar Cambios' : 'Registrar Regla'}
                 </button>
               </div>
             </form>
