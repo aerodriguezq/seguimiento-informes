@@ -103,8 +103,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
       `;
       const reportId = insertedReports[0].id;
 
+      const [typeRow] = await sql`SELECT codigo FROM tipos_informe WHERE tipo_informe_id = ${typeId}`;
+      const typeCode = typeRow?.codigo || 'INF';
+      const [{ count }] = await sql`
+        SELECT COUNT(*) AS count FROM informes WHERE tipo_informe_id = ${typeId} AND anio = ${year}
+      `;
+      const consecutive = `${typeCode}-${year}-${String(count).padStart(3, '0')}`;
+
       await sql`
-        UPDATE informes SET consecutivo = ${`INF-${year}-${String(reportId).padStart(3, '0')}`}
+        UPDATE informes SET consecutivo = ${consecutive}
         WHERE informe_id = ${reportId}
       `;
 
