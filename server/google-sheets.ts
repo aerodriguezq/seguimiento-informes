@@ -46,6 +46,28 @@ export async function getSheetGridWithBackgrounds(
   );
 }
 
+export type SheetValue = string | number | boolean;
+
+// Lectura simple de valores (sin formato/colores) para las hojas de datos
+// tabulares (Insumos Detalle, Abono, Material Vegetal, etc.) — más liviana
+// que getSheetGridWithBackgrounds, que solo hace falta para el Cronograma.
+// Se pide UNFORMATTED_VALUE (no texto formateado) para que las fechas y
+// números lleguen como los devuelve SpreadsheetApp en Apps Script (números
+// de serie / números planos), evitando parsear formato regional de texto.
+export async function getSheetValues(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetTitle: string,
+  maxRows = 1500,
+): Promise<SheetValue[][]> {
+  const range = `${sheetTitle}!A1:BZ${maxRows}`;
+  const payload = await sheetsRequest<{ values?: SheetValue[][] }>(
+    accessToken,
+    `${spreadsheetId}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE`,
+  );
+  return payload.values || [];
+}
+
 function rgbToHex(color?: { red?: number; green?: number; blue?: number }): string | null {
   if (!color) return '#ffffff';
   const toByte = (v: number | undefined) => Math.round((v ?? 0) * 255).toString(16).padStart(2, '0');

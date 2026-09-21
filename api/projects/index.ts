@@ -1,8 +1,19 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAdminRequest } from '../../server/admin-auth.js';
 import { getGoogleOAuthClient } from '../../server/google-oauth.js';
-import { getSheetTitleByGid, getSheetGridWithBackgrounds } from '../../server/google-sheets.js';
+import { getSheetTitleByGid, getSheetGridWithBackgrounds, getSheetValues } from '../../server/google-sheets.js';
 import { parseCronograma } from '../../server/cronograma-parser.js';
+import {
+  parseReferenciaLineas,
+  parseInsumosDetalle,
+  parseAbono,
+  parseMaterialVegetal,
+  parseEntregaInsumos,
+  parseEntregaEstimada,
+  parseBeneficiariosKpis,
+  type PistaAgg,
+  type Kpi,
+} from '../../server/seguimiento-parsers.js';
 import { getSweepGate, recordSweepRun } from '../../server/sweep-config.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
@@ -19,7 +30,17 @@ async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
   return token.token;
 }
 
-async function fetchCronograma(sql: SqlClient, projectId: number) {
+const SEGUIMIENTO_SHEET_NAMES = {
+  insumosDetalle: 'Insumos Detalle',
+  abono: 'Abono',
+  materialVegetal: 'Material Vegetal',
+  entregaInsumos: 'Entrega Insumos',
+  entregaEstimada: 'Entrega Estimada Manual',
+  referenciaLineas: 'Referencia SubActividad-Linea',
+  beneficiarios: 'Beneficiarios',
+};
+
+async function fetchSeguimiento(sql: SqlClient, projectId: number) {
   const [config] = (await sql`
     SELECT spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid",
       ultima_importacion AS "lastImportAt", ultimo_error AS "lastError"
@@ -33,24 +54,51 @@ async function fetchCronograma(sql: SqlClient, projectId: number) {
     FROM seguimiento_cronograma_filas WHERE proyecto_id = ${projectId} ORDER BY orden ASC
   `) as any[];
 
-  const rowIds = rows.map((r: any) => r.id);
-  const segments = rowIds.length
-    ? ((await sql`
-        SELECT fila_id AS "rowId", TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS start, TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "end", color
-        FROM seguimiento_cronograma_segmentos WHERE fila_id = ANY(${rowIds}) ORDER BY fecha_inicio ASC
-      `) as any[])
-    : [];
+  const referencia = (await sql`
+    SELECT sub_actividad AS "subActividad", linea_productiva AS "lineaProductiva"
+    FROM seguimiento_referencia_lineas WHERE proyecto_id = ${projectId}
+  `) as any[];
+  const lineaBySub: Record<string, string> = {};
+  referencia.forEach((r: any) => { lineaBySub[r.subActividad] = r.lineaProductiva; });
 
-  const days = Array.from(new Set(segments.flatMap((s: any) => [s.start, s.end]))).sort();
+  const pistas = (await sql`
+    SELECT linea_productiva AS "lineaProductiva", pista,
+      TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "fechaInicio", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "fechaFin",
+      cantidad_total AS "cantidadTotal", cantidad_entregada AS "cantidadEntregada",
+      toneladas_total AS "toneladasTotal", hectareas
+    FROM seguimiento_linea_pistas WHERE proyecto_id = ${projectId}
+  `) as any[];
+
+  const proyeccion = (await sql`
+    SELECT sub_actividad AS "subActividad", TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "fechaInicio",
+      TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "fechaFin", dias_entrega AS "diasEntrega",
+      beneficiarios_por_dia AS "beneficiariosPorDia", total_toneladas_kit AS "totalToneladasKit"
+    FROM seguimiento_proyeccion WHERE proyecto_id = ${projectId}
+  `) as any[];
+  const proyeccionBySub: Record<string, any> = {};
+  proyeccion.forEach((p: any) => { proyeccionBySub[p.subActividad] = p; });
+
+  const kpiRows = (await sql`SELECT tipo, total, avance FROM seguimiento_kpis WHERE proyecto_id = ${projectId}`) as any[];
+  const kpis: Record<string, { total: number; avance: number }> = {};
+  kpiRows.forEach((k: any) => { kpis[k.tipo] = { total: k.total, avance: k.avance }; });
 
   return {
     config: config || null,
-    days,
-    rows: rows.map((r: any) => ({ ...r, segments: segments.filter((s: any) => s.rowId === r.id) })),
+    kpis,
+    rows: rows.map((r: any) => {
+      const linea = lineaBySub[r.subActividad] || null;
+      const pistasFila = linea ? pistas.filter((p: any) => p.lineaProductiva === linea) : [];
+      return {
+        ...r,
+        lineaProductiva: linea,
+        pistas: pistasFila,
+        proyeccion: proyeccionBySub[r.subActividad] || null,
+      };
+    }),
   };
 }
 
-async function importCronograma(sql: SqlClient, projectId: number) {
+async function importSeguimiento(sql: SqlClient, projectId: number) {
   const [config] = (await sql`
     SELECT spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid"
     FROM seguimiento_config WHERE proyecto_id = ${projectId}
@@ -61,18 +109,44 @@ async function importCronograma(sql: SqlClient, projectId: number) {
   if (!accessToken) throw new Error('Conecta una cuenta de Google (Fuentes Drive) para poder leer la hoja de cálculo.');
 
   const sheetTitle = await getSheetTitleByGid(accessToken, config.spreadsheetId, config.cronogramaGid);
-  const grid = await getSheetGridWithBackgrounds(accessToken, config.spreadsheetId, sheetTitle);
-  const parsed = parseCronograma(grid);
-
-  if (parsed.rows.length === 0) {
+  const cronogramaGrid = await getSheetGridWithBackgrounds(accessToken, config.spreadsheetId, sheetTitle);
+  const parsedCronograma = parseCronograma(cronogramaGrid);
+  if (parsedCronograma.rows.length === 0) {
     throw new Error(
       `La pestaña "${sheetTitle}" (gid ${config.cronogramaGid}) no tiene la estructura esperada: no se encontró una fila con encabezado "Sub Actividad" ni columnas de día (1-31). Verifica que sea la pestaña correcta del cronograma con "Cambiar hoja".`,
     );
   }
 
+  const referenciaGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.referenciaLineas);
+  const referencia = parseReferenciaLineas(referenciaGrid);
+
+  const insumosGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.insumosDetalle);
+  const { compra, entrega } = parseInsumosDetalle(insumosGrid);
+
+  const abonoGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.abono);
+  const abono = parseAbono(abonoGrid);
+
+  const mvGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.materialVegetal);
+  const materialVegetal = parseMaterialVegetal(mvGrid);
+
+  const entregaInsumosGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.entregaInsumos);
+  const entregaInsumos = parseEntregaInsumos(entregaInsumosGrid);
+
+  const estimadaGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.entregaEstimada);
+  const proyeccion = parseEntregaEstimada(estimadaGrid);
+
+  const beneficiariosGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.beneficiarios);
+  const kpis = parseBeneficiariosKpis(beneficiariosGrid);
+
+  // --- Persistencia: se limpia todo lo del proyecto y se reinserta desde cero. ---
   await sql`DELETE FROM seguimiento_cronograma_filas WHERE proyecto_id = ${projectId}`;
+  await sql`DELETE FROM seguimiento_referencia_lineas WHERE proyecto_id = ${projectId}`;
+  await sql`DELETE FROM seguimiento_linea_pistas WHERE proyecto_id = ${projectId}`;
+  await sql`DELETE FROM seguimiento_proyeccion WHERE proyecto_id = ${projectId}`;
+  await sql`DELETE FROM seguimiento_kpis WHERE proyecto_id = ${projectId}`;
+
   let orden = 0;
-  for (const row of parsed.rows) {
+  for (const row of parsedCronograma.rows) {
     const inserted = await sql`
       INSERT INTO seguimiento_cronograma_filas
         (proyecto_id, orden, sub_actividad, concepto, total_toneladas, toneladas_riego_abono, observaciones, es_resumen)
@@ -89,7 +163,45 @@ async function importCronograma(sql: SqlClient, projectId: number) {
     orden++;
   }
 
-  return { rowsImported: parsed.rows.length, daysDetected: parsed.days.length };
+  for (const [sub, linea] of Object.entries(referencia)) {
+    await sql`
+      INSERT INTO seguimiento_referencia_lineas (proyecto_id, sub_actividad, linea_productiva)
+      VALUES (${projectId}, ${sub}, ${linea})
+    `;
+  }
+
+  const insertPista = async (pista: string, byLinea: Record<string, PistaAgg>) => {
+    for (const [linea, agg] of Object.entries(byLinea)) {
+      await sql`
+        INSERT INTO seguimiento_linea_pistas
+          (proyecto_id, linea_productiva, pista, fecha_inicio, fecha_fin, cantidad_total, cantidad_entregada, toneladas_total, hectareas)
+        VALUES (${projectId}, ${linea}, ${pista}, ${agg.fechaInicio}, ${agg.fechaFin}, ${agg.total}, ${agg.entregado}, ${agg.toneladas}, ${agg.hectareas})
+      `;
+    }
+  };
+  await insertPista('proveeduria_compra', compra);
+  await insertPista('proveeduria_entrega', entrega);
+  await insertPista('entrega_abono', abono);
+  await insertPista('entrega_material_vegetal', materialVegetal);
+  await insertPista('entrega_insumos', entregaInsumos);
+
+  for (const [sub, p] of Object.entries(proyeccion)) {
+    await sql`
+      INSERT INTO seguimiento_proyeccion (proyecto_id, sub_actividad, fecha_inicio, fecha_fin, dias_entrega, beneficiarios_por_dia, total_toneladas_kit)
+      VALUES (${projectId}, ${sub}, ${p.fechaInicio}, ${p.fechaFin}, ${p.diasEntrega}, ${p.beneficiariosPorDia}, ${p.totalToneladasKit})
+    `;
+  }
+
+  const kpiEntries: [string, Kpi][] = [['insumo', kpis.insumo], ['abono', kpis.abono], ['material_vegetal', kpis.materialVegetal]];
+  for (const [tipo, k] of kpiEntries) {
+    await sql`INSERT INTO seguimiento_kpis (proyecto_id, tipo, total, avance) VALUES (${projectId}, ${tipo}, ${k.total}, ${k.avance})`;
+  }
+
+  return {
+    rowsImported: parsedCronograma.rows.length,
+    lineasDetectadas: Object.keys(referencia).length,
+    kpis,
+  };
 }
 
 // Barrido periódico: recorre todos los proyectos que tienen una hoja de
@@ -102,7 +214,7 @@ async function importAllCronogramas(sql: SqlClient) {
   let failed = 0;
   for (const config of configs) {
     try {
-      await importCronograma(sql, config.projectId);
+      await importSeguimiento(sql, config.projectId);
       await sql`UPDATE seguimiento_config SET ultima_importacion = NOW(), ultimo_error = NULL WHERE proyecto_id = ${config.projectId}`;
       imported++;
     } catch (error) {
@@ -163,7 +275,7 @@ export default async function handler(
       if (!Number.isInteger(projectId) || projectId <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
       }
-      const data = await fetchCronograma(sql, projectId);
+      const data = await fetchSeguimiento(sql, projectId);
       return response.status(200).json({ data, meta: {}, errors: [] });
     }
 
@@ -191,11 +303,11 @@ export default async function handler(
       }
 
       try {
-        const result = await importCronograma(sql, projectId);
+        const result = await importSeguimiento(sql, projectId);
         await sql`UPDATE seguimiento_config SET ultima_importacion = NOW(), ultimo_error = NULL WHERE proyecto_id = ${projectId}`;
         return response.status(200).json({ data: result, meta: {}, errors: [] });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'No fue posible importar el cronograma.';
+        const message = error instanceof Error ? error.message : 'No fue posible importar el seguimiento.';
         await sql`UPDATE seguimiento_config SET ultimo_error = ${message} WHERE proyecto_id = ${projectId}`;
         return response.status(502).json({ data: null, meta: {}, errors: [message] });
       }

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { CalendarRange, RefreshCw, AlertTriangle, Settings, Save } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { CalendarRange, RefreshCw, AlertTriangle, Settings, Save, Search } from 'lucide-react';
 
 function extractSheetIds(input: string): { spreadsheetId: string; gid: string } | null {
   const trimmed = input.trim();
@@ -12,38 +12,83 @@ function extractSheetIds(input: string): { spreadsheetId: string; gid: string } 
   return null;
 }
 
-type Segment = { start: string; end: string; color: string };
-type CronogramaRow = {
+type Pista = {
+  lineaProductiva: string;
+  pista: string;
+  fechaInicio: string | null;
+  fechaFin: string | null;
+  cantidadTotal: number;
+  cantidadEntregada: number;
+  toneladasTotal: number | null;
+  hectareas: number | null;
+};
+type Proyeccion = {
+  fechaInicio: string | null;
+  fechaFin: string | null;
+  diasEntrega: number | null;
+  beneficiariosPorDia: number | null;
+  totalToneladasKit: number | null;
+};
+type SeguimientoRow = {
   id: number;
   subActividad: string;
   concepto: string;
   totalToneladas: number | null;
-  toneladasRiegoAbono: number | null;
-  observaciones: string;
   isResumen: boolean;
-  segments: Segment[];
+  lineaProductiva: string | null;
+  pistas: Pista[];
+  proyeccion: Proyeccion | null;
 };
-type CronogramaData = {
+type Kpi = { total: number; avance: number };
+type SeguimientoData = {
   config: { spreadsheetId: string; cronogramaGid: string; lastImportAt: string | null; lastError: string | null } | null;
-  rows: CronogramaRow[];
+  kpis: Record<string, Kpi>;
+  rows: SeguimientoRow[];
 };
 
 type LogEntry = { time: string; message: string; tone: 'info' | 'success' | 'error' };
 
-const MESES_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const KPI_META: { key: string; label: string; color: string; bar: string }[] = [
+  { key: 'insumo', label: 'INSUMO', color: 'text-sky-700', bar: 'bg-sky-500' },
+  { key: 'abono', label: 'ABONO', color: 'text-emerald-700', bar: 'bg-emerald-500' },
+  { key: 'material_vegetal', label: 'MATERIAL VEGETAL', color: 'text-amber-700', bar: 'bg-amber-500' },
+];
+
+const PISTA_META: Record<string, { label: string; color: string }> = {
+  proveeduria_compra: { label: 'Compra', color: '#4338ca' },
+  proveeduria_entrega: { label: 'Entrega', color: '#93c5fd' },
+  entrega_insumos: { label: 'Entrega de Insumos', color: '#f59e0b' },
+  entrega_abono: { label: 'Entrega Abono', color: '#22c55e' },
+  entrega_material_vegetal: { label: 'Entrega Material Vegetal', color: '#fb923c' },
+};
+const PROYECCION_COLOR = '#a855f7';
+
+const FILTERS: { key: string; label: string }[] = [
+  { key: 'proveeduria', label: 'Proveeduría' },
+  { key: 'proyeccion', label: 'Proyección Entrega de Insumos' },
+  { key: 'entrega_insumos', label: 'Entrega de Insumos' },
+  { key: 'entrega_abono', label: 'Entrega Abono' },
+  { key: 'entrega_material_vegetal', label: 'Entrega Material Vegetal' },
+];
 
 function dayIndex(iso: string, minIso: string): number {
   return Math.round((new Date(`${iso}T00:00:00`).getTime() - new Date(`${minIso}T00:00:00`).getTime()) / 86400000);
 }
 
+function fmtTon(v: number | null): string {
+  return v === null ? '' : `${v.toFixed(1)} t`;
+}
+
 export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boolean }> = ({ projectId, isAdmin }) => {
-  const [data, setData] = useState<CronogramaData | null>(null);
+  const [data, setData] = useState<SeguimientoData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [isEditingConfig, setIsEditingConfig] = useState(false);
   const [sheetInput, setSheetInput] = useState('');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
+  const [search, setSearch] = useState('');
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set(FILTERS.map((f) => f.key)));
 
   const pushLog = (message: string, tone: LogEntry['tone']) => {
     const time = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -54,10 +99,10 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
     try {
       const res = await fetch(`/api/projects?seguimiento=cronograma&projectId=${encodeURIComponent(projectId)}`);
       const payload = await res.json();
-      if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible cargar el cronograma.');
+      if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible cargar el seguimiento.');
       setData(payload.data);
     } catch (err) {
-      pushLog(err instanceof Error ? err.message : 'No fue posible cargar el cronograma.', 'error');
+      pushLog(err instanceof Error ? err.message : 'No fue posible cargar el seguimiento.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -70,7 +115,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
 
   const handleImport = async () => {
     setIsImporting(true);
-    pushLog('Leyendo la hoja de cálculo conectada...', 'info');
+    pushLog('Leyendo la hoja de cálculo conectada (Cronograma, Insumos, Abono, Material Vegetal, Beneficiarios...)...', 'info');
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -78,11 +123,11 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
         body: JSON.stringify({ kind: 'importCronograma', projectId: Number(projectId) }),
       });
       const payload = await res.json();
-      if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible importar el cronograma.');
-      pushLog(`Importado: ${payload.data.rowsImported} fila(s), ${payload.data.daysDetected} día(s) detectados.`, 'success');
+      if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible importar el seguimiento.');
+      pushLog(`Importado: ${payload.data.rowsImported} fila(s), ${payload.data.lineasDetectadas} línea(s) productiva(s).`, 'success');
       await fetchData();
     } catch (err) {
-      pushLog(err instanceof Error ? err.message : 'No fue posible importar el cronograma.', 'error');
+      pushLog(err instanceof Error ? err.message : 'No fue posible importar el seguimiento.', 'error');
     } finally {
       setIsImporting(false);
     }
@@ -114,6 +159,22 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
     }
   };
 
+  const toggleFilter = (key: string) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const filteredRows = useMemo(() => {
+    if (!data) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return data.rows;
+    return data.rows.filter((r) => r.subActividad.toLowerCase().includes(q) || r.concepto.toLowerCase().includes(q));
+  }, [data, search]);
+
   if (isLoading) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-6 text-center text-xs text-slate-400">
@@ -132,7 +193,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
             <CalendarRange className="h-4.5 w-4.5" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-slate-900">Cronograma de Entregas (Seguimiento)</h3>
+            <h3 className="text-sm font-bold text-slate-900">Cronograma de Entregas · Consolidado de Insumos</h3>
             <p className="text-[11px] text-slate-500">Este proyecto no tiene una hoja de cálculo vinculada todavía.</p>
           </div>
         </div>
@@ -173,26 +234,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
     );
   }
 
-  const allSegments = data.rows.flatMap((r) => r.segments);
-  const hasTimeline = allSegments.length > 0;
-  const minIso = hasTimeline ? allSegments.reduce((min, s) => (s.start < min ? s.start : min), allSegments[0].start) : '';
-  const maxIso = hasTimeline ? allSegments.reduce((max, s) => (s.end > max ? s.end : max), allSegments[0].end) : '';
-  const totalDays = hasTimeline ? dayIndex(maxIso, minIso) + 1 : 0;
-
-  const monthTicks: { label: string; left: number }[] = [];
-  if (hasTimeline) {
-    let cursor = new Date(`${minIso}T00:00:00`);
-    const end = new Date(`${maxIso}T00:00:00`);
-    cursor.setDate(1);
-    while (cursor <= end) {
-      const iso = cursor.toISOString().slice(0, 10);
-      const idx = dayIndex(iso, minIso);
-      if (idx >= 0) {
-        monthTicks.push({ label: `${MESES_ES[cursor.getMonth()]} ${cursor.getFullYear()}`, left: (idx / totalDays) * 100 });
-      }
-      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
-    }
-  }
+  const hasData = data.rows.length > 0;
 
   return (
     <div id="project-seguimiento-cronograma" className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -202,7 +244,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
             <CalendarRange className="h-4.5 w-4.5" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-slate-900">Cronograma de Entregas (Seguimiento)</h3>
+            <h3 className="text-sm font-bold text-slate-900">Cronograma de Entregas · Consolidado de Insumos</h3>
             <p className="text-[11px] text-slate-500">
               {data.config.lastImportAt
                 ? `Última importación: ${new Date(data.config.lastImportAt).toLocaleString('es-CO')}`
@@ -280,55 +322,171 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
         </div>
       )}
 
-      <div className="p-4">
-        {!hasTimeline ? (
+      {!hasData ? (
+        <div className="p-4">
           <div className="py-8 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
-            Sin datos importados todavía. {isAdmin ? 'Usa "Importar desde Google Sheets" para traer el cronograma.' : ''}
+            Sin datos importados todavía. {isAdmin ? 'Usa "Importar desde Google Sheets" para traer el seguimiento.' : ''}
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <div style={{ minWidth: 760 }}>
-              <div className="relative h-5 ml-56 border-b border-slate-200 mb-1">
-                {monthTicks.map((tick, idx) => (
-                  <span
-                    key={idx}
-                    className="absolute top-0 text-[10px] font-semibold text-slate-400 -translate-x-0"
-                    style={{ left: `${tick.left}%` }}
-                  >
-                    {tick.label}
-                  </span>
-                ))}
-              </div>
-              <div className="space-y-1">
-                {data.rows.map((row) => (
-                  <div key={row.id} className={`flex items-center gap-2 ${row.isResumen ? 'pt-2' : ''}`}>
-                    <div className="w-56 shrink-0 pr-2">
-                      <p className={`text-xs truncate ${row.isResumen ? 'font-bold text-slate-800' : 'text-slate-700'}`} title={row.concepto}>
-                        {row.subActividad ? <span className="font-mono text-[10px] text-slate-400 mr-1">{row.subActividad}</span> : null}
-                        {row.concepto}
-                      </p>
-                    </div>
-                    <div className="relative flex-1 h-5 bg-slate-50 rounded">
-                      {row.segments.map((seg, idx) => {
-                        const left = (dayIndex(seg.start, minIso) / totalDays) * 100;
-                        const width = ((dayIndex(seg.end, minIso) - dayIndex(seg.start, minIso) + 1) / totalDays) * 100;
-                        return (
-                          <div
-                            key={idx}
-                            className="absolute top-0 h-5 rounded"
-                            style={{ left: `${left}%`, width: `${Math.max(width, 0.5)}%`, backgroundColor: seg.color }}
-                            title={`${seg.start} → ${seg.end}`}
-                          />
-                        );
-                      })}
-                    </div>
+        </div>
+      ) : (
+        <>
+          {/* KPI cards */}
+          <div className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {KPI_META.map((meta) => {
+              const kpi = data.kpis[meta.key];
+              if (!kpi || kpi.total === 0) return null;
+              const pct = Math.round((kpi.avance / kpi.total) * 1000) / 10;
+              return (
+                <div key={meta.key} className="rounded-xl border border-slate-200 p-3.5">
+                  <p className={`text-[11px] font-bold tracking-wide ${meta.color}`}>{meta.label}</p>
+                  <p className="text-2xl font-extrabold text-slate-900 mt-1">{pct.toFixed(1)}%</p>
+                  <p className="text-[10.5px] text-slate-500 mb-1.5">Porcentaje de avance general</p>
+                  <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div className={`h-full rounded-full ${meta.bar}`} style={{ width: `${Math.min(pct, 100)}%` }} />
                   </div>
-                ))}
-              </div>
+                  <div className="flex items-center justify-between mt-1.5 text-[10.5px] text-slate-500">
+                    <span>Beneficiarios</span>
+                    <span className="font-semibold text-slate-700">{kpi.avance} / {kpi.total}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Filtros + búsqueda */}
+          <div className="px-4 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            {FILTERS.map((f) => (
+              <label key={f.key} className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={activeFilters.has(f.key)}
+                  onChange={() => toggleFilter(f.key)}
+                  className="rounded text-indigo-600"
+                />
+                {f.label}
+              </label>
+            ))}
+            <div className="relative ml-auto w-full sm:w-56">
+              <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por sub actividad o concepto..."
+                className="w-full pl-7 pr-2 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
+              />
             </div>
           </div>
+
+          <div className="border-t border-slate-100 divide-y divide-slate-100">
+            {filteredRows.map((row) => (
+              <SeguimientoRowCard key={row.id} row={row} activeFilters={activeFilters} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<string> }> = ({ row, activeFilters }) => {
+  type Track = { key: string; label: string; color: string; segments: { start: string; end: string }[]; badge: string };
+
+  const tracks: Track[] = [];
+
+  if (activeFilters.has('proveeduria')) {
+    const compra = row.pistas.find((p) => p.pista === 'proveeduria_compra');
+    const entrega = row.pistas.find((p) => p.pista === 'proveeduria_entrega');
+    if ((compra && compra.fechaInicio) || (entrega && entrega.fechaInicio)) {
+      const segments: Track['segments'] = [];
+      if (compra?.fechaInicio && compra.fechaFin) segments.push({ start: compra.fechaInicio, end: compra.fechaFin });
+      if (entrega?.fechaInicio && entrega.fechaFin) segments.push({ start: entrega.fechaInicio, end: entrega.fechaFin });
+      const total = entrega?.cantidadTotal ?? compra?.cantidadTotal ?? 0;
+      const entregado = entrega?.cantidadEntregada ?? compra?.cantidadEntregada ?? 0;
+      tracks.push({ key: 'proveeduria', label: 'Proveeduría', color: PISTA_META.proveeduria_entrega.color, segments, badge: `${entregado}/${total} insumos` });
+    }
+  }
+
+  if (activeFilters.has('proyeccion') && row.proyeccion?.fechaInicio && row.proyeccion.fechaFin) {
+    const p = row.proyeccion;
+    tracks.push({
+      key: 'proyeccion',
+      label: 'Proyección Entrega de Insumos',
+      color: PROYECCION_COLOR,
+      segments: [{ start: p.fechaInicio as string, end: p.fechaFin as string }],
+      badge: p.beneficiariosPorDia ? `${p.beneficiariosPorDia} benef./día` : '',
+    });
+  }
+
+  (['entrega_insumos', 'entrega_abono', 'entrega_material_vegetal'] as const).forEach((key) => {
+    if (!activeFilters.has(key)) return;
+    const pista = row.pistas.find((p) => p.pista === key);
+    if (!pista || !pista.fechaInicio || !pista.fechaFin) return;
+    const meta = PISTA_META[key];
+    const badgeParts: string[] = [];
+    if (pista.toneladasTotal !== null) badgeParts.push(`${pista.toneladasTotal.toFixed(1)}t`);
+    badgeParts.push(`${pista.cantidadEntregada}/${pista.cantidadTotal}`);
+    tracks.push({ key, label: meta.label, color: meta.color, segments: [{ start: pista.fechaInicio, end: pista.fechaFin }], badge: badgeParts.join(' · ') });
+  });
+
+  const allDates = tracks.flatMap((t) => t.segments.flatMap((s) => [s.start, s.end]));
+  const hasTimeline = allDates.length > 0;
+  const minIso = hasTimeline ? allDates.reduce((min, d) => (d < min ? d : min)) : '';
+  const maxIso = hasTimeline ? allDates.reduce((max, d) => (d > max ? d : max)) : '';
+  const totalDays = hasTimeline ? Math.max(dayIndex(maxIso, minIso) + 1, 1) : 0;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayLeft = hasTimeline && todayIso >= minIso && todayIso <= maxIso ? (dayIndex(todayIso, minIso) / totalDays) * 100 : null;
+
+  return (
+    <div className={`px-4 py-3.5 ${row.isResumen ? 'bg-slate-50' : ''}`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {row.subActividad && (
+            <span className="shrink-0 font-mono text-[10.5px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">{row.subActividad}</span>
+          )}
+          <p className={`text-sm truncate ${row.isResumen ? 'font-bold text-slate-800' : 'text-slate-700'}`} title={row.concepto}>
+            {row.concepto}
+          </p>
+          {row.lineaProductiva && (
+            <span className="shrink-0 text-[10.5px] font-semibold text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded">{row.lineaProductiva}</span>
+          )}
+        </div>
+        {row.totalToneladas !== null && (
+          <span className="shrink-0 text-[11px] text-slate-500">{fmtTon(row.totalToneladas)} riego/abono</span>
         )}
       </div>
+
+      {!hasTimeline ? (
+        <p className="text-[11px] text-slate-400 italic">Sin fechas registradas para esta actividad.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {tracks.map((track) => (
+            <div key={track.key} className="flex items-center gap-2">
+              <div className="w-44 shrink-0">
+                <p className="text-[10.5px] font-semibold text-slate-600 truncate">{track.label}</p>
+                {track.badge && <p className="text-[10px] text-slate-400 truncate">{track.badge}</p>}
+              </div>
+              <div className="relative flex-1 h-4 bg-slate-50 rounded">
+                {track.segments.map((seg, idx) => {
+                  const left = (dayIndex(seg.start, minIso) / totalDays) * 100;
+                  const width = ((dayIndex(seg.end, minIso) - dayIndex(seg.start, minIso) + 1) / totalDays) * 100;
+                  return (
+                    <div
+                      key={idx}
+                      className="absolute top-0 h-4 rounded"
+                      style={{ left: `${left}%`, width: `${Math.max(width, 1)}%`, backgroundColor: track.color, opacity: idx === 0 && track.segments.length > 1 ? 0.85 : 1 }}
+                      title={`${seg.start} → ${seg.end}`}
+                    />
+                  );
+                })}
+                {todayLeft !== null && (
+                  <div className="absolute top-0 bottom-0 w-px bg-rose-500" style={{ left: `${todayLeft}%` }} />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
