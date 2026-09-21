@@ -204,12 +204,24 @@ const LOG_TONE_CLASSES: Record<LogEntry['tone'], string> = {
   error: 'text-rose-600',
 };
 
+// La detección de entregas se mide en minutos (corre cada 30 min); los
+// recordatorios son de ritmo diario, así que se editan en horas.
+const SWEEP_UNITS: Record<string, { label: string; factor: number; min: number; step: number }> = {
+  recordatorios_alertas: { label: 'h', factor: 60, min: 1, step: 1 },
+};
+const DEFAULT_UNIT = { label: 'min', factor: 1, min: 5, step: 5 };
+
+function getSweepUnit(kind: string) {
+  return SWEEP_UNITS[kind] || DEFAULT_UNIT;
+}
+
 const SweepCard: React.FC<{
   sweep: SweepConfig;
   onUpdateSweep: UsersManagementViewProps['onUpdateSweep'];
   onTriggerSweep: UsersManagementViewProps['onTriggerSweep'];
 }> = ({ sweep, onUpdateSweep, onTriggerSweep }) => {
-  const [frequency, setFrequency] = useState(String(sweep.frequencyMinutes));
+  const unit = getSweepUnit(sweep.kind);
+  const [frequency, setFrequency] = useState(String(sweep.frequencyMinutes / unit.factor));
   const [isSavingFreq, setIsSavingFreq] = useState(false);
   const [isTogglingActive, setIsTogglingActive] = useState(false);
   const [isRunningNow, setIsRunningNow] = useState(false);
@@ -221,7 +233,7 @@ const SweepCard: React.FC<{
     setLog((prev) => [{ time, message, tone }, ...prev].slice(0, 6));
   };
 
-  const frequencyDirty = frequency !== String(sweep.frequencyMinutes);
+  const frequencyDirty = frequency !== String(sweep.frequencyMinutes / unit.factor);
 
   const health = !sweep.lastRunAt
     ? { label: 'Sin ejecuciones aún', tone: 'slate', Icon: PauseCircle }
@@ -256,12 +268,13 @@ const SweepCard: React.FC<{
   };
 
   const handleSaveFrequency = async () => {
-    const value = Math.max(5, Number(frequency) || 0);
+    const enteredValue = Math.max(unit.min, Number(frequency) || 0);
+    const minutes = enteredValue * unit.factor;
     setIsSavingFreq(true);
     setError('');
     try {
-      await onUpdateSweep(sweep.kind, { frequencyMinutes: value });
-      setFrequency(String(value));
+      await onUpdateSweep(sweep.kind, { frequencyMinutes: minutes });
+      setFrequency(String(enteredValue));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No fue posible guardar la frecuencia.');
     } finally {
@@ -323,13 +336,13 @@ const SweepCard: React.FC<{
           <input
             id={`sweep-frequency-${sweep.kind}`}
             type="number"
-            min={5}
-            step={5}
+            min={unit.min}
+            step={unit.step}
             value={frequency}
             onChange={(e) => setFrequency(e.target.value)}
             className="w-16 px-2 py-1 border border-slate-200 rounded-lg outline-none focus:border-teal-600 text-center"
           />
-          <span className="text-slate-500">min</span>
+          <span className="text-slate-500">{unit.label}</span>
           {frequencyDirty && (
             <button
               type="button"
