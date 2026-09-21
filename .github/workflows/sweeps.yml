@@ -6,6 +6,8 @@ on:
     - cron: '*/30 * * * *'
     # Recordatorios de alertas pendientes: una vez al dia, 8:00am hora Colombia (13:00 UTC)
     - cron: '0 13 * * *'
+    # Importacion del cronograma de Seguimiento desde Google Sheets: cada hora
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -25,4 +27,13 @@ jobs:
       - name: Envio de recordatorios de alertas vencidas
         run: |
           curl -sf -X GET "https://seguimiento-informes.vercel.app/api/alerts" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+
+  importacion-cronograma:
+    if: github.event.schedule == '0 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reimportar el cronograma de Seguimiento desde Google Sheets
+        run: |
+          curl -sf -X GET "https://seguimiento-informes.vercel.app/api/projects" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

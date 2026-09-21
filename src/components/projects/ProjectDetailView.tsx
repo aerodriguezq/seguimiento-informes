@@ -14,6 +14,7 @@ import {
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
 import { ScheduleFrequencyField } from '../alerts/ScheduleFrequencyField';
+import { SeguimientoCronograma } from './SeguimientoCronograma';
 import {
   ArrowLeft,
   Building2,
@@ -60,6 +61,7 @@ interface ProjectDetailViewProps {
   }) => Promise<void>;
   onViewAllReports: () => void;
   onUpdateProjectVigencia: (projectId: string, startDate: string, endDate: string) => Promise<void>;
+  isAdmin: boolean;
 }
 
 export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
@@ -77,6 +79,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onAddNewAlertRule,
   onViewAllReports,
   onUpdateProjectVigencia,
+  isAdmin,
 }) => {
   const [isEditingVigencia, setIsEditingVigencia] = useState(false);
   const [vigenciaStart, setVigenciaStart] = useState(project.startDate);
@@ -476,6 +479,9 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* 3.5 BLOQUE SEGUIMIENTO (extensión de proyecto: cronograma de entregas importado desde Google Sheets) */}
+      <SeguimientoCronograma projectId={project.id} isAdmin={isAdmin} />
 
       {/* 4. BLOQUE ALERTAS PROGRAMADAS (Sección 7) */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">

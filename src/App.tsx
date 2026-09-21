@@ -823,6 +823,7 @@ export default function App() {
               onToggleAlertRuleActive={handleToggleAlertActive}
               onAddNewAlertRule={handleAddNewAlert}
               onViewAllReports={() => handleViewAllReports()}
+              isAdmin={user.isAdmin}
             />
           )}
 

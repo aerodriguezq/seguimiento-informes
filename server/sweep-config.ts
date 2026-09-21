@@ -1,6 +1,6 @@
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
-export type SweepKind = 'deteccion_entregas' | 'recordatorios_alertas';
+export type SweepKind = 'deteccion_entregas' | 'recordatorios_alertas' | 'importacion_cronograma';
 
 type SweepGate = { run: boolean; reason?: 'disabled' | 'throttled' };
 

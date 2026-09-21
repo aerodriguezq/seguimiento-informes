@@ -193,6 +193,9 @@ function formatSweepResult(kind: string, result: Record<string, unknown> | null)
   if (kind === 'deteccion_entregas') {
     return `${result.checked ?? 0} informe(s) revisados · ${result.advanced ?? 0} avanzado(s).`;
   }
+  if (kind === 'importacion_cronograma') {
+    return `${result.projectsChecked ?? 0} proyecto(s) revisados · ${result.imported ?? 0} importado(s) · ${result.failed ?? 0} con error.`;
+  }
   return `${result.evaluated ?? 0} alerta(s) evaluadas · ${result.sent ?? 0} enviada(s).`;
 }
 
@@ -208,6 +211,7 @@ const LOG_TONE_CLASSES: Record<LogEntry['tone'], string> = {
 // recordatorios son de ritmo diario, así que se editan en horas.
 const SWEEP_UNITS: Record<string, { label: string; factor: number; min: number; step: number }> = {
   recordatorios_alertas: { label: 'h', factor: 60, min: 1, step: 1 },
+  importacion_cronograma: { label: 'h', factor: 60, min: 1, step: 1 },
 };
 const DEFAULT_UNIT = { label: 'min', factor: 1, min: 5, step: 5 };
 

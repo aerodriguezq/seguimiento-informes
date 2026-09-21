@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getGoogleOAuthClient, driveScope, gmailReadScope, gmailSendScope, sessionCookie } from '../../server/google-oauth.js';
+import { getGoogleOAuthClient, driveScope, gmailReadScope, gmailSendScope, sheetsReadScope, sessionCookie } from '../../server/google-oauth.js';
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {
@@ -9,7 +9,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const url = client.generateAuthUrl({
       access_type: 'offline',
       prompt: 'consent',
-      scope: [driveScope, gmailReadScope, gmailSendScope, 'openid', 'email'],
+      scope: [driveScope, gmailReadScope, gmailSendScope, sheetsReadScope, 'openid', 'email'],
       state,
     });
     return response.redirect(302, url);

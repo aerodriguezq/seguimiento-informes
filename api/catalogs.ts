@@ -21,6 +21,7 @@ async function isAdminRequest(request: VercelRequest, sql: any): Promise<boolean
 const SWEEP_LABELS: Record<string, string> = {
   deteccion_entregas: 'Detección de entregas por correo',
   recordatorios_alertas: 'Recordatorios de alertas',
+  importacion_cronograma: 'Importación de cronograma (Seguimiento)',
 };
 
 async function fetchSweepConfig(sql: any) {
@@ -38,7 +39,11 @@ async function fetchSweepConfig(sql: any) {
 async function triggerSweep(kind: string) {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) throw new Error('CRON_SECRET no está configurado en el servidor.');
-  const path = kind === 'deteccion_entregas' ? '/api/reports' : kind === 'recordatorios_alertas' ? '/api/alerts' : null;
+  const path =
+    kind === 'deteccion_entregas' ? '/api/reports'
+    : kind === 'recordatorios_alertas' ? '/api/alerts'
+    : kind === 'importacion_cronograma' ? '/api/projects'
+    : null;
   if (!path) throw new Error('Barrido no reconocido.');
 
   const baseUrl = (process.env.APP_URL || 'https://seguimiento-informes.vercel.app').replace(/\/$/, '');
