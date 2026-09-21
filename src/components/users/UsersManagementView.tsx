@@ -28,7 +28,7 @@ interface UsersManagementViewProps {
   onRemoveUser: (email: string) => Promise<void>;
   sweeps: SweepConfig[];
   onUpdateSweep: (kind: string, updates: { active?: boolean; frequencyMinutes?: number }) => Promise<void>;
-  onTriggerSweep: (kind: string) => Promise<void>;
+  onTriggerSweep: (kind: string) => Promise<Record<string, unknown>>;
 }
 
 const MODULES: { key: PermissionModule; label: string }[] = [
@@ -196,6 +196,14 @@ function formatSweepResult(kind: string, result: Record<string, unknown> | null)
   return `${result.evaluated ?? 0} alerta(s) evaluadas · ${result.sent ?? 0} enviada(s).`;
 }
 
+type LogEntry = { time: string; message: string; tone: 'info' | 'success' | 'error' };
+
+const LOG_TONE_CLASSES: Record<LogEntry['tone'], string> = {
+  info: 'text-slate-500',
+  success: 'text-emerald-700',
+  error: 'text-rose-600',
+};
+
 const SweepCard: React.FC<{
   sweep: SweepConfig;
   onUpdateSweep: UsersManagementViewProps['onUpdateSweep'];
@@ -206,6 +214,12 @@ const SweepCard: React.FC<{
   const [isTogglingActive, setIsTogglingActive] = useState(false);
   const [isRunningNow, setIsRunningNow] = useState(false);
   const [error, setError] = useState('');
+  const [log, setLog] = useState<LogEntry[]>([]);
+
+  const pushLog = (message: string, tone: LogEntry['tone']) => {
+    const time = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setLog((prev) => [{ time, message, tone }, ...prev].slice(0, 6));
+  };
 
   const frequencyDirty = frequency !== String(sweep.frequencyMinutes);
 
@@ -258,10 +272,14 @@ const SweepCard: React.FC<{
   const handleRunNow = async () => {
     setIsRunningNow(true);
     setError('');
+    pushLog('Enviando solicitud al servidor...', 'info');
     try {
-      await onTriggerSweep(sweep.kind);
+      const result = await onTriggerSweep(sweep.kind);
+      pushLog(formatSweepResult(sweep.kind, result), 'success');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No fue posible lanzar el barrido.');
+      const message = err instanceof Error ? err.message : 'No fue posible lanzar el barrido.';
+      setError(message);
+      pushLog(message, 'error');
     } finally {
       setIsRunningNow(false);
     }
@@ -339,10 +357,22 @@ const SweepCard: React.FC<{
       <div className="border-t border-slate-100 pt-2.5 text-[11px] text-slate-500">
         <p>
           {sweep.lastRunAt
-            ? `Última ejecución: ${new Date(sweep.lastRunAt).toLocaleString('es-CO')}`
+            ? `Última ejecución registrada: ${new Date(sweep.lastRunAt).toLocaleString('es-CO')}`
             : 'Aún no se ha ejecutado.'}
         </p>
         <p className="mt-0.5">{formatSweepResult(sweep.kind, sweep.lastRunResult)}</p>
+      </div>
+
+      <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 space-y-1 font-mono text-[10.5px] max-h-28 overflow-y-auto">
+        {log.length === 0 ? (
+          <p className="text-slate-400">Sin actividad reciente. Usa "Ejecutar ahora" para ver el progreso aquí.</p>
+        ) : (
+          log.map((entry, idx) => (
+            <p key={idx} className={LOG_TONE_CLASSES[entry.tone]}>
+              <span className="text-slate-400">[{entry.time}]</span> {entry.message}
+            </p>
+          ))
+        )}
       </div>
 
       {error && <p className="text-xs font-semibold text-rose-600">{error}</p>}

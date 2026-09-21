@@ -669,18 +669,24 @@ export default function App() {
     showToast(`"${payload.data.label}" actualizado.`, 'success');
   };
 
-  const handleTriggerSweep = async (kind: string) => {
+  const handleTriggerSweep = async (kind: string): Promise<Record<string, unknown>> => {
     const response = await fetch('/api/catalogs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ kind: 'triggerSweep', data: { sweepKind: kind } }),
     });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible lanzar el barrido.');
+    let payload: any = null;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new Error(`El servidor respondió con estado ${response.status} sin un cuerpo válido (posible timeout).`);
+    }
+    if (!response.ok) throw new Error(payload?.errors?.[0] || `El barrido falló (estado ${response.status}).`);
     if (payload.data.config) {
       setSweeps((prev) => prev.map((s) => (s.kind === kind ? payload.data.config : s)));
     }
     showToast('Barrido ejecutado manualmente.', 'success');
+    return payload.data.result || {};
   };
 
   const activeReportForModal = reports.find((r) => r.id === selectedReportId);
