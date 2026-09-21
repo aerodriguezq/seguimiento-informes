@@ -15,6 +15,7 @@ import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
 import { ScheduleFrequencyField } from '../alerts/ScheduleFrequencyField';
 import { SeguimientoCronograma } from './SeguimientoCronograma';
+import { ErrorBoundary } from '../common/ErrorBoundary';
 import {
   ArrowLeft,
   Building2,
@@ -481,7 +482,9 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       </div>
 
       {/* 3.5 BLOQUE SEGUIMIENTO (extensión de proyecto: cronograma de entregas importado desde Google Sheets) */}
-      <SeguimientoCronograma projectId={project.id} isAdmin={isAdmin} />
+      <ErrorBoundary fallbackLabel="No fue posible mostrar el Seguimiento de este proyecto.">
+        <SeguimientoCronograma projectId={project.id} isAdmin={isAdmin} />
+      </ErrorBoundary>
 
       {/* 4. BLOQUE ALERTAS PROGRAMADAS (Sección 7) */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">

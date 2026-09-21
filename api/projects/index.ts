@@ -40,6 +40,15 @@ const SEGUIMIENTO_SHEET_NAMES = {
   beneficiarios: 'Beneficiarios',
 };
 
+// El driver de Neon devuelve columnas NUMERIC como texto (para no perder
+// precisión), no como number — hay que convertirlas explícitamente o
+// romperán cualquier .toFixed()/aritmética del lado del cliente.
+function toNumOrNull(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 async function fetchSeguimiento(sql: SqlClient, projectId: number) {
   const [config] = (await sql`
     SELECT spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid",
@@ -61,26 +70,37 @@ async function fetchSeguimiento(sql: SqlClient, projectId: number) {
   const lineaBySub: Record<string, string> = {};
   referencia.forEach((r: any) => { lineaBySub[r.subActividad] = r.lineaProductiva; });
 
-  const pistas = (await sql`
+  const pistas = ((await sql`
     SELECT linea_productiva AS "lineaProductiva", pista,
       TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "fechaInicio", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "fechaFin",
       cantidad_total AS "cantidadTotal", cantidad_entregada AS "cantidadEntregada",
       toneladas_total AS "toneladasTotal", hectareas
     FROM seguimiento_linea_pistas WHERE proyecto_id = ${projectId}
-  `) as any[];
+  `) as any[]).map((p: any) => ({
+    ...p,
+    cantidadTotal: toNumOrNull(p.cantidadTotal) ?? 0,
+    cantidadEntregada: toNumOrNull(p.cantidadEntregada) ?? 0,
+    toneladasTotal: toNumOrNull(p.toneladasTotal),
+    hectareas: toNumOrNull(p.hectareas),
+  }));
 
-  const proyeccion = (await sql`
+  const proyeccion = ((await sql`
     SELECT sub_actividad AS "subActividad", TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "fechaInicio",
       TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "fechaFin", dias_entrega AS "diasEntrega",
       beneficiarios_por_dia AS "beneficiariosPorDia", total_toneladas_kit AS "totalToneladasKit"
     FROM seguimiento_proyeccion WHERE proyecto_id = ${projectId}
-  `) as any[];
+  `) as any[]).map((p: any) => ({
+    ...p,
+    diasEntrega: toNumOrNull(p.diasEntrega),
+    beneficiariosPorDia: toNumOrNull(p.beneficiariosPorDia),
+    totalToneladasKit: toNumOrNull(p.totalToneladasKit),
+  }));
   const proyeccionBySub: Record<string, any> = {};
   proyeccion.forEach((p: any) => { proyeccionBySub[p.subActividad] = p; });
 
   const kpiRows = (await sql`SELECT tipo, total, avance FROM seguimiento_kpis WHERE proyecto_id = ${projectId}`) as any[];
   const kpis: Record<string, { total: number; avance: number }> = {};
-  kpiRows.forEach((k: any) => { kpis[k.tipo] = { total: k.total, avance: k.avance }; });
+  kpiRows.forEach((k: any) => { kpis[k.tipo] = { total: toNumOrNull(k.total) ?? 0, avance: toNumOrNull(k.avance) ?? 0 }; });
 
   return {
     config: config || null,
@@ -90,6 +110,8 @@ async function fetchSeguimiento(sql: SqlClient, projectId: number) {
       const pistasFila = linea ? pistas.filter((p: any) => p.lineaProductiva === linea) : [];
       return {
         ...r,
+        totalToneladas: toNumOrNull(r.totalToneladas),
+        toneladasRiegoAbono: toNumOrNull(r.toneladasRiegoAbono),
         lineaProductiva: linea,
         pistas: pistasFila,
         proyeccion: proyeccionBySub[r.subActividad] || null,

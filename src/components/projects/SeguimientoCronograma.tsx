@@ -76,7 +76,8 @@ function dayIndex(iso: string, minIso: string): number {
 }
 
 function fmtTon(v: number | null): string {
-  return v === null ? '' : `${v.toFixed(1)} t`;
+  const n = Number(v);
+  return v === null || !Number.isFinite(n) ? '' : `${n.toFixed(1)} t`;
 }
 
 export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boolean }> = ({ projectId, isAdmin }) => {
@@ -334,8 +335,10 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
           <div className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
             {KPI_META.map((meta) => {
               const kpi = data.kpis[meta.key];
-              if (!kpi || kpi.total === 0) return null;
-              const pct = Math.round((kpi.avance / kpi.total) * 1000) / 10;
+              const kpiTotal = Number(kpi?.total);
+              const kpiAvance = Number(kpi?.avance);
+              if (!kpi || !Number.isFinite(kpiTotal) || kpiTotal === 0) return null;
+              const pct = Math.round((kpiAvance / kpiTotal) * 1000) / 10;
               return (
                 <div key={meta.key} className="rounded-xl border border-slate-200 p-3.5">
                   <p className={`text-[11px] font-bold tracking-wide ${meta.color}`}>{meta.label}</p>
@@ -424,7 +427,8 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
     if (!pista || !pista.fechaInicio || !pista.fechaFin) return;
     const meta = PISTA_META[key];
     const badgeParts: string[] = [];
-    if (pista.toneladasTotal !== null) badgeParts.push(`${pista.toneladasTotal.toFixed(1)}t`);
+    const toneladas = Number(pista.toneladasTotal);
+    if (pista.toneladasTotal !== null && Number.isFinite(toneladas)) badgeParts.push(`${toneladas.toFixed(1)}t`);
     badgeParts.push(`${pista.cantidadEntregada}/${pista.cantidadTotal}`);
     tracks.push({ key, label: meta.label, color: meta.color, segments: [{ start: pista.fechaInicio, end: pista.fechaFin }], badge: badgeParts.join(' · ') });
   });
