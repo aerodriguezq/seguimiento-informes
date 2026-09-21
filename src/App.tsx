@@ -26,7 +26,7 @@ import { ProjectDetailView } from './components/projects/ProjectDetailView';
 import { AlertsView } from './components/alerts/AlertsView';
 import { MasterListsView } from './components/master-lists/MasterListsView';
 import { DriveLinksView } from './components/drive/DriveLinksView';
-import { UsersManagementView, AuthorizedUser } from './components/users/UsersManagementView';
+import { UsersManagementView, AuthorizedUser, SweepConfig } from './components/users/UsersManagementView';
 import { useAuth } from './auth/AuthContext';
 import { CheckCircle2, Info, X } from 'lucide-react';
 
@@ -107,6 +107,7 @@ export default function App() {
   const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
   const [reportTypeSteps, setReportTypeSteps] = useState<ReportTypeStep[]>([]);
   const [authorizedUsers, setAuthorizedUsers] = useState<AuthorizedUser[]>([]);
+  const [sweeps, setSweeps] = useState<SweepConfig[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
@@ -206,6 +207,7 @@ export default function App() {
         setReportTypes(catalogsPayload.data.reportTypes);
         setReportTypeSteps(catalogsPayload.data.reportTypeSteps || []);
         setAuthorizedUsers(catalogsPayload.data.authorizedUsers || []);
+        setSweeps(catalogsPayload.data.sweeps || []);
         setContacts(catalogsPayload.data.contacts);
         setReports(loadedReports);
         setAlerts(loadedAlerts);
@@ -655,6 +657,32 @@ export default function App() {
     showToast(`Usuario "${email}" actualizado.`, 'success');
   };
 
+  const handleUpdateSweep = async (kind: string, updates: { active?: boolean; frequencyMinutes?: number }) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'sweepConfig', sweepKind: kind, ...updates }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el barrido.');
+    setSweeps((prev) => prev.map((s) => (s.kind === kind ? payload.data : s)));
+    showToast(`"${payload.data.label}" actualizado.`, 'success');
+  };
+
+  const handleTriggerSweep = async (kind: string) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'triggerSweep', data: { sweepKind: kind } }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible lanzar el barrido.');
+    if (payload.data.config) {
+      setSweeps((prev) => prev.map((s) => (s.kind === kind ? payload.data.config : s)));
+    }
+    showToast('Barrido ejecutado manualmente.', 'success');
+  };
+
   const activeReportForModal = reports.find((r) => r.id === selectedReportId);
 
   return (
@@ -829,6 +857,9 @@ export default function App() {
               onAddUser={handleAddAuthorizedUser}
               onUpdateUser={handleUpdateAuthorizedUser}
               onRemoveUser={handleRemoveAuthorizedUser}
+              sweeps={sweeps}
+              onUpdateSweep={handleUpdateSweep}
+              onTriggerSweep={handleTriggerSweep}
             />
           )}
         </main>

@@ -18,6 +18,38 @@ async function isAdminRequest(request: VercelRequest, sql: any): Promise<boolean
   return Boolean(row?.isAdmin);
 }
 
+const SWEEP_LABELS: Record<string, string> = {
+  deteccion_entregas: 'Detección de entregas por correo',
+  recordatorios_alertas: 'Recordatorios de alertas',
+};
+
+async function fetchSweepConfig(sql: any) {
+  const rows = (await sql`
+    SELECT kind, activo AS active, frecuencia_minutos AS "frequencyMinutes",
+      ultima_ejecucion AS "lastRunAt", ultimo_exito AS "lastRunSuccess", ultimo_resultado AS "lastRunResult"
+    FROM barrido_config ORDER BY kind ASC
+  `) as any[];
+  return rows.map((row) => ({ ...row, label: SWEEP_LABELS[row.kind] || row.kind }));
+}
+
+// Ejecuta el barrido ya mismo llamando al propio endpoint (reports.ts o
+// alerts/index.ts) con el mismo secreto que usa el cron, pero forzando la
+// ejecución sin importar el throttle configurado.
+async function triggerSweep(kind: string) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) throw new Error('CRON_SECRET no está configurado en el servidor.');
+  const path = kind === 'deteccion_entregas' ? '/api/reports' : kind === 'recordatorios_alertas' ? '/api/alerts' : null;
+  if (!path) throw new Error('Barrido no reconocido.');
+
+  const baseUrl = (process.env.APP_URL || 'https://seguimiento-informes.vercel.app').replace(/\/$/, '');
+  const res = await fetch(`${baseUrl}${path}?force=true`, {
+    headers: { Authorization: `Bearer ${cronSecret}` },
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.errors?.[0] || `El barrido respondió con estado ${res.status}.`);
+  return body?.data;
+}
+
 export default async function handler(
   request: VercelRequest,
   response: VercelResponse,
@@ -61,6 +93,7 @@ export default async function handler(
       const authorizedUsers = isAdmin
         ? await sql`SELECT email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions FROM usuarios_autorizados ORDER BY created_at ASC`
         : [];
+      const sweeps = isAdmin ? await fetchSweepConfig(sql) : [];
       const [reportTypes, contacts, steps, stepContacts] = await Promise.all([
         sql`
           SELECT tipo_informe_id AS id, COALESCE(codigo, '') AS code, nombre AS name,
@@ -89,11 +122,37 @@ export default async function handler(
         contactIds: (stepContacts as any[]).filter((sc) => sc.stepId === step.id).map((sc) => String(sc.contactId)),
       }));
 
-      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, isAdmin }, meta: {}, errors: [] });
+      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, isAdmin }, meta: {}, errors: [] });
     }
 
     if (request.method === 'PATCH') {
       const body = request.body ?? {};
+
+      if (body.kind === 'sweepConfig') {
+        if (!(await isAdminRequest(request, sql))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede configurar los barridos.'] });
+        }
+        const sweepKind = String(body.sweepKind ?? '');
+        if (!SWEEP_LABELS[sweepKind]) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['Barrido no reconocido.'] });
+        }
+        const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+        const current = await sql`SELECT * FROM barrido_config WHERE kind = ${sweepKind}`;
+        if (!current[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Barrido no encontrado.'] });
+
+        const nextActive = has('active') ? Boolean(body.active) : current[0].activo;
+        const nextFrequency = has('frequencyMinutes') ? Math.max(5, Number(body.frequencyMinutes) || 0) : current[0].frecuencia_minutos;
+
+        const rows = await sql`
+          UPDATE barrido_config
+          SET activo = ${nextActive}, frecuencia_minutos = ${nextFrequency}, updated_at = NOW()
+          WHERE kind = ${sweepKind}
+          RETURNING kind, activo AS active, frecuencia_minutos AS "frequencyMinutes",
+            ultima_ejecucion AS "lastRunAt", ultimo_exito AS "lastRunSuccess", ultimo_resultado AS "lastRunResult"
+        `;
+        return response.status(200).json({ data: { ...rows[0], label: SWEEP_LABELS[sweepKind] }, meta: {}, errors: [] });
+      }
+
       if (body.kind !== 'authorizedUser') {
         return response.status(400).json({ data: null, meta: {}, errors: ['Catálogo no soportado.'] });
       }
@@ -123,6 +182,24 @@ export default async function handler(
     }
 
     const { kind, data } = request.body ?? {};
+
+    if (kind === 'triggerSweep') {
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede lanzar un barrido manual.'] });
+      }
+      const sweepKind = String(data?.sweepKind ?? '');
+      if (!SWEEP_LABELS[sweepKind]) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Barrido no reconocido.'] });
+      }
+      try {
+        const result = await triggerSweep(sweepKind);
+        const [config] = await fetchSweepConfig(sql).then((rows) => rows.filter((r) => r.kind === sweepKind));
+        return response.status(200).json({ data: { result, config }, meta: {}, errors: [] });
+      } catch (error) {
+        return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible lanzar el barrido.'] });
+      }
+    }
+
     if (kind === 'reportType') {
       if (!data?.code || !data?.name || !data?.periodicity) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Código, nombre y periodicidad son obligatorios.'] });

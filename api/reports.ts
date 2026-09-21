@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../server/google-drive.js';
 import { findDeliveryEmail } from '../server/google-gmail.js';
+import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -281,12 +282,12 @@ async function advanceReportStep(sql: SqlClient, reportId: number): Promise<void
 // Fase D: revisa cada informe con un paso pendiente y busca en la cuenta de
 // Google conectada un correo entrante con el asunto esperado de ese paso,
 // de alguno de sus contactos responsables. Si aparece, avanza el flujo.
-async function runDeliveryDetectionSweep(response: VercelResponse, sql: SqlClient) {
+async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: number; advanced: number; skipped?: string }> {
   const session = await sql`
     SELECT session_id, token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
   `;
   if (!session[0]) {
-    return response.status(200).json({ data: { checked: 0, advanced: 0, skipped: 'no-connected-google-account' }, meta: {}, errors: [] });
+    return { checked: 0, advanced: 0, skipped: 'no-connected-google-account' };
   }
 
   let accessToken: string;
@@ -294,7 +295,7 @@ async function runDeliveryDetectionSweep(response: VercelResponse, sql: SqlClien
     accessToken = await getDriveAccessToken(session[0].token_json);
   } catch (error) {
     console.error('Delivery sweep: no fue posible obtener el token de acceso', error);
-    return response.status(200).json({ data: { checked: 0, advanced: 0, skipped: 'token-error' }, meta: {}, errors: [] });
+    return { checked: 0, advanced: 0, skipped: 'token-error' };
   }
 
   const pendingSteps = (await sql`
@@ -340,7 +341,7 @@ async function runDeliveryDetectionSweep(response: VercelResponse, sql: SqlClien
     }
   }
 
-  return response.status(200).json({ data: { checked: pendingSteps.length, advanced }, meta: {}, errors: [] });
+  return { checked: pendingSteps.length, advanced };
 }
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
@@ -359,7 +360,19 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const cronSecret = process.env.CRON_SECRET;
     const isCronRequest = request.method === 'GET' && !!cronSecret && request.headers.authorization === `Bearer ${cronSecret}`;
     if (isCronRequest) {
-      return runDeliveryDetectionSweep(response, sql);
+      const force = request.query.force === 'true' || request.query.force === '1';
+      const gate = await getSweepGate(sql, 'deteccion_entregas', force);
+      if (!gate.run) {
+        return response.status(200).json({ data: { skipped: true, reason: gate.reason }, meta: {}, errors: [] });
+      }
+      try {
+        const result = await runDeliveryDetectionSweep(sql);
+        await recordSweepRun(sql, 'deteccion_entregas', true, result);
+        return response.status(200).json({ data: result, meta: {}, errors: [] });
+      } catch (error) {
+        await recordSweepRun(sql, 'deteccion_entregas', false, { error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
     }
 
     if (request.method === 'GET') {

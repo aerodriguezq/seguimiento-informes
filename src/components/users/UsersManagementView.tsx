@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Plus, Trash2, Save, UserCog, ChevronDown, ChevronRight, ShieldAlert, Users as UsersIcon } from 'lucide-react';
+import { ShieldCheck, Plus, Trash2, Save, UserCog, ChevronDown, ChevronRight, ShieldAlert, Users as UsersIcon, RadioTower, Play, AlertTriangle, CheckCircle2, PauseCircle } from 'lucide-react';
 import type { PermissionModule, PermissionLevel } from '../../auth/AuthContext';
 
 export interface AuthorizedUser {
@@ -10,12 +10,25 @@ export interface AuthorizedUser {
   permissions: Partial<Record<PermissionModule, PermissionLevel>>;
 }
 
+export interface SweepConfig {
+  kind: string;
+  label: string;
+  active: boolean;
+  frequencyMinutes: number;
+  lastRunAt: string | null;
+  lastRunSuccess: boolean | null;
+  lastRunResult: Record<string, unknown> | null;
+}
+
 interface UsersManagementViewProps {
   users: AuthorizedUser[];
   currentUserEmail: string;
   onAddUser: (email: string, name: string) => Promise<void>;
   onUpdateUser: (email: string, updates: Partial<Pick<AuthorizedUser, 'name' | 'active' | 'isAdmin' | 'permissions'>>) => Promise<void>;
   onRemoveUser: (email: string) => Promise<void>;
+  sweeps: SweepConfig[];
+  onUpdateSweep: (kind: string, updates: { active?: boolean; frequencyMinutes?: number }) => Promise<void>;
+  onTriggerSweep: (kind: string) => Promise<void>;
 }
 
 const MODULES: { key: PermissionModule; label: string }[] = [
@@ -173,14 +186,181 @@ const UserRow: React.FC<{
   );
 };
 
+function formatSweepResult(kind: string, result: Record<string, unknown> | null): string {
+  if (!result) return 'Sin datos aún.';
+  if (result.skipped) return `Omitido (${result.skipped}).`;
+  if (result.error) return `Error: ${String(result.error)}`;
+  if (kind === 'deteccion_entregas') {
+    return `${result.checked ?? 0} informe(s) revisados · ${result.advanced ?? 0} avanzado(s).`;
+  }
+  return `${result.evaluated ?? 0} alerta(s) evaluadas · ${result.sent ?? 0} enviada(s).`;
+}
+
+const SweepCard: React.FC<{
+  sweep: SweepConfig;
+  onUpdateSweep: UsersManagementViewProps['onUpdateSweep'];
+  onTriggerSweep: UsersManagementViewProps['onTriggerSweep'];
+}> = ({ sweep, onUpdateSweep, onTriggerSweep }) => {
+  const [frequency, setFrequency] = useState(String(sweep.frequencyMinutes));
+  const [isSavingFreq, setIsSavingFreq] = useState(false);
+  const [isTogglingActive, setIsTogglingActive] = useState(false);
+  const [isRunningNow, setIsRunningNow] = useState(false);
+  const [error, setError] = useState('');
+
+  const frequencyDirty = frequency !== String(sweep.frequencyMinutes);
+
+  const health = !sweep.lastRunAt
+    ? { label: 'Sin ejecuciones aún', tone: 'slate', Icon: PauseCircle }
+    : !sweep.active
+    ? { label: 'Desactivado', tone: 'slate', Icon: PauseCircle }
+    : sweep.lastRunSuccess === false
+    ? { label: 'Con errores', tone: 'rose', Icon: AlertTriangle }
+    : (() => {
+        const elapsedMinutes = (Date.now() - new Date(sweep.lastRunAt as string).getTime()) / 60000;
+        return elapsedMinutes > sweep.frequencyMinutes * 3
+          ? { label: 'Posible interrupción', tone: 'amber', Icon: AlertTriangle }
+          : { label: 'Funcionando', tone: 'emerald', Icon: CheckCircle2 };
+      })();
+
+  const toneClasses: Record<string, string> = {
+    slate: 'bg-slate-100 text-slate-600',
+    rose: 'bg-rose-50 text-rose-700',
+    amber: 'bg-amber-50 text-amber-700',
+    emerald: 'bg-emerald-50 text-emerald-700',
+  };
+
+  const handleToggleActive = async () => {
+    setIsTogglingActive(true);
+    setError('');
+    try {
+      await onUpdateSweep(sweep.kind, { active: !sweep.active });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No fue posible cambiar el estado.');
+    } finally {
+      setIsTogglingActive(false);
+    }
+  };
+
+  const handleSaveFrequency = async () => {
+    const value = Math.max(5, Number(frequency) || 0);
+    setIsSavingFreq(true);
+    setError('');
+    try {
+      await onUpdateSweep(sweep.kind, { frequencyMinutes: value });
+      setFrequency(String(value));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No fue posible guardar la frecuencia.');
+    } finally {
+      setIsSavingFreq(false);
+    }
+  };
+
+  const handleRunNow = async () => {
+    setIsRunningNow(true);
+    setError('');
+    try {
+      await onTriggerSweep(sweep.kind);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No fue posible lanzar el barrido.');
+    } finally {
+      setIsRunningNow(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3.5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700 shrink-0">
+            <RadioTower className="h-4.5 w-4.5" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-slate-900">{sweep.label}</p>
+            <p className="text-[11px] text-slate-500 font-mono">{sweep.kind}</p>
+          </div>
+        </div>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${toneClasses[health.tone]}`}>
+          <health.Icon className="h-3 w-3" />
+          {health.label}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-4 text-xs">
+        <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={sweep.active}
+            onClick={handleToggleActive}
+            disabled={isTogglingActive}
+            className={`relative h-5 w-9 rounded-full transition-colors disabled:opacity-50 ${sweep.active ? 'bg-teal-700' : 'bg-slate-300'}`}
+          >
+            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${sweep.active ? 'translate-x-4' : 'translate-x-0.5'}`} />
+          </button>
+          <span className="font-semibold text-slate-700">{sweep.active ? 'Activo' : 'Desactivado'}</span>
+        </label>
+
+        <div className="flex items-center gap-1.5">
+          <span className="font-semibold text-slate-700">Cada</span>
+          <input
+            id={`sweep-frequency-${sweep.kind}`}
+            type="number"
+            min={5}
+            step={5}
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value)}
+            className="w-16 px-2 py-1 border border-slate-200 rounded-lg outline-none focus:border-teal-600 text-center"
+          />
+          <span className="text-slate-500">min</span>
+          {frequencyDirty && (
+            <button
+              type="button"
+              onClick={handleSaveFrequency}
+              disabled={isSavingFreq}
+              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
+            >
+              <Save className="h-3 w-3" />
+              {isSavingFreq ? 'Guardando...' : 'Guardar'}
+            </button>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={handleRunNow}
+          disabled={isRunningNow}
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-teal-700 border border-teal-200 bg-teal-50 hover:bg-teal-100 rounded-lg disabled:opacity-50"
+        >
+          <Play className="h-3 w-3" />
+          {isRunningNow ? 'Ejecutando...' : 'Ejecutar ahora'}
+        </button>
+      </div>
+
+      <div className="border-t border-slate-100 pt-2.5 text-[11px] text-slate-500">
+        <p>
+          {sweep.lastRunAt
+            ? `Última ejecución: ${new Date(sweep.lastRunAt).toLocaleString('es-CO')}`
+            : 'Aún no se ha ejecutado.'}
+        </p>
+        <p className="mt-0.5">{formatSweepResult(sweep.kind, sweep.lastRunResult)}</p>
+      </div>
+
+      {error && <p className="text-xs font-semibold text-rose-600">{error}</p>}
+    </div>
+  );
+};
+
 export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
   users,
   currentUserEmail,
   onAddUser,
   onUpdateUser,
   onRemoveUser,
+  sweeps,
+  onUpdateSweep,
+  onTriggerSweep,
 }) => {
-  const [activeTab, setActiveTab] = useState<'admins' | 'users'>('users');
+  const [activeTab, setActiveTab] = useState<'admins' | 'users' | 'sweeps'>('users');
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -280,26 +460,53 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
           <ShieldAlert className="w-4 h-4" />
           <span>Administradores ({admins.length})</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('sweeps')}
+          className={`px-4 py-2.5 font-bold border-b-2 transition-colors inline-flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'sweeps' ? 'border-teal-700 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <RadioTower className="w-4 h-4" />
+          <span>Barridos ({sweeps.length})</span>
+        </button>
       </div>
 
-      <div className="space-y-2.5">
-        {visibleUsers.length === 0 ? (
-          <div className="py-8 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
-            No hay usuarios en esta categoría.
-          </div>
-        ) : (
-          visibleUsers.map((u, idx) => (
-            <UserRow
-              key={u.email}
-              user={u}
-              isSelf={u.email === currentUserEmail}
-              defaultOpen={visibleUsers.length === 1 && idx === 0}
-              onUpdateUser={onUpdateUser}
-              onRemoveUser={onRemoveUser}
-            />
-          ))
-        )}
-      </div>
+      {activeTab === 'sweeps' ? (
+        <div className="space-y-2.5">
+          <p className="text-xs text-slate-500 -mt-1">
+            Controla cada cuánto se revisan las entregas por correo y se envían los recordatorios, o lánzalos ya mismo.
+          </p>
+          {sweeps.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+              Sin barridos configurados todavía.
+            </div>
+          ) : (
+            sweeps.map((s) => (
+              <SweepCard key={s.kind} sweep={s} onUpdateSweep={onUpdateSweep} onTriggerSweep={onTriggerSweep} />
+            ))
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {visibleUsers.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+              No hay usuarios en esta categoría.
+            </div>
+          ) : (
+            visibleUsers.map((u, idx) => (
+              <UserRow
+                key={u.email}
+                user={u}
+                isSelf={u.email === currentUserEmail}
+                defaultOpen={visibleUsers.length === 1 && idx === 0}
+                onUpdateUser={onUpdateUser}
+                onRemoveUser={onRemoveUser}
+              />
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 };

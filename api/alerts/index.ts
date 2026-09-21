@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../../server/google-drive.js';
 import { sendEmail, buildAlertEmailHtml } from '../../server/google-gmail.js';
+import { getSweepGate, recordSweepRun } from '../../server/sweep-config.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -118,10 +119,10 @@ async function handleSend(request: VercelRequest, response: VercelResponse, sql:
   }
 }
 
-async function handleCronSweep(response: VercelResponse, sql: SqlClient) {
+async function handleCronSweep(sql: SqlClient): Promise<{ evaluated: number; sent: number; skipped?: string }> {
   const accessToken = await getConnectedAccessToken(sql);
   if (!accessToken) {
-    return response.status(200).json({ data: { evaluated: 0, sent: 0, skipped: 'no-connected-google-account' }, meta: {}, errors: [] });
+    return { evaluated: 0, sent: 0, skipped: 'no-connected-google-account' };
   }
 
   const dueAlerts = (await sql`
@@ -157,7 +158,7 @@ async function handleCronSweep(response: VercelResponse, sql: SqlClient) {
     }
   }
 
-  return response.status(200).json({ data: { evaluated: dueAlerts.length, sent: sentCount }, meta: {}, errors: [] });
+  return { evaluated: dueAlerts.length, sent: sentCount };
 }
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
@@ -176,7 +177,19 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const cronSecret = process.env.CRON_SECRET;
     const isCronRequest = request.method === 'GET' && !!cronSecret && request.headers.authorization === `Bearer ${cronSecret}`;
     if (isCronRequest) {
-      return handleCronSweep(response, sql);
+      const force = request.query.force === 'true' || request.query.force === '1';
+      const gate = await getSweepGate(sql, 'recordatorios_alertas', force);
+      if (!gate.run) {
+        return response.status(200).json({ data: { skipped: true, reason: gate.reason }, meta: {}, errors: [] });
+      }
+      try {
+        const result = await handleCronSweep(sql);
+        await recordSweepRun(sql, 'recordatorios_alertas', true, result);
+        return response.status(200).json({ data: result, meta: {}, errors: [] });
+      } catch (error) {
+        await recordSweepRun(sql, 'recordatorios_alertas', false, { error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
     }
 
     if (request.method === 'GET') {
