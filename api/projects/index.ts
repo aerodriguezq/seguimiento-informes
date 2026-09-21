@@ -64,6 +64,12 @@ async function importCronograma(sql: SqlClient, projectId: number) {
   const grid = await getSheetGridWithBackgrounds(accessToken, config.spreadsheetId, sheetTitle);
   const parsed = parseCronograma(grid);
 
+  if (parsed.rows.length === 0) {
+    throw new Error(
+      `La pestaña "${sheetTitle}" (gid ${config.cronogramaGid}) no tiene la estructura esperada: no se encontró una fila con encabezado "Sub Actividad" ni columnas de día (1-31). Verifica que sea la pestaña correcta del cronograma con "Cambiar hoja".`,
+    );
+  }
+
   await sql`DELETE FROM seguimiento_cronograma_filas WHERE proyecto_id = ${projectId}`;
   let orden = 0;
   for (const row of parsed.rows) {
