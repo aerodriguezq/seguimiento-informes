@@ -129,4 +129,5 @@ export type ActiveModule =
   | 'project_detail'
   | 'alerts'
   | 'lists'
-  | 'drive_links';
+  | 'drive_links'
+  | 'users';

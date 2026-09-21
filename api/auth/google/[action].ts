@@ -59,7 +59,7 @@ async function appStatus(request: VercelRequest, response: VercelResponse) {
 
     const sql = await getSql();
     const [row] = await sql`
-      SELECT u.email, u.nombre AS name, u.es_admin AS "isAdmin"
+      SELECT u.email, u.nombre AS name, u.es_admin AS "isAdmin", u.permisos AS permissions
       FROM app_sesiones s
       JOIN usuarios_autorizados u ON u.email = s.email
       WHERE s.session_id = ${sessionId} AND s.expires_at > NOW() AND u.activo = TRUE

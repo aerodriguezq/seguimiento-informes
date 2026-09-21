@@ -22,7 +22,7 @@ export default async function handler(
   request: VercelRequest,
   response: VercelResponse,
 ) {
-  if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'DELETE') {
+  if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'PATCH' && request.method !== 'DELETE') {
     return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
   }
 
@@ -59,7 +59,7 @@ export default async function handler(
     if (request.method === 'GET') {
       const isAdmin = await isAdminRequest(request, sql);
       const authorizedUsers = isAdmin
-        ? await sql`SELECT email, nombre AS name, es_admin AS "isAdmin", activo AS active FROM usuarios_autorizados ORDER BY created_at ASC`
+        ? await sql`SELECT email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions FROM usuarios_autorizados ORDER BY created_at ASC`
         : [];
       const [reportTypes, contacts, steps, stepContacts] = await Promise.all([
         sql`
@@ -90,6 +90,36 @@ export default async function handler(
       }));
 
       return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, isAdmin }, meta: {}, errors: [] });
+    }
+
+    if (request.method === 'PATCH') {
+      const body = request.body ?? {};
+      if (body.kind !== 'authorizedUser') {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Catálogo no soportado.'] });
+      }
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede editar usuarios autorizados.'] });
+      }
+
+      const email = String(body.email ?? '').trim().toLowerCase();
+      if (!email) return response.status(400).json({ data: null, meta: {}, errors: ['El correo es obligatorio.'] });
+
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+      const current = await sql`SELECT * FROM usuarios_autorizados WHERE email = ${email}`;
+      if (!current[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Usuario no encontrado.'] });
+
+      const nextName = has('name') ? String(body.name ?? '').trim() || null : current[0].nombre;
+      const nextActive = has('active') ? Boolean(body.active) : current[0].activo;
+      const nextIsAdmin = has('isAdmin') ? Boolean(body.isAdmin) : current[0].es_admin;
+      const nextPermissions = has('permissions') ? JSON.stringify(body.permissions ?? {}) : JSON.stringify(current[0].permisos ?? {});
+
+      const rows = await sql`
+        UPDATE usuarios_autorizados
+        SET nombre = ${nextName}, activo = ${nextActive}, es_admin = ${nextIsAdmin}, permisos = ${nextPermissions}::jsonb
+        WHERE email = ${email}
+        RETURNING email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions
+      `;
+      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
     }
 
     const { kind, data } = request.body ?? {};
@@ -190,10 +220,10 @@ export default async function handler(
       }
 
       const rows = await sql`
-        INSERT INTO usuarios_autorizados (email, nombre, es_admin, activo)
-        VALUES (${email}, ${String(data?.name ?? '').trim() || null}, FALSE, TRUE)
+        INSERT INTO usuarios_autorizados (email, nombre, es_admin, activo, permisos)
+        VALUES (${email}, ${String(data?.name ?? '').trim() || null}, FALSE, TRUE, '{}'::jsonb)
         ON CONFLICT (email) DO UPDATE SET activo = TRUE
-        RETURNING email, nombre AS name, es_admin AS "isAdmin", activo AS active
+        RETURNING email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions
       `;
       return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
     }

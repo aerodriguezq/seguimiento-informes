@@ -1,15 +1,21 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { LogIn, ShieldAlert, ShieldCheck } from 'lucide-react';
 
+export type PermissionModule = 'dashboard' | 'reports' | 'projects' | 'alerts' | 'lists' | 'drive_links';
+export type PermissionLevel = 'none' | 'view' | 'edit';
+
 interface AuthUser {
   email: string;
   name: string | null;
   isAdmin: boolean;
+  permissions: Partial<Record<PermissionModule, PermissionLevel>>;
 }
 
 interface AuthContextValue {
   user: AuthUser;
   logout: () => Promise<void>;
+  canView: (module: PermissionModule) => boolean;
+  canEdit: (module: PermissionModule) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -90,5 +96,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   }
 
-  return <AuthContext.Provider value={{ user, logout }}>{children}</AuthContext.Provider>;
+  const levelOf = (module: PermissionModule): PermissionLevel => {
+    if (user.isAdmin) return 'edit';
+    return user.permissions[module] ?? 'edit';
+  };
+  const canView = (module: PermissionModule) => levelOf(module) !== 'none';
+  const canEdit = (module: PermissionModule) => levelOf(module) === 'edit';
+
+  return <AuthContext.Provider value={{ user, logout, canView, canEdit }}>{children}</AuthContext.Provider>;
 };

@@ -26,6 +26,8 @@ import { ProjectDetailView } from './components/projects/ProjectDetailView';
 import { AlertsView } from './components/alerts/AlertsView';
 import { MasterListsView } from './components/master-lists/MasterListsView';
 import { DriveLinksView } from './components/drive/DriveLinksView';
+import { UsersManagementView, AuthorizedUser } from './components/users/UsersManagementView';
+import { useAuth } from './auth/AuthContext';
 import { CheckCircle2, Info, X } from 'lucide-react';
 
 const MODULE_ROUTES: Partial<Record<ActiveModule, string>> = {
@@ -35,6 +37,7 @@ const MODULE_ROUTES: Partial<Record<ActiveModule, string>> = {
   alerts: '/alerts',
   lists: '/lists',
   drive_links: '/drive-links',
+  users: '/usuarios',
 };
 
 const PATH_TO_MODULE: Partial<Record<string, ActiveModule>> = Object.fromEntries(
@@ -60,6 +63,15 @@ function mapAlert(a: any): ScheduledAlert {
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user, canView } = useAuth();
+
+  const canViewModule = (mod: ActiveModule): boolean => {
+    if (mod === 'users') return user.isAdmin;
+    if (mod === 'dashboard' || mod === 'new_report' || mod === 'project_detail') {
+      return mod === 'new_report' ? canView('reports') : mod === 'project_detail' ? canView('projects') : true;
+    }
+    return canView(mod as any);
+  };
 
   // Global State
   const [activeModule, setActiveModule] = useState<ActiveModule>(
@@ -70,6 +82,7 @@ export default function App() {
   // primary sections) get a real path; sub-views like new_report/project_detail
   // stay internal state and don't change the URL.
   const goToModule = (mod: ActiveModule) => {
+    if (!canViewModule(mod)) return;
     setActiveModule(mod);
     const path = MODULE_ROUTES[mod];
     if (path && path !== location.pathname) {
@@ -83,7 +96,7 @@ export default function App() {
       return;
     }
     const matched = PATH_TO_MODULE[location.pathname];
-    if (matched) {
+    if (matched && canViewModule(matched)) {
       setActiveModule(matched);
     } else {
       navigate('/dashboard', { replace: true });
@@ -93,7 +106,7 @@ export default function App() {
   const [reports, setReports] = useState<Report[]>([]);
   const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
   const [reportTypeSteps, setReportTypeSteps] = useState<ReportTypeStep[]>([]);
-  const [authorizedUsers, setAuthorizedUsers] = useState<{ email: string; name: string | null; isAdmin: boolean; active: boolean }[]>([]);
+  const [authorizedUsers, setAuthorizedUsers] = useState<AuthorizedUser[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
@@ -627,6 +640,21 @@ export default function App() {
     }
   };
 
+  const handleUpdateAuthorizedUser = async (
+    email: string,
+    updates: { name?: string; active?: boolean; isAdmin?: boolean; permissions?: Record<string, string> }
+  ) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'authorizedUser', email, ...updates }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el usuario.');
+    setAuthorizedUsers((prev) => prev.map((u) => (u.email === email ? payload.data : u)));
+    showToast(`Usuario "${email}" actualizado.`, 'success');
+  };
+
   const activeReportForModal = reports.find((r) => r.id === selectedReportId);
 
   return (
@@ -788,13 +816,21 @@ export default function App() {
               onAddContact={handleAddContact}
               onAddReportTypeStep={handleAddReportTypeStep}
               onDeleteReportTypeStep={handleDeleteReportTypeStep}
-              authorizedUsers={authorizedUsers}
-              onAddAuthorizedUser={handleAddAuthorizedUser}
-              onRemoveAuthorizedUser={handleRemoveAuthorizedUser}
             />
           )}
 
           {!isLoadingWorkspace && !workspaceError && activeModule === 'drive_links' && <DriveLinksView />}
+
+          {/* M09: Usuarios Autorizados (solo administradores) */}
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'users' && user.isAdmin && (
+            <UsersManagementView
+              users={authorizedUsers}
+              currentUserEmail={user.email}
+              onAddUser={handleAddAuthorizedUser}
+              onUpdateUser={handleUpdateAuthorizedUser}
+              onRemoveUser={handleRemoveAuthorizedUser}
+            />
+          )}
         </main>
       </div>
 

@@ -10,8 +10,10 @@ import {
   ExternalLink,
   ShieldAlert,
   ChevronRight,
+  UserCog,
 } from 'lucide-react';
 import { ActiveModule } from '../../types';
+import { useAuth } from '../../auth/AuthContext';
 
 interface SidebarProps {
   activeModule: ActiveModule;
@@ -28,19 +30,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
   urgentReportsCount,
   activeAlertsCount,
 }) => {
-  const navItems: {
+  const { user, canView } = useAuth();
+
+  const allNavItems: {
     id: ActiveModule;
     label: string;
     icon: React.ElementType;
     badge?: number;
     badgeColor?: string;
     description?: string;
+    visible: boolean;
   }[] = [
     {
       id: 'dashboard',
       label: 'Dashboard',
       icon: LayoutDashboard,
       description: 'Vista ejecutiva de KPIs y cumplimiento',
+      visible: true,
     },
     {
       id: 'reports',
@@ -49,24 +55,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: pendingReportsCount,
       badgeColor: 'bg-amber-100 text-amber-800',
       description: 'Listado, filtros y semáforos',
+      visible: canView('reports'),
     },
     {
       id: 'new_report',
       label: 'Nuevo Informe',
       icon: PlusCircle,
       description: 'Creación guiada por pasos',
+      visible: canView('reports'),
     },
     {
       id: 'projects',
       label: 'Proyectos',
       icon: FolderGit2,
       description: 'Cartera y estados BPIN',
+      visible: canView('projects'),
     },
     {
       id: 'project_detail',
       label: 'Detalle de Proyecto',
       icon: Sliders,
       description: 'Configuración, alertas e informes',
+      visible: canView('projects'),
     },
     {
       id: 'alerts',
@@ -75,20 +85,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: activeAlertsCount,
       badgeColor: 'bg-indigo-100 text-indigo-800',
       description: 'Reglas y programación automática',
+      visible: canView('alerts'),
     },
     {
       id: 'lists',
       label: 'Listas Maestras',
       icon: Database,
       description: 'Catálogos, tipos y contactos',
+      visible: canView('lists'),
     },
     {
       id: 'drive_links',
       label: 'Fuentes Drive',
       icon: ExternalLink,
       description: 'Origen y destino para automatizaciones',
+      visible: canView('drive_links'),
+    },
+    {
+      id: 'users',
+      label: 'Usuarios',
+      icon: UserCog,
+      description: 'Acceso y permisos por módulo',
+      visible: user.isAdmin,
     },
   ];
+
+  const navItems = allNavItems.filter((item) => item.visible);
 
   return (
     <aside

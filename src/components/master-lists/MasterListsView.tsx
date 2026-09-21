@@ -20,15 +20,8 @@ import {
   Bell,
   GitBranch,
   Flag,
-  ShieldCheck,
 } from 'lucide-react';
-
-interface AuthorizedUser {
-  email: string;
-  name: string | null;
-  isAdmin: boolean;
-  active: boolean;
-}
+import { useAuth } from '../../auth/AuthContext';
 
 interface MasterListsViewProps {
   reportTypes: ReportType[];
@@ -38,9 +31,6 @@ interface MasterListsViewProps {
   onAddContact: (contact: Contact) => Promise<void>;
   onAddReportTypeStep: (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[] }) => Promise<void>;
   onDeleteReportTypeStep: (stepId: string) => Promise<void>;
-  authorizedUsers: AuthorizedUser[];
-  onAddAuthorizedUser: (email: string, name: string) => Promise<void>;
-  onRemoveAuthorizedUser: (email: string) => Promise<void>;
 }
 
 export const MasterListsView: React.FC<MasterListsViewProps> = ({
@@ -51,31 +41,9 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   onAddContact,
   onAddReportTypeStep,
   onDeleteReportTypeStep,
-  authorizedUsers,
-  onAddAuthorizedUser,
-  onRemoveAuthorizedUser,
 }) => {
-  const isAdmin = authorizedUsers.length > 0;
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserName, setNewUserName] = useState('');
-  const [userError, setUserError] = useState('');
-  const [isSavingUser, setIsSavingUser] = useState(false);
-
-  const handleAddUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newUserEmail.trim()) return;
-    setIsSavingUser(true);
-    setUserError('');
-    try {
-      await onAddAuthorizedUser(newUserEmail.trim().toLowerCase(), newUserName.trim());
-      setNewUserEmail('');
-      setNewUserName('');
-    } catch (error) {
-      setUserError(error instanceof Error ? error.message : 'No fue posible agregar el usuario.');
-    } finally {
-      setIsSavingUser(false);
-    }
-  };
+  const { canEdit } = useAuth();
+  const canEditLists = canEdit('lists');
 
   const [stepsModalTypeId, setStepsModalTypeId] = useState<string | null>(null);
   const [newStepName, setNewStepName] = useState('');
@@ -84,7 +52,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [newStepContactIds, setNewStepContactIds] = useState<string[]>([]);
   const [stepError, setStepError] = useState('');
   const [isSavingStep, setIsSavingStep] = useState(false);
-  const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'statuses' | 'periods' | 'users'>('types');
+  const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'statuses' | 'periods'>('types');
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -210,7 +178,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
           </p>
         </div>
 
-        {(activeTab === 'types' || activeTab === 'contacts') && (
+        {(activeTab === 'types' || activeTab === 'contacts') && canEditLists && (
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
@@ -277,21 +245,6 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
           <Calendar className="w-4 h-4" />
           <span>Períodos & Vigencias</span>
         </button>
-
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={() => { setActiveTab('users'); setSearchTerm(''); }}
-            className={`px-4 py-2.5 font-bold border-b-2 transition-colors inline-flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-              activeTab === 'users'
-                ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-900'
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4" />
-            <span>Usuarios Autorizados ({authorizedUsers.length})</span>
-          </button>
-        )}
       </div>
 
       {/* Tab: Tipos de Informe */}
@@ -510,90 +463,6 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 ))}
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tab: Usuarios Autorizados */}
-      {activeTab === 'users' && isAdmin && (
-        <div className="space-y-3">
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
-            <h3 className="text-sm font-bold text-slate-900">Acceso a la aplicación</h3>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Solo las cuentas de Google listadas aquí pueden iniciar sesión. Los administradores pueden gestionar esta lista; el resto solo puede usar la app.
-            </p>
-            <form onSubmit={handleAddUser} className="mt-3 flex flex-wrap items-end gap-2 text-xs">
-              <div className="flex-1 min-w-50">
-                <label className="block font-semibold text-slate-700 mb-1">Correo de Gmail</label>
-                <input
-                  type="email"
-                  required
-                  value={newUserEmail}
-                  onChange={(e) => setNewUserEmail(e.target.value)}
-                  placeholder="persona@gmail.com"
-                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                />
-              </div>
-              <div className="flex-1 min-w-40">
-                <label className="block font-semibold text-slate-700 mb-1">Nombre (opcional)</label>
-                <input
-                  type="text"
-                  value={newUserName}
-                  onChange={(e) => setNewUserName(e.target.value)}
-                  placeholder="Nombre completo"
-                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={isSavingUser}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                {isSavingUser ? 'Guardando...' : 'Autorizar'}
-              </button>
-            </form>
-            {userError && <p className="mt-2 text-xs font-semibold text-rose-600">{userError}</p>}
-          </div>
-
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                  <th className="py-2.5 px-4">Correo</th>
-                  <th className="py-2.5 px-4">Nombre</th>
-                  <th className="py-2.5 px-4">Rol</th>
-                  <th className="py-2.5 px-4 text-right">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {authorizedUsers.map((u) => (
-                  <tr key={u.email} className="hover:bg-slate-50">
-                    <td className="py-3 px-4 font-mono text-slate-800">{u.email}</td>
-                    <td className="py-3 px-4 text-slate-700">{u.name || '—'}</td>
-                    <td className="py-3 px-4">
-                      {u.isAdmin ? (
-                        <span className="rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700">Administrador</span>
-                      ) : (
-                        <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">Usuario</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      {!u.isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => onRemoveAuthorizedUser(u.email)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md"
-                          title="Quitar acceso"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         </div>
       )}
@@ -832,14 +701,16 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                         {step.contactIds.map((id) => contacts.find((c) => c.id === id)?.name).filter(Boolean).join(', ') || 'Sin contactos'}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => onDeleteReportTypeStep(step.id)}
-                      className="text-slate-400 hover:text-rose-600 shrink-0"
-                      title="Eliminar paso"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {canEditLists && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteReportTypeStep(step.id)}
+                        className="text-slate-400 hover:text-rose-600 shrink-0"
+                        title="Eliminar paso"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </li>
                 ))}
               </ol>
@@ -851,6 +722,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
               </div>
             )}
 
+            {canEditLists && (
             <form onSubmit={handleSaveStep} className="space-y-2.5 border-t border-slate-100 pt-3 text-xs">
               <p className="font-semibold text-slate-700">Agregar paso {stepsForModalType.length + 1}</p>
               <input
@@ -906,6 +778,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 </button>
               </div>
             </form>
+            )}
           </div>
         </div>
       )}
