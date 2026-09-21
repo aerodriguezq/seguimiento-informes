@@ -1,0 +1,28 @@
+name: Barridos automaticos
+
+on:
+  schedule:
+    # Deteccion de entregas por correo: cada 30 minutos, todo el dia
+    - cron: '*/30 * * * *'
+    # Recordatorios de alertas pendientes: una vez al dia, 8:00am hora Colombia (13:00 UTC)
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+
+jobs:
+  deteccion-entregas:
+    if: github.event.schedule == '*/30 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Barrido de deteccion de entregas (avanza el flujo si llego el correo)
+        run: |
+          curl -sf -X GET "https://seguimiento-informes.vercel.app/api/reports" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+
+  recordatorios-alertas:
+    if: github.event.schedule == '0 13 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Envio de recordatorios de alertas vencidas
+        run: |
+          curl -sf -X GET "https://seguimiento-informes.vercel.app/api/alerts" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
