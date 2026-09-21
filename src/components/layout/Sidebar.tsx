@@ -192,22 +192,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Bottom system status */}
-      <div className="p-4 border-t border-slate-800/80 bg-slate-950/40">
-        <div className="text-[11px] text-slate-400">
-          <div className="flex items-center justify-between">
-            <span>Reglas de alerta:</span>
-            <span className="font-semibold text-emerald-400">Activas (4/6)</span>
-          </div>
-          <div className="flex items-center justify-between mt-1.5">
-            <span>Próxima ejecución:</span>
-            <span className="text-slate-300 font-mono text-[10px]">Mañana 07:30</span>
-          </div>
-          <div className="mt-2.5 pt-2 border-t border-slate-800/60 text-[10px] text-slate-500 text-center">
-            Versión Operacional 2026 • Semáforo Activo
-          </div>
-        </div>
-      </div>
     </aside>
   );
 };
