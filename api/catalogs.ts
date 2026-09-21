@@ -1,5 +1,23 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
+function readCookie(request: VercelRequest, name: string) {
+  const cookies = request.headers.cookie?.split(';').map((c) => c.trim()) ?? [];
+  const entry = cookies.find((c) => c.startsWith(`${name}=`));
+  return entry ? decodeURIComponent(entry.slice(name.length + 1)) : null;
+}
+
+async function isAdminRequest(request: VercelRequest, sql: any): Promise<boolean> {
+  const sessionId = readCookie(request, 'app_session');
+  if (!sessionId) return false;
+  const [row] = await sql`
+    SELECT u.es_admin AS "isAdmin"
+    FROM app_sesiones s
+    JOIN usuarios_autorizados u ON u.email = s.email
+    WHERE s.session_id = ${sessionId} AND s.expires_at > NOW() AND u.activo = TRUE
+  `;
+  return Boolean(row?.isAdmin);
+}
+
 export default async function handler(
   request: VercelRequest,
   response: VercelResponse,
@@ -18,6 +36,17 @@ export default async function handler(
     const sql = neon(databaseUrl);
 
     if (request.method === 'DELETE') {
+      if (request.query.kind === 'authorizedUser') {
+        if (!(await isAdminRequest(request, sql))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede eliminar usuarios autorizados.'] });
+        }
+        const email = typeof request.query.email === 'string' ? request.query.email : '';
+        if (!email) return response.status(400).json({ data: null, meta: {}, errors: ['El correo es obligatorio.'] });
+        const deletedUser = await sql`DELETE FROM usuarios_autorizados WHERE email = ${email} AND es_admin = FALSE RETURNING email`;
+        if (!deletedUser[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Usuario no encontrado o es administrador.'] });
+        return response.status(200).json({ data: deletedUser[0], meta: {}, errors: [] });
+      }
+
       const stepId = Number(request.query.stepId);
       if (!Number.isInteger(stepId) || stepId <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El id del paso es obligatorio.'] });
@@ -28,6 +57,10 @@ export default async function handler(
     }
 
     if (request.method === 'GET') {
+      const isAdmin = await isAdminRequest(request, sql);
+      const authorizedUsers = isAdmin
+        ? await sql`SELECT email, nombre AS name, es_admin AS "isAdmin", activo AS active FROM usuarios_autorizados ORDER BY created_at ASC`
+        : [];
       const [reportTypes, contacts, steps, stepContacts] = await Promise.all([
         sql`
           SELECT tipo_informe_id AS id, COALESCE(codigo, '') AS code, nombre AS name,
@@ -56,7 +89,7 @@ export default async function handler(
         contactIds: (stepContacts as any[]).filter((sc) => sc.stepId === step.id).map((sc) => String(sc.contactId)),
       }));
 
-      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps }, meta: {}, errors: [] });
+      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, isAdmin }, meta: {}, errors: [] });
     }
 
     const { kind, data } = request.body ?? {};
@@ -145,6 +178,24 @@ export default async function handler(
         data: { ...stepRows[0], contactIds: contactIds.map(String) },
         meta: {}, errors: [],
       });
+    }
+
+    if (kind === 'authorizedUser') {
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede agregar usuarios autorizados.'] });
+      }
+      const email = String(data?.email ?? '').trim().toLowerCase();
+      if (!email || !email.includes('@')) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Un correo válido es obligatorio.'] });
+      }
+
+      const rows = await sql`
+        INSERT INTO usuarios_autorizados (email, nombre, es_admin, activo)
+        VALUES (${email}, ${String(data?.name ?? '').trim() || null}, FALSE, TRUE)
+        ON CONFLICT (email) DO UPDATE SET activo = TRUE
+        RETURNING email, nombre AS name, es_admin AS "isAdmin", activo AS active
+      `;
+      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
     }
 
     return response.status(400).json({ data: null, meta: {}, errors: ['Catálogo no soportado.'] });

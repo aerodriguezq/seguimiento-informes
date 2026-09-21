@@ -93,6 +93,7 @@ export default function App() {
   const [reports, setReports] = useState<Report[]>([]);
   const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
   const [reportTypeSteps, setReportTypeSteps] = useState<ReportTypeStep[]>([]);
+  const [authorizedUsers, setAuthorizedUsers] = useState<{ email: string; name: string | null; isAdmin: boolean; active: boolean }[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
@@ -191,6 +192,7 @@ export default function App() {
         setProjects(loadedProjects);
         setReportTypes(catalogsPayload.data.reportTypes);
         setReportTypeSteps(catalogsPayload.data.reportTypeSteps || []);
+        setAuthorizedUsers(catalogsPayload.data.authorizedUsers || []);
         setContacts(catalogsPayload.data.contacts);
         setReports(loadedReports);
         setAlerts(loadedAlerts);
@@ -601,6 +603,30 @@ export default function App() {
     }
   };
 
+  const handleAddAuthorizedUser = async (email: string, name: string) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'authorizedUser', data: { email, name } }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible agregar el usuario.');
+    setAuthorizedUsers((prev) => [...prev.filter((u) => u.email !== payload.data.email), payload.data]);
+    showToast(`Usuario "${email}" autorizado.`, 'success');
+  };
+
+  const handleRemoveAuthorizedUser = async (email: string) => {
+    try {
+      const response = await fetch(`/api/catalogs?kind=authorizedUser&email=${encodeURIComponent(email)}`, { method: 'DELETE' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible quitar el usuario.');
+      setAuthorizedUsers((prev) => prev.filter((u) => u.email !== email));
+      showToast('Usuario removido de la lista autorizada.', 'info');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible quitar el usuario.', 'info');
+    }
+  };
+
   const activeReportForModal = reports.find((r) => r.id === selectedReportId);
 
   return (
@@ -762,6 +788,9 @@ export default function App() {
               onAddContact={handleAddContact}
               onAddReportTypeStep={handleAddReportTypeStep}
               onDeleteReportTypeStep={handleDeleteReportTypeStep}
+              authorizedUsers={authorizedUsers}
+              onAddAuthorizedUser={handleAddAuthorizedUser}
+              onRemoveAuthorizedUser={handleRemoveAuthorizedUser}
             />
           )}
 

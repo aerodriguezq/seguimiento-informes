@@ -14,8 +14,10 @@ import {
   AlertCircle,
   AlertTriangle,
   Info,
+  LogOut,
 } from 'lucide-react';
 import { Project, SystemNotification } from '../../types';
+import { useAuth } from '../../auth/AuthContext';
 
 interface HeaderProps {
   currentProject: Project | null;
@@ -42,6 +44,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSearchGlobal,
   searchQuery,
 }) => {
+  const { user, logout } = useAuth();
   const currentDateLabel = new Intl.DateTimeFormat('es-CO', {
     day: '2-digit',
     month: 'short',
@@ -337,6 +340,25 @@ export const Header: React.FC<HeaderProps> = ({
                 )}
               </div>
             )}
+          </div>
+
+          {/* User badge */}
+          <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
+            <div className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs font-bold flex items-center justify-center">
+              {(user.name || user.email).slice(0, 2).toUpperCase()}
+            </div>
+            <div className="hidden xl:block text-left text-xs">
+              <div className="font-semibold text-slate-800 leading-none">{user.name || user.email}</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">{user.isAdmin ? 'Administrador' : 'Usuario autorizado'}</div>
+            </div>
+            <button
+              type="button"
+              onClick={logout}
+              title="Cerrar sesión"
+              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded-md transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </div>
