@@ -13,8 +13,8 @@ export async function getSweepGate(sql: SqlClient, kind: SweepKind, force: boole
     FROM barrido_config WHERE kind = ${kind}
   `) as any[];
   if (!config) return { run: true };
-  if (!config.activo) return { run: false, reason: 'disabled' };
   if (force) return { run: true };
+  if (!config.activo) return { run: false, reason: 'disabled' };
   if (!config.lastRunAt) return { run: true };
 
   const elapsedMinutes = (Date.now() - new Date(config.lastRunAt).getTime()) / 60000;
