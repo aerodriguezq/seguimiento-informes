@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Plus, Trash2, Save, UserCog } from 'lucide-react';
+import { ShieldCheck, Plus, Trash2, Save, UserCog, ChevronDown, ChevronRight, ShieldAlert, Users as UsersIcon } from 'lucide-react';
 import type { PermissionModule, PermissionLevel } from '../../auth/AuthContext';
 
 export interface AuthorizedUser {
@@ -27,12 +27,16 @@ const MODULES: { key: PermissionModule; label: string }[] = [
   { key: 'drive_links', label: 'Fuentes Drive' },
 ];
 
+const PERMISSION_LABEL: Record<PermissionLevel, string> = { none: 'Sin acceso', view: 'Solo ver', edit: 'Editar' };
+
 const UserRow: React.FC<{
   user: AuthorizedUser;
   isSelf: boolean;
+  defaultOpen: boolean;
   onUpdateUser: UsersManagementViewProps['onUpdateUser'];
   onRemoveUser: UsersManagementViewProps['onRemoveUser'];
-}> = ({ user, isSelf, onUpdateUser, onRemoveUser }) => {
+}> = ({ user, isSelf, defaultOpen, onUpdateUser, onRemoveUser }) => {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
   const [name, setName] = useState(user.name || '');
   const [isAdmin, setIsAdmin] = useState(user.isAdmin);
   const [active, setActive] = useState(user.active);
@@ -70,80 +74,101 @@ const UserRow: React.FC<{
     }
   };
 
+  const summaryPermCount = Object.values(user.permissions || {}).filter((v) => v === 'edit').length;
+
   return (
-    <div className={`rounded-xl border p-4 space-y-3 ${active ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-70'}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="font-mono text-sm font-bold text-slate-900">{user.email}</p>
-          {isSelf && <span className="text-[10px] font-semibold text-teal-700">Esta es tu cuenta</span>}
+    <div className={`rounded-xl border overflow-hidden ${user.active ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-70'}`}>
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="w-full flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-left hover:bg-slate-50/80 transition-colors"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-slate-400 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />}
+          <div className="min-w-0">
+            <p className="font-mono text-xs font-bold text-slate-900 truncate">{user.email}</p>
+            <p className="text-[11px] text-slate-500 truncate">{user.name || 'Sin nombre'}</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
-            <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} disabled={isSelf} className="rounded text-teal-600" />
-            Activo
-          </label>
-          <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
-            <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} disabled={isSelf} className="rounded text-teal-600" />
-            Administrador
-          </label>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isSelf && <span className="rounded bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700">Tú</span>}
+          <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${user.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+            {user.active ? 'Activo' : 'Inactivo'}
+          </span>
+          {!user.isAdmin && <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{summaryPermCount}/{MODULES.length} editables</span>}
         </div>
-      </div>
+      </button>
 
-      <input
-        type="text"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Nombre completo"
-        className="w-full max-w-sm px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
-      />
+      {isOpen && (
+        <div className="border-t border-slate-100 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
+              <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} disabled={isSelf} className="rounded text-teal-600" />
+              Activo
+            </label>
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
+              <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} disabled={isSelf} className="rounded text-teal-600" />
+              Administrador
+            </label>
+          </div>
 
-      {!isAdmin && (
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Permisos por módulo</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {MODULES.map((m) => (
-              <div key={m.key} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs">
-                <span className="text-slate-700">{m.label}</span>
-                <select
-                  value={permissions[m.key] ?? 'edit'}
-                  onChange={(e) => setPermissions((prev) => ({ ...prev, [m.key]: e.target.value as PermissionLevel }))}
-                  className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] outline-none focus:border-teal-600"
-                >
-                  <option value="none">Sin acceso</option>
-                  <option value="view">Solo ver</option>
-                  <option value="edit">Editar</option>
-                </select>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Nombre completo"
+            className="w-full max-w-sm px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
+          />
+
+          {!isAdmin && (
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Permisos por módulo</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {MODULES.map((m) => (
+                  <div key={m.key} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs">
+                    <span className="text-slate-700">{m.label}</span>
+                    <select
+                      value={permissions[m.key] ?? 'edit'}
+                      onChange={(e) => setPermissions((prev) => ({ ...prev, [m.key]: e.target.value as PermissionLevel }))}
+                      className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] outline-none focus:border-teal-600"
+                    >
+                      <option value="none">{PERMISSION_LABEL.none}</option>
+                      <option value="view">{PERMISSION_LABEL.view}</option>
+                      <option value="edit">{PERMISSION_LABEL.edit}</option>
+                    </select>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
+          )}
+          {isAdmin && <p className="text-[11px] text-slate-500 italic">Los administradores tienen acceso total a todos los módulos.</p>}
+
+          {error && <p className="text-xs font-semibold text-rose-600">{error}</p>}
+
+          <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-2.5">
+            {!isSelf && (
+              <button
+                type="button"
+                onClick={handleRemove}
+                disabled={isDeleting}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-lg disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {isDeleting ? 'Quitando...' : 'Quitar acceso'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!isDirty || isSaving}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Save className="h-3.5 w-3.5" />
+              {isSaving ? 'Guardando...' : 'Guardar cambios'}
+            </button>
           </div>
         </div>
       )}
-      {isAdmin && <p className="text-[11px] text-slate-500 italic">Los administradores tienen acceso total a todos los módulos.</p>}
-
-      {error && <p className="text-xs font-semibold text-rose-600">{error}</p>}
-
-      <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-2.5">
-        {!isSelf && (
-          <button
-            type="button"
-            onClick={handleRemove}
-            disabled={isDeleting}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-lg disabled:opacity-50"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            {isDeleting ? 'Quitando...' : 'Quitar acceso'}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={!isDirty || isSaving}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <Save className="h-3.5 w-3.5" />
-          {isSaving ? 'Guardando...' : 'Guardar cambios'}
-        </button>
-      </div>
     </div>
   );
 };
@@ -155,6 +180,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
   onUpdateUser,
   onRemoveUser,
 }) => {
+  const [activeTab, setActiveTab] = useState<'admins' | 'users'>('users');
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -175,6 +201,10 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
       setIsSaving(false);
     }
   };
+
+  const admins = users.filter((u) => u.isAdmin);
+  const regularUsers = users.filter((u) => !u.isAdmin);
+  const visibleUsers = activeTab === 'admins' ? admins : regularUsers;
 
   return (
     <div id="view-users-management" className="space-y-5 max-w-5xl mx-auto">
@@ -229,16 +259,46 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
         {error && <p className="mt-2 text-xs font-semibold text-rose-600">{error}</p>}
       </div>
 
-      <div className="space-y-3">
-        {users.map((u) => (
-          <UserRow
-            key={u.email}
-            user={u}
-            isSelf={u.email === currentUserEmail}
-            onUpdateUser={onUpdateUser}
-            onRemoveUser={onRemoveUser}
-          />
-        ))}
+      <div className="flex items-center gap-2 border-b border-slate-200 text-xs">
+        <button
+          type="button"
+          onClick={() => setActiveTab('users')}
+          className={`px-4 py-2.5 font-bold border-b-2 transition-colors inline-flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'users' ? 'border-teal-700 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <UsersIcon className="w-4 h-4" />
+          <span>Usuarios ({regularUsers.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('admins')}
+          className={`px-4 py-2.5 font-bold border-b-2 transition-colors inline-flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'admins' ? 'border-teal-700 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <ShieldAlert className="w-4 h-4" />
+          <span>Administradores ({admins.length})</span>
+        </button>
+      </div>
+
+      <div className="space-y-2.5">
+        {visibleUsers.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+            No hay usuarios en esta categoría.
+          </div>
+        ) : (
+          visibleUsers.map((u, idx) => (
+            <UserRow
+              key={u.email}
+              user={u}
+              isSelf={u.email === currentUserEmail}
+              defaultOpen={visibleUsers.length === 1 && idx === 0}
+              onUpdateUser={onUpdateUser}
+              onRemoveUser={onRemoveUser}
+            />
+          ))
+        )}
       </div>
     </div>
   );
