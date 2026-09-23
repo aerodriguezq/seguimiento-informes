@@ -24,7 +24,7 @@ interface UsersManagementViewProps {
   users: AuthorizedUser[];
   currentUserEmail: string;
   onAddUser: (email: string, name: string) => Promise<void>;
-  onUpdateUser: (email: string, updates: Partial<Pick<AuthorizedUser, 'name' | 'active' | 'isAdmin' | 'permissions'>>) => Promise<void>;
+  onUpdateUser: (email: string, updates: Partial<Pick<AuthorizedUser, 'name' | 'active' | 'isAdmin' | 'permissions'>> & { newEmail?: string }) => Promise<void>;
   onRemoveUser: (email: string) => Promise<void>;
   sweeps: SweepConfig[];
   onUpdateSweep: (kind: string, updates: { active?: boolean; frequencyMinutes?: number }) => Promise<void>;
@@ -51,6 +51,7 @@ const UserRow: React.FC<{
   onRemoveUser: UsersManagementViewProps['onRemoveUser'];
 }> = ({ user, isSelf, defaultOpen, onUpdateUser, onRemoveUser }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [email, setEmail] = useState(user.email);
   const [name, setName] = useState(user.name || '');
   const [isAdmin, setIsAdmin] = useState(user.isAdmin);
   const [active, setActive] = useState(user.active);
@@ -59,17 +60,22 @@ const UserRow: React.FC<{
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState('');
 
+  const emailChanged = email.trim().toLowerCase() !== user.email;
   const isDirty =
+    emailChanged ||
     name !== (user.name || '') ||
     isAdmin !== user.isAdmin ||
     active !== user.active ||
     JSON.stringify(permissions) !== JSON.stringify(user.permissions || {});
 
   const handleSave = async () => {
+    if (emailChanged && !window.confirm(`¿Cambiar el correo de ${user.email} a ${email.trim().toLowerCase()}? Se cerrará cualquier sesión activa de esa cuenta.`)) {
+      return;
+    }
     setIsSaving(true);
     setError('');
     try {
-      await onUpdateUser(user.email, { name, isAdmin, active, permissions });
+      await onUpdateUser(user.email, { name, isAdmin, active, permissions, ...(emailChanged ? { newEmail: email.trim().toLowerCase() } : {}) });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No fue posible guardar los cambios.');
     } finally {
@@ -126,13 +132,33 @@ const UserRow: React.FC<{
             </label>
           </div>
 
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nombre completo"
-            className="w-full max-w-sm px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
-          />
+          <div className="flex flex-wrap gap-2">
+            <div className="flex-1 min-w-52">
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Correo de Gmail</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={isSelf}
+                placeholder="persona@gmail.com"
+                className="w-full px-2.5 py-1.5 text-xs font-mono border border-slate-200 rounded-lg outline-none focus:border-teal-600 disabled:bg-slate-50 disabled:text-slate-400"
+              />
+            </div>
+            <div className="flex-1 min-w-52">
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Nombre</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Nombre completo"
+                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
+              />
+            </div>
+          </div>
+          {isSelf && <p className="text-[10.5px] text-slate-400 italic">No puedes editar tu propio correo — pídele a otro administrador que lo cambie.</p>}
+          {emailChanged && (
+            <p className="text-[10.5px] text-amber-600">Al guardar, se cerrará cualquier sesión activa de {user.email}.</p>
+          )}
 
           {!isAdmin && (
             <div>

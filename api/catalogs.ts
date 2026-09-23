@@ -177,13 +177,35 @@ export default async function handler(
       const nextIsAdmin = has('isAdmin') ? Boolean(body.isAdmin) : current[0].es_admin;
       const nextPermissions = has('permissions') ? JSON.stringify(body.permissions ?? {}) : JSON.stringify(current[0].permisos ?? {});
 
-      const rows = await sql`
-        UPDATE usuarios_autorizados
-        SET nombre = ${nextName}, activo = ${nextActive}, es_admin = ${nextIsAdmin}, permisos = ${nextPermissions}::jsonb
-        WHERE email = ${email}
-        RETURNING email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions
-      `;
-      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+      let nextEmail = email;
+      if (has('newEmail')) {
+        nextEmail = String(body.newEmail ?? '').trim().toLowerCase();
+        if (!nextEmail || !nextEmail.includes('@')) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El nuevo correo no es válido.'] });
+        }
+        if (nextEmail !== email) {
+          const existing = await sql`SELECT email FROM usuarios_autorizados WHERE email = ${nextEmail}`;
+          if (existing[0]) return response.status(409).json({ data: null, meta: {}, errors: ['Ya existe un usuario autorizado con ese correo.'] });
+          // Cambiar el correo invalida las sesiones activas de esa cuenta: tendrá que
+          // volver a iniciar sesión (con el correo nuevo, si es que ya es el suyo).
+          await sql`DELETE FROM app_sesiones WHERE email = ${email}`;
+        }
+      }
+
+      try {
+        const rows = await sql`
+          UPDATE usuarios_autorizados
+          SET email = ${nextEmail}, nombre = ${nextName}, activo = ${nextActive}, es_admin = ${nextIsAdmin}, permisos = ${nextPermissions}::jsonb
+          WHERE email = ${email}
+          RETURNING email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions
+        `;
+        return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+      } catch (error) {
+        if ((error as { code?: string })?.code === '23505') {
+          return response.status(409).json({ data: null, meta: {}, errors: ['Ya existe un usuario autorizado con ese correo.'] });
+        }
+        throw error;
+      }
     }
 
     const { kind, data } = request.body ?? {};

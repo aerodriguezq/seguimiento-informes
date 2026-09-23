@@ -646,7 +646,7 @@ export default function App() {
 
   const handleUpdateAuthorizedUser = async (
     email: string,
-    updates: { name?: string; active?: boolean; isAdmin?: boolean; permissions?: Record<string, string> }
+    updates: { name?: string; active?: boolean; isAdmin?: boolean; permissions?: Record<string, string>; newEmail?: string }
   ) => {
     const response = await fetch('/api/catalogs', {
       method: 'PATCH',
