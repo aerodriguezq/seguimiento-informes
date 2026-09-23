@@ -80,7 +80,11 @@ function fmtTon(v: number | null): string {
   return v === null || !Number.isFinite(n) ? '' : `${n.toFixed(1)} t`;
 }
 
-export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boolean }> = ({ projectId, isAdmin }) => {
+export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boolean; standalone?: boolean }> = ({
+  projectId,
+  isAdmin,
+  standalone = false,
+}) => {
   const [data, setData] = useState<SeguimientoData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
@@ -110,6 +114,8 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
   };
 
   useEffect(() => {
+    setIsLoading(true);
+    setData(null);
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -184,9 +190,17 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
     );
   }
 
-  // Sin configuración: si no es admin, no hay nada que mostrar; si lo es, ofrece configurarla.
+  // Sin configuración: dentro del Detalle de Proyecto no molestamos a quien no es admin con
+  // nada; en la página dedicada de Seguimiento sí decimos algo, para no dejarla en blanco.
   if (!data?.config) {
-    if (!isAdmin) return null;
+    if (!isAdmin) {
+      if (!standalone) return null;
+      return (
+        <div className="py-10 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+          Este proyecto no tiene un cronograma de Seguimiento configurado todavía.
+        </div>
+      );
+    }
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
         <div className="flex items-center gap-2.5">

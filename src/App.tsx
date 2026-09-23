@@ -23,6 +23,7 @@ import { NewReportWizard } from './components/reports/NewReportWizard';
 import { ReportDetailModal } from './components/reports/ReportDetailModal';
 import { ProjectsListView } from './components/projects/ProjectsListView';
 import { ProjectDetailView } from './components/projects/ProjectDetailView';
+import { SeguimientoModule } from './components/projects/SeguimientoModule';
 import { AlertsView } from './components/alerts/AlertsView';
 import { MasterListsView } from './components/master-lists/MasterListsView';
 import { DriveLinksView } from './components/drive/DriveLinksView';
@@ -37,6 +38,7 @@ const MODULE_ROUTES: Partial<Record<ActiveModule, string>> = {
   alerts: '/alerts',
   lists: '/lists',
   drive_links: '/drive-links',
+  seguimiento: '/seguimiento',
   users: '/usuarios',
 };
 
@@ -855,6 +857,10 @@ export default function App() {
           )}
 
           {!isLoadingWorkspace && !workspaceError && activeModule === 'drive_links' && <DriveLinksView />}
+
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'seguimiento' && (
+            <SeguimientoModule projects={projects} isAdmin={user.isAdmin} />
+          )}
 
           {/* M09: Usuarios Autorizados (solo administradores) */}
           {!isLoadingWorkspace && !workspaceError && activeModule === 'users' && user.isAdmin && (

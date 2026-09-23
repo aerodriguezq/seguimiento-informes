@@ -11,6 +11,7 @@ import {
   ShieldAlert,
   ChevronRight,
   UserCog,
+  CalendarRange,
 } from 'lucide-react';
 import { ActiveModule } from '../../types';
 import { useAuth } from '../../auth/AuthContext';
@@ -100,6 +101,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: ExternalLink,
       description: 'Origen y destino para automatizaciones',
       visible: canView('drive_links'),
+    },
+    {
+      id: 'seguimiento',
+      label: 'Seguimiento',
+      icon: CalendarRange,
+      description: 'Cronograma de entregas por proyecto',
+      visible: canView('seguimiento'),
     },
     {
       id: 'users',

@@ -130,4 +130,5 @@ export type ActiveModule =
   | 'alerts'
   | 'lists'
   | 'drive_links'
+  | 'seguimiento'
   | 'users';
