@@ -18,6 +18,15 @@ import {
   Users,
 } from 'lucide-react';
 
+// Mismos colores que StatusBadge, para que el segmento de la barra combine
+// visualmente con el badge de esa etapa en el resto de la app.
+const STAGE_BAR_COLOR: Record<ReportStatus, string> = {
+  'Pendientes Evidencias': 'bg-amber-500',
+  'Informe en Elaboración': 'bg-blue-500',
+  'Entregado a Of. Proyectos': 'bg-indigo-500',
+  'Enviado': 'bg-emerald-500',
+};
+
 interface DashboardViewProps {
   projects: Project[];
   reports: Report[];
@@ -48,25 +57,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   );
   const totalReports = reports.length;
   const compliance = totalReports ? Math.round((countEnviados / totalReports) * 100) : 0;
-  const stageStats = STATUS_SEQUENCE.map((status, idx) => ({
-    status,
-    idx,
-    count: reports.filter((r) => r.status === status).length,
-  }));
   const projectStats = projects.map((project) => {
     const projectReports = reports.filter((report) => report.projectId === project.id);
     const sent = projectReports.filter((report) => report.status === 'Enviado').length;
     const overdue = projectReports.filter(
       (report) => getSemaforoStatus(report.dueDate, report.status) === 'vencido',
     ).length;
+    const stages = STATUS_SEQUENCE.map((status) => ({
+      status,
+      count: projectReports.filter((report) => report.status === status).length,
+    }));
     return {
       project,
       total: projectReports.length,
       sent,
       overdue,
       percent: projectReports.length ? Math.round((sent / projectReports.length) * 100) : 0,
+      stages,
     };
   });
+  const projectsWithReports = projectStats.filter((p) => p.total > 0);
 
   const kpis = [
     { label: 'Total de informes', value: totalReports, note: 'En el período activo', icon: FileText, tone: 'ink', action: () => onViewAllReports() },
@@ -103,25 +113,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </section>
 
-      <div className={`grid grid-cols-1 gap-5 ${totalReports > 0 ? 'xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.85fr)]' : ''}`}>
+      <div className={`grid grid-cols-1 gap-5 ${projectsWithReports.length > 0 ? 'xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.85fr)]' : ''}`}>
         <section className="overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-[0_10px_24px_rgba(20,32,43,0.045)]">
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4"><div><div className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-rose-600" /><h3 className="text-sm font-bold text-slate-950">Prioridades de gestión</h3></div><p className="mt-1 text-xs text-slate-500">Elementos que necesitan una acción antes del siguiente corte.</p></div><button type="button" onClick={() => onViewAllReports()} className="hidden items-center gap-1 text-xs font-bold text-teal-700 hover:text-teal-900 sm:inline-flex">Ver todos <ArrowUpRight className="h-3.5 w-3.5" /></button></div>
           {urgentReports.length === 0 ? <div className="flex min-h-56 flex-col items-center justify-center px-6 text-center"><span className="mb-3 rounded-full bg-teal-50 p-3 text-teal-700"><CheckCircle2 className="h-5 w-5" /></span><h4 className="text-sm font-bold text-slate-900">Sin excepciones abiertas</h4><p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">No hay informes vencidos o próximos a vencer en la información disponible.</p></div> : <div className="overflow-x-auto"><table className="w-full min-w-170 text-left"><thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-widest text-slate-500"><tr><th className="px-5 py-3">Informe</th><th className="px-3 py-3">Proyecto</th><th className="px-3 py-3">Vencimiento</th><th className="px-3 py-3">Estado</th><th className="px-5 py-3 text-right">Acción</th></tr></thead><tbody className="divide-y divide-slate-100 text-xs">{urgentReports.slice(0, 6).map((report) => { const days = calculateDaysRemaining(report.dueDate, report.status); return <tr key={report.id} onClick={() => onSelectReportDetail(report.id)} className="group cursor-pointer transition hover:bg-slate-50"><td className="px-5 py-3.5"><div className="font-bold text-slate-900">{report.consecutive}</div><div className="mt-0.5 max-w-48 truncate text-[11px] text-slate-500">{report.typeName}</div></td><td className="max-w-48 truncate px-3 py-3.5 font-medium text-slate-700">{report.projectName}</td><td className="px-3 py-3.5"><div className="font-medium text-slate-700">{report.dueDate}</div><div className="mt-1 text-[11px] text-slate-400">{report.month} {report.year}</div></td><td className="px-3 py-3.5"><div className="flex flex-col items-start gap-1"><SemaforoBadge status={getSemaforoStatus(report.dueDate, report.status)} daysRemaining={days} /><StatusBadge status={report.status} size="sm" /></div></td><td className="px-5 py-3.5 text-right"><button type="button" onClick={(event) => { event.stopPropagation(); onSelectReportDetail(report.id); }} className="inline-flex items-center gap-1 font-bold text-teal-700 hover:text-teal-900">Gestionar <ChevronRight className="h-3.5 w-3.5" /></button></td></tr>; })}</tbody></table></div>}
         </section>
 
-        {totalReports > 0 && (
+        {projectsWithReports.length > 0 && (
           <section className="rounded-[10px] border border-slate-200 bg-white p-5 shadow-[0_10px_24px_rgba(20,32,43,0.045)]">
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-teal-700">Ciclo de vida</p>
-            <h3 className="mt-1 text-lg font-bold tracking-tight text-slate-950">Avance por etapa</h3>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              {stageStats.map(({ status, idx, count }) => (
-                <div key={status} className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[9px] font-bold uppercase text-slate-400">Etapa {idx + 1}</span>
+            <h3 className="mt-1 text-lg font-bold tracking-tight text-slate-950">Avance por proyecto</h3>
+            <div className="mt-4 max-h-105 space-y-4 overflow-y-auto pr-1">
+              {projectsWithReports.map(({ project, total, stages }) => (
+                <div key={project.id}>
+                  <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate font-semibold text-slate-800">{project.name}</span>
+                    <span className="shrink-0 text-slate-500">{total} informe{total === 1 ? '' : 's'}</span>
                   </div>
-                  <div className="text-2xl font-bold tracking-tight text-slate-950">{count}</div>
-                  <StatusBadge status={status} size="sm" />
+                  <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+                    {stages.map(({ status, count }) => count > 0 && (
+                      <div
+                        key={status}
+                        title={`${status}: ${count}`}
+                        className={`h-full ${STAGE_BAR_COLOR[status]}`}
+                        style={{ width: `${(count / total) * 100}%` }}
+                      />
+                    ))}
+                  </div>
                 </div>
+              ))}
+            </div>
+            <div className="mt-4 flex flex-wrap gap-x-3 gap-y-1.5 border-t border-slate-100 pt-3 text-[10px] text-slate-500">
+              {STATUS_SEQUENCE.map((status) => (
+                <span key={status} className="inline-flex items-center gap-1.5">
+                  <span className={`h-2 w-2 rounded-full ${STAGE_BAR_COLOR[status]}`} />
+                  {status}
+                </span>
               ))}
             </div>
           </section>
