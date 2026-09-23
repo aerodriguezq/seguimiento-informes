@@ -145,7 +145,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
 
   const pushLog = (message: string, tone: LogEntry['tone']) => {
     const time = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    setLog((prev) => [{ time, message, tone }, ...prev].slice(0, 5));
+    setLog((prev) => [{ time, message, tone }, ...prev].slice(0, 14));
   };
 
   const fetchData = async () => {
@@ -180,6 +180,16 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible importar el seguimiento.');
       pushLog(`Importado: ${payload.data.rowsImported} fila(s), ${payload.data.lineasDetectadas} línea(s) productiva(s).`, 'success');
+      const d = payload.data.detalle;
+      if (d) {
+        pushLog(`Referencia SubActividad-Linea: ${d.referenciaSubActividadLinea.filasLeidas} fila(s) → ${d.referenciaSubActividadLinea.lineasMapeadas} línea(s) mapeada(s).`, d.referenciaSubActividadLinea.lineasMapeadas === 0 ? 'error' : 'info');
+        pushLog(`Insumos Detalle: ${d.insumosDetalle.filasLeidas} fila(s) → ${d.insumosDetalle.lineasConDatos} línea(s) con datos.`, 'info');
+        pushLog(`Abono: ${d.abono.filasLeidas} fila(s) → ${d.abono.lineasConDatos} línea(s) con datos.`, 'info');
+        pushLog(`Material Vegetal: ${d.materialVegetal.filasLeidas} fila(s) → ${d.materialVegetal.lineasConDatos} línea(s) con datos.`, 'info');
+        pushLog(`Entrega Insumos: ${d.entregaInsumos.filasLeidas} fila(s) → ${d.entregaInsumos.lineasConDatos} línea(s) con datos.`, 'info');
+        pushLog(`Entrega Estimada Manual: ${d.entregaEstimadaManual.filasLeidas} fila(s) → ${d.entregaEstimadaManual.subActividadesConDatos} sub actividad(es).`, 'info');
+        pushLog(`Beneficiarios: ${d.beneficiarios.filasLeidas} fila(s).`, 'info');
+      }
       await fetchData();
     } catch (err) {
       pushLog(err instanceof Error ? err.message : 'No fue posible importar el seguimiento.', 'error');
@@ -379,7 +389,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
       )}
 
       {isAdmin && log.length > 0 && (
-        <div className="mx-4 mt-3 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 space-y-1 font-mono text-[10.5px] max-h-24 overflow-y-auto">
+        <div className="mx-4 mt-3 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 space-y-1 font-mono text-[10.5px] max-h-56 overflow-y-auto">
           {log.map((entry, idx) => (
             <p key={idx} className={entry.tone === 'error' ? 'text-rose-600' : entry.tone === 'success' ? 'text-emerald-700' : 'text-slate-500'}>
               <span className="text-slate-400">[{entry.time}]</span> {entry.message}

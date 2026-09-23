@@ -223,6 +223,19 @@ async function importSeguimiento(sql: SqlClient, projectId: number) {
     rowsImported: parsedCronograma.rows.length,
     lineasDetectadas: Object.keys(referencia).length,
     kpis,
+    // Diagnóstico por hoja: cuántas filas de datos trajo cada pestaña y cuántas
+    // líneas productivas distintas se lograron mapear de ahí — así, si algo sale
+    // en 0, se ve de inmediato cuál pestaña está vacía o mal nombrada, en vez de
+    // un "importado con éxito" que esconde el problema.
+    detalle: {
+      referenciaSubActividadLinea: { filasLeidas: Math.max(referenciaGrid.length - 1, 0), lineasMapeadas: Object.keys(referencia).length },
+      insumosDetalle: { filasLeidas: Math.max(insumosGrid.length - 1, 0), lineasConDatos: new Set([...Object.keys(compra), ...Object.keys(entrega)]).size },
+      abono: { filasLeidas: Math.max(abonoGrid.length - 1, 0), lineasConDatos: Object.keys(abono).length },
+      materialVegetal: { filasLeidas: Math.max(mvGrid.length - 1, 0), lineasConDatos: Object.keys(materialVegetal).length },
+      entregaInsumos: { filasLeidas: Math.max(entregaInsumosGrid.length - 1, 0), lineasConDatos: Object.keys(entregaInsumos).length },
+      entregaEstimadaManual: { filasLeidas: Math.max(estimadaGrid.length - 1, 0), subActividadesConDatos: Object.keys(proyeccion).length },
+      beneficiarios: { filasLeidas: Math.max(beneficiariosGrid.length - 1, 0), kpis },
+    },
   };
 }
 
