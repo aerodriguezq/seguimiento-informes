@@ -1,17 +1,20 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
-  FileText,
-  PlusCircle,
   Folder,
+  FolderOpen,
   FileSpreadsheet,
+  TrendingUp,
+  FileText,
+  List,
+  PlusCircle,
   BellRing,
-  Table,
+  Wrench,
   Cloud,
+  Archive,
+  Users,
   ShieldAlert,
   ChevronRight,
-  Users,
-  TrendingUp,
 } from 'lucide-react';
 import { ActiveModule } from '../../types';
 import { useAuth } from '../../auth/AuthContext';
@@ -24,6 +27,25 @@ interface SidebarProps {
   activeAlertsCount: number;
 }
 
+type LeafNode = {
+  kind: 'leaf';
+  id: ActiveModule;
+  label: string;
+  icon: React.ElementType;
+  badge?: number;
+  badgeColor?: string;
+  visible: boolean;
+};
+type GroupNode = {
+  kind: 'group';
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  visible: boolean;
+  children: NavNode[];
+};
+type NavNode = LeafNode | GroupNode;
+
 export const Sidebar: React.FC<SidebarProps> = ({
   activeModule,
   onSelectModule,
@@ -32,93 +54,184 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeAlertsCount,
 }) => {
   const { user, canView } = useAuth();
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['proyectos', 'informes', 'admin']));
 
-  const allNavItems: {
-    id: ActiveModule;
-    label: string;
-    icon: React.ElementType;
-    badge?: number;
-    badgeColor?: string;
-    description?: string;
-    visible: boolean;
-  }[] = [
+  const toggleGroup = (id: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const navTree: NavNode[] = [
     {
+      kind: 'leaf',
       id: 'dashboard',
       label: 'Dashboard',
       icon: LayoutDashboard,
-      description: 'Vista ejecutiva de KPIs y cumplimiento',
       visible: true,
     },
     {
-      id: 'reports',
-      label: 'Informes',
-      icon: FileText,
-      badge: pendingReportsCount,
-      badgeColor: 'bg-amber-100 text-amber-800',
-      description: 'Listado, filtros y semáforos',
-      visible: canView('reports'),
-    },
-    {
-      id: 'new_report',
-      label: 'Nuevo Informe',
-      icon: PlusCircle,
-      description: 'Creación guiada por pasos',
-      visible: canView('reports'),
-    },
-    {
-      id: 'projects',
+      kind: 'group',
+      id: 'proyectos',
       label: 'Proyectos',
       icon: Folder,
-      description: 'Cartera y estados BPIN',
-      visible: canView('projects'),
+      visible: true,
+      children: [
+        {
+          kind: 'leaf',
+          id: 'projects',
+          label: 'Lista de Proyectos',
+          icon: FolderOpen,
+          visible: canView('projects'),
+        },
+        {
+          kind: 'leaf',
+          id: 'project_detail',
+          label: 'Detalle de Proyecto',
+          icon: FileSpreadsheet,
+          visible: canView('projects'),
+        },
+        {
+          kind: 'leaf',
+          id: 'seguimiento',
+          label: 'Seguimiento',
+          icon: TrendingUp,
+          visible: canView('seguimiento'),
+        },
+        {
+          kind: 'group',
+          id: 'informes',
+          label: 'Informes',
+          icon: FileText,
+          visible: true,
+          children: [
+            {
+              kind: 'leaf',
+              id: 'reports',
+              label: 'Ver Todos',
+              icon: List,
+              badge: pendingReportsCount,
+              badgeColor: 'bg-amber-100 text-amber-800',
+              visible: canView('reports'),
+            },
+            {
+              kind: 'leaf',
+              id: 'new_report',
+              label: 'Crear Nuevo Informe',
+              icon: PlusCircle,
+              visible: canView('reports'),
+            },
+            {
+              kind: 'leaf',
+              id: 'alerts',
+              label: 'Configuración de Alertas',
+              icon: BellRing,
+              badge: activeAlertsCount,
+              badgeColor: 'bg-indigo-100 text-indigo-800',
+              visible: canView('alerts'),
+            },
+          ],
+        },
+      ],
     },
     {
-      id: 'project_detail',
-      label: 'Detalle de Proyecto',
-      icon: FileSpreadsheet,
-      description: 'Configuración, alertas e informes',
-      visible: canView('projects'),
-    },
-    {
-      id: 'alerts',
-      label: 'Alertas',
-      icon: BellRing,
-      badge: activeAlertsCount,
-      badgeColor: 'bg-indigo-100 text-indigo-800',
-      description: 'Reglas y programación automática',
-      visible: canView('alerts'),
-    },
-    {
-      id: 'lists',
-      label: 'Listas Maestras',
-      icon: Table,
-      description: 'Catálogos, tipos y contactos',
-      visible: canView('lists'),
-    },
-    {
-      id: 'drive_links',
-      label: 'Fuentes Drive',
-      icon: Cloud,
-      description: 'Origen y destino para automatizaciones',
-      visible: canView('drive_links'),
-    },
-    {
-      id: 'seguimiento',
-      label: 'Seguimiento',
-      icon: TrendingUp,
-      description: 'Cronograma de entregas por proyecto',
-      visible: canView('seguimiento'),
-    },
-    {
-      id: 'users',
-      label: 'Usuarios',
-      icon: Users,
-      description: 'Acceso y permisos por módulo',
-      visible: user.isAdmin,
+      kind: 'group',
+      id: 'admin',
+      label: 'Administración / Datos',
+      icon: Wrench,
+      visible: true,
+      children: [
+        {
+          kind: 'leaf',
+          id: 'drive_links',
+          label: 'Fuentes Drive',
+          icon: Cloud,
+          visible: canView('drive_links'),
+        },
+        {
+          kind: 'leaf',
+          id: 'lists',
+          label: 'Listas Maestras',
+          icon: Archive,
+          visible: canView('lists'),
+        },
+        {
+          kind: 'leaf',
+          id: 'users',
+          label: 'Usuarios',
+          icon: Users,
+          visible: user.isAdmin,
+        },
+      ],
     },
   ];
 
-  const navItems = allNavItems.filter((item) => item.visible);
+  const renderNode = (node: NavNode, depth: number): React.ReactNode => {
+    if (!node.visible) return null;
+
+    if (node.kind === 'leaf') {
+      const Icon = node.icon;
+      const isActive = activeModule === node.id;
+      return (
+        <button
+          key={node.id}
+          id={`sidebar-nav-${node.id}`}
+          type="button"
+          onClick={() => onSelectModule(node.id)}
+          style={{ paddingLeft: `${12 + depth * 16}px` }}
+          className={`w-full flex items-center justify-between pr-3 py-2.5 rounded-lg text-xs font-medium transition-all group cursor-pointer ${
+            isActive
+              ? 'bg-indigo-600 text-white font-semibold shadow-xs'
+              : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Icon
+              className={`w-4 h-4 shrink-0 transition-colors ${
+                isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'
+              }`}
+            />
+            <span className="truncate">{node.label}</span>
+          </div>
+          {node.badge !== undefined && node.badge > 0 && (
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                isActive ? 'bg-white/20 text-white' : node.badgeColor
+              }`}
+            >
+              {node.badge}
+            </span>
+          )}
+        </button>
+      );
+    }
+
+    const visibleChildren = node.children.map((child) => renderNode(child, depth + 1)).filter(Boolean);
+    if (visibleChildren.length === 0) return null;
+
+    const Icon = node.icon;
+    const isOpen = expandedGroups.has(node.id);
+    return (
+      <div key={node.id}>
+        <button
+          type="button"
+          onClick={() => toggleGroup(node.id)}
+          style={{ paddingLeft: `${12 + depth * 16}px` }}
+          className="w-full flex items-center justify-between pr-3 py-2.5 rounded-lg text-xs font-bold text-slate-200 hover:bg-slate-800/80 hover:text-white transition-all cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Icon className="w-4 h-4 shrink-0 text-slate-400" />
+            <span className="truncate">{node.label}</span>
+          </div>
+          <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-slate-500 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+        </button>
+        {isOpen && <div className="space-y-1 mt-1">{visibleChildren}</div>}
+      </div>
+    );
+  };
 
   return (
     <aside
@@ -126,7 +239,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       className="w-64 bg-slate-900 text-slate-200 shrink-0 flex flex-col justify-between h-screen sticky top-0 border-r border-slate-800 z-40 select-none"
     >
       {/* Top branding */}
-      <div>
+      <div className="flex-1 min-h-0 flex flex-col">
         <div className="px-5 py-5 border-b border-slate-800 flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center text-white shadow-md shadow-indigo-900/30">
             <ShieldAlert className="w-5 h-5" />
@@ -161,45 +274,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
 
         {/* Navigation Menu */}
-        <nav className="p-3 space-y-1 mt-2" aria-label="Navegación principal">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeModule === item.id;
-            return (
-              <button
-                key={item.id}
-                id={`sidebar-nav-${item.id}`}
-                type="button"
-                onClick={() => onSelectModule(item.id)}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all group cursor-pointer ${
-                  isActive
-                    ? 'bg-indigo-600 text-white font-semibold shadow-xs'
-                    : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <Icon
-                    className={`w-4 h-4 shrink-0 transition-colors ${
-                      isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'
-                    }`}
-                  />
-                  <span className="truncate">{item.label}</span>
-                </div>
-                {item.badge !== undefined && item.badge > 0 && (
-                  <span
-                    className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                      isActive ? 'bg-white/20 text-white' : item.badgeColor
-                    }`}
-                  >
-                    {item.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+        <nav className="p-3 space-y-1 mt-2 overflow-y-auto" aria-label="Navegación principal">
+          {navTree.map((node) => renderNode(node, 0))}
         </nav>
       </div>
-
     </aside>
   );
 };
