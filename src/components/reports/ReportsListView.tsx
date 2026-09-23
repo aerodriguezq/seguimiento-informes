@@ -5,6 +5,7 @@ import {
   ReportType,
   Contact,
   ReportStatus,
+  ScheduledAlert,
 } from '../../types';
 import {
   calculateDaysRemaining,
@@ -26,6 +27,8 @@ import {
   AlertCircle,
   Clock,
   CheckCircle2,
+  CalendarDays,
+  BellRing,
 } from 'lucide-react';
 
 interface ReportsListViewProps {
@@ -33,6 +36,7 @@ interface ReportsListViewProps {
   projects: Project[];
   reportTypes: ReportType[];
   contacts: Contact[];
+  alerts: ScheduledAlert[];
   onSelectReport: (reportId: string) => void;
   onOpenNewReport: () => void;
   onQuickChangeStatus?: (reportId: string, newStatus: ReportStatus) => void;
@@ -44,10 +48,17 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
   projects,
   reportTypes,
   contacts,
+  alerts,
   onSelectReport,
   onOpenNewReport,
   initialFilterStatus = 'all',
 }) => {
+  const countPendientes = reports.filter((r) => r.status === 'Pendientes Evidencias').length;
+  const countElaboracion = reports.filter((r) => r.status === 'Informe en Elaboración').length;
+  const countEntregados = reports.filter((r) => r.status === 'Entregado a Of. Proyectos').length;
+  const totalReports = reports.length;
+  const activeAlerts = alerts.filter((alert) => alert.active).length;
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProject, setSelectedProject] = useState('all');
   const [selectedType, setSelectedType] = useState('all');
@@ -180,6 +191,55 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Panorama operativo */}
+      <section className="rounded-[10px] border border-slate-200 bg-[#eef7f5] p-5 shadow-[0_10px_24px_rgba(20,32,43,0.045)]">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-teal-700">Lectura del corte</p>
+            <h3 className="mt-1 text-lg font-bold tracking-tight text-slate-950">Panorama operativo</h3>
+          </div>
+          <CalendarDays className="h-5 w-5 text-teal-700" />
+        </div>
+        <div className="mt-5 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-3">
+          <div className="border-b border-teal-900/10 pb-3 sm:border-b-0 sm:pb-0">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-600">En elaboración</span>
+              <strong className="text-slate-900">{countElaboracion}</strong>
+            </div>
+            <div className="mt-2 h-1.5 rounded-full bg-white/80">
+              <div className="h-full rounded-full bg-teal-600" style={{ width: `${totalReports ? Math.max((countElaboracion / totalReports) * 100, 3) : 0}%` }} />
+            </div>
+          </div>
+          <div className="border-b border-teal-900/10 pb-3 sm:border-b-0 sm:pb-0">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-600">Pendientes de evidencia</span>
+              <strong className="text-slate-900">{countPendientes}</strong>
+            </div>
+            <div className="mt-2 h-1.5 rounded-full bg-white/80">
+              <div className="h-full rounded-full bg-amber-500" style={{ width: `${totalReports ? Math.max((countPendientes / totalReports) * 100, 3) : 0}%` }} />
+            </div>
+          </div>
+          <div>
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-600">Entregados a oficina</span>
+              <strong className="text-slate-900">{countEntregados}</strong>
+            </div>
+            <div className="mt-2 h-1.5 rounded-full bg-white/80">
+              <div className="h-full rounded-full bg-indigo-500" style={{ width: `${totalReports ? Math.max((countEntregados / totalReports) * 100, 3) : 0}%` }} />
+            </div>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-col gap-3 border-t border-teal-900/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <span className="inline-flex items-center gap-2 text-xs text-slate-600">
+            <BellRing className="h-3.5 w-3.5 text-teal-700" />
+            Alertas activas <strong className="text-slate-950">{activeAlerts}</strong>
+          </span>
+          <p className="text-[11px] leading-5 text-slate-600">
+            <span className="font-bold text-slate-900">Responsables:</span> revisa primero las excepciones y confirma evidencias antes del próximo envío.
+          </p>
+        </div>
+      </section>
 
       {/* Filter and Search Panel */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-3">

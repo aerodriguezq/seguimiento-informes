@@ -760,7 +760,6 @@ export default function App() {
             <DashboardView
               projects={projects}
               reports={reports}
-              alerts={alerts}
               onSelectProjectDetail={handleSelectProjectDetail}
               onSelectReportDetail={handleNavigateToReport}
               onOpenNewReport={() => handleOpenNewReport(currentProjectId)}
@@ -775,6 +774,7 @@ export default function App() {
               projects={projects}
               reportTypes={reportTypes}
               contacts={contacts}
+              alerts={alerts}
               onSelectReport={handleNavigateToReport}
               onOpenNewReport={() => handleOpenNewReport(currentProjectId)}
               initialFilterStatus={reportsFilterStatus}
