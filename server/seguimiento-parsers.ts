@@ -67,6 +67,12 @@ function isFilled(value: SheetValue | undefined): boolean {
   return value !== undefined && value !== null && String(value).trim() !== '';
 }
 
+// "Avance"/"entregado" solo cuenta lo que YA pasó — una fecha futura en estas
+// columnas es una entrega PROGRAMADA, no una entrega real todavía.
+function getTodayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function withHeaders(grid: Grid) {
   const headerRow = (grid[0] || []).map((h) => String(h ?? ''));
   const rows = grid.slice(1);
@@ -152,6 +158,7 @@ export function parseAbono(grid: Grid): Record<string, PistaAgg> {
   const haCol = findContains(headerRow, 'area asignada');
   if (lineaCol === -1) throw new Error('No se encontró la columna "Línea Productiva Asignada" en la pestaña Abono.');
 
+  const todayIso = getTodayIso();
   const byLinea: Record<string, PistaAgg> = {};
   for (const row of rows) {
     const linea = String(row[lineaCol] ?? '').trim();
@@ -161,7 +168,7 @@ export function parseAbono(grid: Grid): Record<string, PistaAgg> {
     agg.total++;
     const iso = fechaCol !== -1 ? parseDate(row[fechaCol]) : null;
     if (iso) {
-      agg.entregado++;
+      if (iso <= todayIso) agg.entregado++;
       extendRange(agg, iso);
     }
     const kg = kgCol !== -1 ? parseNum(row[kgCol]) : null;
@@ -180,6 +187,7 @@ export function parseMaterialVegetal(grid: Grid): Record<string, PistaAgg> {
   const kgCol = findExact(headerRow, 'Cantidad Kg./Beneficiario');
   if (lineaCol === -1) throw new Error('No se encontró la columna "Línea Productiva Asignada" en la pestaña Material Vegetal.');
 
+  const todayIso = getTodayIso();
   const byLinea: Record<string, PistaAgg> = {};
   for (const row of rows) {
     const linea = String(row[lineaCol] ?? '').trim();
@@ -189,7 +197,7 @@ export function parseMaterialVegetal(grid: Grid): Record<string, PistaAgg> {
     agg.total++;
     const iso = fechaCol !== -1 ? parseDate(row[fechaCol]) : null;
     if (iso) {
-      agg.entregado++;
+      if (iso <= todayIso) agg.entregado++;
       extendRange(agg, iso);
     }
     const kg = kgCol !== -1 ? parseNum(row[kgCol]) : null;
@@ -211,6 +219,7 @@ export function parseEntregaInsumos(grid: Grid): Record<string, PistaAgg> {
   const kgCol = findExact(headerRow, 'Cantidad Insumos Kg./Beneficiario');
   if (lineaCol === -1) throw new Error('No se encontró una columna de línea productiva en la pestaña Entrega Insumos.');
 
+  const todayIso = getTodayIso();
   const byLinea: Record<string, PistaAgg> = {};
   for (const row of rows) {
     const linea = String(row[lineaCol] ?? '').trim();
@@ -220,7 +229,7 @@ export function parseEntregaInsumos(grid: Grid): Record<string, PistaAgg> {
     agg.total++;
     const iso = fechaCol !== -1 ? parseDate(row[fechaCol]) : null;
     if (iso) {
-      agg.entregado++;
+      if (iso <= todayIso) agg.entregado++;
       extendRange(agg, iso);
     }
     const kg = kgCol !== -1 ? parseNum(row[kgCol]) : null;
@@ -278,6 +287,16 @@ export function parseBeneficiariosKpis(grid: Grid): { insumo: Kpi; abono: Kpi; m
     throw new Error('No se encontraron las columnas ABONO, Material Vegetal o Entrega Insumos en la pestaña Beneficiarios.');
   }
 
+  // ABONO / Material Vegetal / Entrega Insumos en esta hoja son fechas de
+  // entrega — una fecha futura es una entrega PROGRAMADA, no una entrega real
+  // todavía, así que no debe contar en el % de avance.
+  const todayIso = getTodayIso();
+  const entregadoAFecha = (value: SheetValue | undefined): boolean => {
+    if (!isFilled(value)) return false;
+    const iso = parseDate(value);
+    return iso === null ? true : iso <= todayIso;
+  };
+
   let insumoTotal = 0;
   let insumoAvance = 0;
   let abonoTotal = 0;
@@ -291,18 +310,18 @@ export function parseBeneficiariosKpis(grid: Grid): { insumo: Kpi; abono: Kpi; m
 
     if (insumoCol !== -1) {
       insumoTotal++;
-      if (isFilled(row[insumoCol])) insumoAvance++;
+      if (entregadoAFecha(row[insumoCol])) insumoAvance++;
     }
     if (mvCol !== -1) {
       mvTotal++;
-      if (isFilled(row[mvCol])) mvAvance++;
+      if (entregadoAFecha(row[mvCol])) mvAvance++;
     }
     if (abonoCol !== -1) {
       const cantidadAbono = cantidadAbonoCol !== -1 ? parseNum(row[cantidadAbonoCol]) : null;
       const excluido = cantidadAbonoCol !== -1 && (cantidadAbono === null || cantidadAbono === 0);
       if (!excluido) {
         abonoTotal++;
-        if (isFilled(row[abonoCol])) abonoAvance++;
+        if (entregadoAFecha(row[abonoCol])) abonoAvance++;
       }
     }
   }
