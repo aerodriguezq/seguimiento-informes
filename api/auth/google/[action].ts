@@ -100,12 +100,17 @@ async function callback(request: VercelRequest, response: VercelResponse) {
     });
     const user = await userResponse.json();
     if (!user.email) return response.status(400).send('No se pudo identificar la cuenta Google.');
+    // Los correos se guardan en minúsculas en toda la app (usuarios_autorizados,
+    // app_sesiones); Google a veces devuelve el correo con mayúsculas tal como
+    // esté configurado en la cuenta, y una comparación exacta sin normalizar
+    // rechaza a un usuario correctamente autorizado.
+    const normalizedEmail = String(user.email).trim().toLowerCase();
 
     const sql = await getSql();
 
     if (state.startsWith('app:')) {
       const [authorizedUser] = await sql`
-        SELECT email FROM usuarios_autorizados WHERE email = ${user.email} AND activo = TRUE
+        SELECT email FROM usuarios_autorizados WHERE email = ${normalizedEmail} AND activo = TRUE
       `;
       if (!authorizedUser) {
         response.setHeader('Set-Cookie', clearOAuthStateCookie());
@@ -115,7 +120,7 @@ async function callback(request: VercelRequest, response: VercelResponse) {
       const sessionId = crypto.randomUUID();
       await sql`
         INSERT INTO app_sesiones (session_id, email, expires_at)
-        VALUES (${sessionId}, ${user.email}, NOW() + INTERVAL '30 days')
+        VALUES (${sessionId}, ${normalizedEmail}, NOW() + INTERVAL '30 days')
       `;
       response.setHeader('Set-Cookie', [sessionCookie(sessionId, 60 * 60 * 24 * 30, 'app_session'), clearOAuthStateCookie()]);
       return response.redirect(302, '/');
