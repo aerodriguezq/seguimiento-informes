@@ -31,10 +31,12 @@ import { UsersManagementView, AuthorizedUser, SweepConfig } from './components/u
 import { useAuth } from './auth/AuthContext';
 import { CheckCircle2, Info, X } from 'lucide-react';
 
-const MODULE_ROUTES: Partial<Record<ActiveModule, string>> = {
+const MODULE_ROUTES: Record<ActiveModule, string> = {
   dashboard: '/dashboard',
   reports: '/reports',
+  new_report: '/reports/new',
   projects: '/projects',
+  project_detail: '/projects/detail',
   alerts: '/alerts',
   lists: '/lists',
   drive_links: '/drive-links',
@@ -80,9 +82,9 @@ export default function App() {
     PATH_TO_MODULE[location.pathname] || 'dashboard'
   );
 
-  // Keep the URL and the active module in sync: routable modules (sidebar's
-  // primary sections) get a real path; sub-views like new_report/project_detail
-  // stay internal state and don't change the URL.
+  // Keep the URL and the active module in sync: every module has a real path,
+  // including sub-views like new_report/project_detail (their context, e.g.
+  // currentProjectId, still lives in state, not the URL).
   const goToModule = (mod: ActiveModule) => {
     if (!canViewModule(mod)) return;
     setActiveModule(mod);

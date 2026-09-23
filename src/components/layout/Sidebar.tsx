@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   Folder,
@@ -45,6 +45,20 @@ type GroupNode = {
   children: NavNode[];
 };
 type NavNode = LeafNode | GroupNode;
+
+// Busca la cadena de ids de grupo que hay que tener abiertos para que
+// "targetId" quede visible (p.ej. para 'alerts' -> ['proyectos', 'informes']).
+function findAncestorGroups(nodes: NavNode[], targetId: ActiveModule, path: string[] = []): string[] | null {
+  for (const node of nodes) {
+    if (node.kind === 'leaf') {
+      if (node.id === targetId) return path;
+    } else {
+      const found = findAncestorGroups(node.children, targetId, [...path, node.id]);
+      if (found) return found;
+    }
+  }
+  return null;
+}
 
 export const Sidebar: React.FC<SidebarProps> = ({
   activeModule,
@@ -168,6 +182,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ],
     },
   ];
+
+  // Si navegamos a una ruta cuya hoja está dentro de un grupo cerrado (p.ej.
+  // por deep-link, o porque el usuario lo había plegado), lo reabrimos para
+  // que la ubicación activa quede visible en vez de escondida.
+  useEffect(() => {
+    const ancestors = findAncestorGroups(navTree, activeModule);
+    if (!ancestors || ancestors.length === 0) return;
+    setExpandedGroups((prev) => {
+      const missing = ancestors.filter((id) => !prev.has(id));
+      if (missing.length === 0) return prev;
+      const next = new Set(prev);
+      missing.forEach((id) => next.add(id));
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeModule]);
 
   const renderNode = (node: NavNode, depth: number): React.ReactNode => {
     if (!node.visible) return null;
