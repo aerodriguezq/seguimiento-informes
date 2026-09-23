@@ -24,6 +24,18 @@ function findContains(headers: string[], ...terms: string[]): number {
   });
 }
 
+// Como findExact, pero si no hay match exacto reintenta comparando sin NINGÚN
+// espacio (no solo colapsando espacios repetidos) — la hoja real tiene
+// "Subactividad" (una palabra) en unas pestañas y "Sub Actividad" (dos
+// palabras) en otras, y esto tolera esa variación sin dejar de exigir match
+// exacto cuando el nombre coincide tal cual.
+function findExactFlexible(headers: string[], name: string): number {
+  const exact = findExact(headers, name);
+  if (exact !== -1) return exact;
+  const target = normalizeHeader(name).replace(/\s+/g, '');
+  return headers.findIndex((h) => normalizeHeader(h).replace(/\s+/g, '') === target);
+}
+
 // Los números de serie de fecha de Sheets/Excel cuentan días desde el
 // 30-dic-1899 — así llegan las fechas con valueRenderOption=UNFORMATTED_VALUE,
 // igual que SpreadsheetApp las entrega como Date en Apps Script.
@@ -85,7 +97,7 @@ function extendRange(agg: PistaAgg, iso: string | null) {
 // Material Vegetal, Entrega Insumos e Insumos Detalle.
 export function parseReferenciaLineas(grid: Grid): Record<string, string> {
   const { headerRow, rows } = withHeaders(grid);
-  const subCol = findExact(headerRow, 'Sub Actividad');
+  const subCol = findExactFlexible(headerRow, 'Sub Actividad');
   const lineaCol = findExact(headerRow, 'Línea Productiva');
   if (subCol === -1 || lineaCol === -1) {
     throw new Error('No se encontraron las columnas "Sub Actividad" y "Línea Productiva" en la pestaña Referencia SubActividad-Linea.');
@@ -191,7 +203,11 @@ export function parseMaterialVegetal(grid: Grid): Record<string, PistaAgg> {
 export function parseEntregaInsumos(grid: Grid): Record<string, PistaAgg> {
   const { headerRow, rows } = withHeaders(grid);
   const lineaCol = findContains(headerRow, 'linea productiva');
-  const fechaCol = findExact(headerRow, 'Fecha Sugerida Entrega');
+  // "Fecha Sugerida Entrega" es el nombre original esperado; la hoja actual
+  // usa "Fecha de entrega" (fecha real) — se prueban ambos por si el nombre
+  // vuelve a cambiar.
+  let fechaCol = findExact(headerRow, 'Fecha Sugerida Entrega');
+  if (fechaCol === -1) fechaCol = findExact(headerRow, 'Fecha de entrega');
   const kgCol = findExact(headerRow, 'Cantidad Insumos Kg./Beneficiario');
   if (lineaCol === -1) throw new Error('No se encontró una columna de línea productiva en la pestaña Entrega Insumos.');
 
@@ -225,7 +241,7 @@ export type Proyeccion = {
 // sistema nunca escribe aquí). Alimenta la pista "Proyección Entrega de Insumos".
 export function parseEntregaEstimada(grid: Grid): Record<string, Proyeccion> {
   const { headerRow, rows } = withHeaders(grid);
-  const subCol = findExact(headerRow, 'Sub Actividad');
+  const subCol = findExactFlexible(headerRow, 'Sub Actividad');
   const inicioCol = findExact(headerRow, 'Fecha Inicio Entrega');
   const finCol = findExact(headerRow, 'Fecha Fin Entrega Estimada');
   const diasCol = findExact(headerRow, 'Días de entrega');
