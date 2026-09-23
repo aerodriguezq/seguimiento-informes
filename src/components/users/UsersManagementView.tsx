@@ -111,7 +111,10 @@ const UserRow: React.FC<{
     }
   };
 
-  const summaryPermCount = Object.values(user.permissions || {}).filter((v) => v === 'edit').length;
+  // Un módulo sin valor guardado es "Editar" por defecto (misma regla que
+  // levelOf() en AuthContext) — contar solo las claves explícitas subestima
+  // el resumen y hace parecer que un permiso no se guardó.
+  const summaryPermCount = MODULES.filter((m) => (user.permissions?.[m.key] ?? 'edit') === 'edit').length;
 
   return (
     <div className={`rounded-xl border overflow-hidden ${user.active ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-70'}`}>
