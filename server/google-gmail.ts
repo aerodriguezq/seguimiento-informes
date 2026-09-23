@@ -95,6 +95,33 @@ export function buildAlertEmailHtml(options: {
 </div>`;
 }
 
+// Correo de prueba que un admin dispara desde Usuarios para confirmar que el
+// correo de una persona autorizada está bien escrito y le llega de verdad.
+export function buildAccessApprovedEmailHtml(options: { name: string | null; loginUrl: string }): string {
+  const escape = (value: string) => String(value).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c] as string));
+  const greeting = options.name ? `Hola ${escape(options.name)},` : 'Hola,';
+
+  return `<div style="max-width: 480px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dce4ec; border-radius: 8px; font-family: Arial, sans-serif; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+  <div style="background-color: #15803d; color: #ffffff; padding: 20px; text-align: center;">
+    <div style="font-size: 24px; margin-bottom: 5px;">✅</div>
+    <h2 style="margin: 0; font-size: 18px; font-weight: bold; color: #ffffff;">Acceso aprobado</h2>
+    <p style="margin: 5px 0 0 0; font-size: 14px; color: #bbf7d0;">Seguimiento de Informes</p>
+  </div>
+
+  <div style="padding: 20px; background-color: #f8fafc; font-size: 14px; color: #334155; line-height: 1.5;">
+    <p style="margin: 0 0 12px 0;">${greeting}</p>
+    <p style="margin: 0;">Tu cuenta de Google ya está autorizada para entrar a la plataforma de Seguimiento de Informes. Este es un correo de prueba para confirmar que tu dirección está bien escrita y te llegan las notificaciones.</p>
+  </div>
+
+  <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">
+    <a href="${escape(options.loginUrl)}" style="display: inline-block; background-color: #15803d; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 13px;">Ingresar a la plataforma</a>
+    <p style="font-size: 11px; color: #64748b; margin: 12px 0 0 0;">Si no esperabas este correo, puedes ignorarlo.</p>
+  </div>
+</div>`;
+}
+
 const DRIVE_URL_PATTERN = /https:\/\/(?:drive|docs)\.google\.com\/[^\s"'<>)\]]+/;
 
 function fromBase64Url(value: string) {

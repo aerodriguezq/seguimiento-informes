@@ -659,6 +659,16 @@ export default function App() {
     showToast(`Usuario "${email}" actualizado.`, 'success');
   };
 
+  const handleSendTestEmail = async (email: string) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'testAuthorizedUserEmail', data: { email } }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible enviar el correo de prueba.');
+  };
+
   const handleUpdateSweep = async (kind: string, updates: { active?: boolean; frequencyMinutes?: number }) => {
     const response = await fetch('/api/catalogs', {
       method: 'PATCH',
@@ -870,6 +880,7 @@ export default function App() {
               onAddUser={handleAddAuthorizedUser}
               onUpdateUser={handleUpdateAuthorizedUser}
               onRemoveUser={handleRemoveAuthorizedUser}
+              onSendTestEmail={handleSendTestEmail}
               sweeps={sweeps}
               onUpdateSweep={handleUpdateSweep}
               onTriggerSweep={handleTriggerSweep}

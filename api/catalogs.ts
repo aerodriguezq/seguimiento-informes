@@ -18,6 +18,19 @@ async function isAdminRequest(request: VercelRequest, sql: any): Promise<boolean
   return Boolean(row?.isAdmin);
 }
 
+async function getConnectedAccessToken(sql: any): Promise<string | null> {
+  const session = (await sql`
+    SELECT token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
+  `) as any[];
+  if (!session[0]) return null;
+  const { getGoogleOAuthClient } = await import('../server/google-oauth.js');
+  const client = await getGoogleOAuthClient();
+  client.setCredentials(JSON.parse(session[0].token_json));
+  const token = await client.getAccessToken();
+  if (!token.token) throw new Error('La sesión de Google conectada expiró. Reconéctala desde Fuentes Drive.');
+  return token.token;
+}
+
 const SWEEP_LABELS: Record<string, string> = {
   deteccion_entregas: 'Detección de entregas por correo',
   recordatorios_alertas: 'Recordatorios de alertas',
@@ -224,6 +237,37 @@ export default async function handler(
         return response.status(200).json({ data: { result, config }, meta: {}, errors: [] });
       } catch (error) {
         return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible lanzar el barrido.'] });
+      }
+    }
+
+    if (kind === 'testAuthorizedUserEmail') {
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede enviar correos de prueba.'] });
+      }
+      const email = String(data?.email ?? '').trim().toLowerCase();
+      if (!email || !email.includes('@')) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El correo es obligatorio.'] });
+      }
+      const [target] = await sql`SELECT nombre AS name FROM usuarios_autorizados WHERE email = ${email}`;
+      if (!target) return response.status(404).json({ data: null, meta: {}, errors: ['Ese correo no está en la lista de usuarios autorizados.'] });
+
+      try {
+        const accessToken = await getConnectedAccessToken(sql);
+        if (!accessToken) {
+          return response.status(503).json({ data: null, meta: {}, errors: ['Conecta una cuenta de Google (Fuentes Drive) para poder enviar correos.'] });
+        }
+        const { sendEmail, buildAccessApprovedEmailHtml } = await import('../server/google-gmail.js');
+        const baseUrl = (process.env.APP_URL || 'https://seguimiento-informes.vercel.app').replace(/\/$/, '');
+        const html = buildAccessApprovedEmailHtml({ name: target.name, loginUrl: baseUrl });
+        await sendEmail(accessToken, {
+          to: [email],
+          subject: 'Acceso aprobado — Seguimiento de Informes',
+          body: html,
+          html: true,
+        });
+        return response.status(200).json({ data: { sent: true, email }, meta: {}, errors: [] });
+      } catch (error) {
+        return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible enviar el correo de prueba.'] });
       }
     }
 

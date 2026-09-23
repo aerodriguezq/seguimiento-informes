@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Plus, Trash2, Save, UserCog, ChevronDown, ChevronRight, ShieldAlert, Users as UsersIcon, RadioTower, Play, AlertTriangle, CheckCircle2, PauseCircle } from 'lucide-react';
+import { ShieldCheck, Plus, Trash2, Save, UserCog, ChevronDown, ChevronRight, ShieldAlert, Users as UsersIcon, RadioTower, Play, AlertTriangle, CheckCircle2, PauseCircle, Send } from 'lucide-react';
 import type { PermissionModule, PermissionLevel } from '../../auth/AuthContext';
 
 export interface AuthorizedUser {
@@ -26,6 +26,7 @@ interface UsersManagementViewProps {
   onAddUser: (email: string, name: string) => Promise<void>;
   onUpdateUser: (email: string, updates: Partial<Pick<AuthorizedUser, 'name' | 'active' | 'isAdmin' | 'permissions'>> & { newEmail?: string }) => Promise<void>;
   onRemoveUser: (email: string) => Promise<void>;
+  onSendTestEmail: (email: string) => Promise<void>;
   sweeps: SweepConfig[];
   onUpdateSweep: (kind: string, updates: { active?: boolean; frequencyMinutes?: number }) => Promise<void>;
   onTriggerSweep: (kind: string) => Promise<Record<string, unknown>>;
@@ -49,7 +50,8 @@ const UserRow: React.FC<{
   defaultOpen: boolean;
   onUpdateUser: UsersManagementViewProps['onUpdateUser'];
   onRemoveUser: UsersManagementViewProps['onRemoveUser'];
-}> = ({ user, isSelf, defaultOpen, onUpdateUser, onRemoveUser }) => {
+  onSendTestEmail: UsersManagementViewProps['onSendTestEmail'];
+}> = ({ user, isSelf, defaultOpen, onUpdateUser, onRemoveUser, onSendTestEmail }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [email, setEmail] = useState(user.email);
   const [name, setName] = useState(user.name || '');
@@ -58,6 +60,8 @@ const UserRow: React.FC<{
   const [permissions, setPermissions] = useState<Partial<Record<PermissionModule, PermissionLevel>>>(user.permissions || {});
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSendingTest, setIsSendingTest] = useState(false);
+  const [testStatus, setTestStatus] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [error, setError] = useState('');
 
   const emailChanged = email.trim().toLowerCase() !== user.email;
@@ -91,6 +95,19 @@ const UserRow: React.FC<{
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No fue posible quitar el usuario.');
       setIsDeleting(false);
+    }
+  };
+
+  const handleSendTestEmail = async () => {
+    setIsSendingTest(true);
+    setTestStatus(null);
+    try {
+      await onSendTestEmail(user.email);
+      setTestStatus({ tone: 'success', message: `Correo de prueba enviado a ${user.email}.` });
+    } catch (err) {
+      setTestStatus({ tone: 'error', message: err instanceof Error ? err.message : 'No fue posible enviar el correo de prueba.' });
+    } finally {
+      setIsSendingTest(false);
     }
   };
 
@@ -184,8 +201,21 @@ const UserRow: React.FC<{
           {isAdmin && <p className="text-[11px] text-slate-500 italic">Los administradores tienen acceso total a todos los módulos.</p>}
 
           {error && <p className="text-xs font-semibold text-rose-600">{error}</p>}
+          {testStatus && (
+            <p className={`text-xs font-semibold ${testStatus.tone === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>{testStatus.message}</p>
+          )}
 
           <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-2.5">
+            <button
+              type="button"
+              onClick={handleSendTestEmail}
+              disabled={isSendingTest}
+              title="Envía un correo de prueba para confirmar que este correo está bien escrito y le llega"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-teal-700 border border-teal-200 hover:bg-teal-50 rounded-lg disabled:opacity-50"
+            >
+              <Send className="h-3.5 w-3.5" />
+              {isSendingTest ? 'Enviando...' : 'Enviar correo de prueba'}
+            </button>
             {!isSelf && (
               <button
                 type="button"
@@ -430,6 +460,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
   onAddUser,
   onUpdateUser,
   onRemoveUser,
+  onSendTestEmail,
   sweeps,
   onUpdateSweep,
   onTriggerSweep,
@@ -576,6 +607,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
                 defaultOpen={visibleUsers.length === 1 && idx === 0}
                 onUpdateUser={onUpdateUser}
                 onRemoveUser={onRemoveUser}
+                onSendTestEmail={onSendTestEmail}
               />
             ))
           )}
