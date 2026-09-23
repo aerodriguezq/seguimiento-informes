@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { isAdminRequest } from '../../server/admin-auth.js';
+import { canEditModuleRequest } from '../../server/admin-auth.js';
 import { getGoogleOAuthClient } from '../../server/google-oauth.js';
 import { getSheetTitleByGid, getSheetGridWithBackgrounds, getSheetValues } from '../../server/google-sheets.js';
 import { parseCronograma } from '../../server/cronograma-parser.js';
@@ -315,8 +315,8 @@ export default async function handler(
     }
 
     if (request.method === 'POST' && (request.body?.kind === 'importCronograma' || request.body?.kind === 'seguimientoConfig')) {
-      if (!(await isAdminRequest(request, sql))) {
-        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede gestionar el seguimiento.'] });
+      if (!(await canEditModuleRequest(request, sql, 'seguimiento'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Seguimiento.'] });
       }
       const projectId = Number(request.body?.projectId);
       if (!Number.isInteger(projectId) || projectId <= 0) {

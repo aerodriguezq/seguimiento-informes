@@ -62,7 +62,7 @@ interface ProjectDetailViewProps {
   }) => Promise<void>;
   onViewAllReports: () => void;
   onUpdateProjectVigencia: (projectId: string, startDate: string, endDate: string) => Promise<void>;
-  isAdmin: boolean;
+  canEditSeguimiento: boolean;
 }
 
 export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
@@ -80,7 +80,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onAddNewAlertRule,
   onViewAllReports,
   onUpdateProjectVigencia,
-  isAdmin,
+  canEditSeguimiento,
 }) => {
   const [isEditingVigencia, setIsEditingVigencia] = useState(false);
   const [vigenciaStart, setVigenciaStart] = useState(project.startDate);
@@ -483,7 +483,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
       {/* 3.5 BLOQUE SEGUIMIENTO (extensión de proyecto: cronograma de entregas importado desde Google Sheets) */}
       <ErrorBoundary fallbackLabel="No fue posible mostrar el Seguimiento de este proyecto.">
-        <SeguimientoCronograma projectId={project.id} isAdmin={isAdmin} />
+        <SeguimientoCronograma projectId={project.id} canEdit={canEditSeguimiento} />
       </ErrorBoundary>
 
       {/* 4. BLOQUE ALERTAS PROGRAMADAS (Sección 7) */}

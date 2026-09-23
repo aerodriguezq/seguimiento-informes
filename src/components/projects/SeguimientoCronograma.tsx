@@ -128,9 +128,9 @@ function fmtTon(v: number | null): string {
   return v === null || !Number.isFinite(n) ? '' : `${n.toFixed(1)} t`;
 }
 
-export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boolean; standalone?: boolean }> = ({
+export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boolean; standalone?: boolean }> = ({
   projectId,
-  isAdmin,
+  canEdit,
   standalone = false,
 }) => {
   const [data, setData] = useState<SeguimientoData | null>(null);
@@ -255,7 +255,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
   // Sin configuración: dentro del Detalle de Proyecto no molestamos a quien no es admin con
   // nada; en la página dedicada de Seguimiento sí decimos algo, para no dejarla en blanco.
   if (!data?.config) {
-    if (!isAdmin) {
+    if (!canEdit) {
       if (!standalone) return null;
       return (
         <div className="py-10 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
@@ -329,7 +329,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
             </p>
           </div>
         </div>
-        {isAdmin && (
+        {canEdit && (
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -353,7 +353,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
         )}
       </div>
 
-      {isAdmin && isEditingConfig && (
+      {canEdit && isEditingConfig && (
         <div className="mx-4 mt-3 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
           <div className="flex-1 min-w-64">
             <label htmlFor="seguimiento-sheet-link-edit" className="block text-[11px] font-semibold text-slate-700 mb-1">
@@ -390,7 +390,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
         </div>
       )}
 
-      {isAdmin && log.length > 0 && (
+      {canEdit && log.length > 0 && (
         <div className="mx-4 mt-3">
           <button
             type="button"
@@ -415,7 +415,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
       {!hasData ? (
         <div className="p-4">
           <div className="py-8 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
-            Sin datos importados todavía. {isAdmin ? 'Usa "Importar desde Google Sheets" para traer el seguimiento.' : ''}
+            Sin datos importados todavía. {canEdit ? 'Usa "Importar desde Google Sheets" para traer el seguimiento.' : ''}
           </div>
         </div>
       ) : (

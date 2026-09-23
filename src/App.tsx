@@ -65,7 +65,7 @@ function mapAlert(a: any): ScheduledAlert {
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, canView } = useAuth();
+  const { user, canView, canEdit } = useAuth();
 
   const canViewModule = (mod: ActiveModule): boolean => {
     if (mod === 'users') return user.isAdmin;
@@ -835,7 +835,7 @@ export default function App() {
               onToggleAlertRuleActive={handleToggleAlertActive}
               onAddNewAlertRule={handleAddNewAlert}
               onViewAllReports={() => handleViewAllReports()}
-              isAdmin={user.isAdmin}
+              canEditSeguimiento={canEdit('seguimiento')}
             />
           )}
 
@@ -869,7 +869,7 @@ export default function App() {
           {!isLoadingWorkspace && !workspaceError && activeModule === 'drive_links' && <DriveLinksView />}
 
           {!isLoadingWorkspace && !workspaceError && activeModule === 'seguimiento' && (
-            <SeguimientoModule projects={projects} isAdmin={user.isAdmin} />
+            <SeguimientoModule projects={projects} />
           )}
 
           {/* M09: Usuarios Autorizados (solo administradores) */}

@@ -2,10 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { CalendarRange } from 'lucide-react';
 import { Project } from '../../types';
 import { SeguimientoCronograma } from './SeguimientoCronograma';
+import { useAuth } from '../../auth/AuthContext';
 
 interface SeguimientoModuleProps {
   projects: Project[];
-  isAdmin: boolean;
 }
 
 // Preferimos abrir por defecto un proyecto que ya tenga Seguimiento configurado
@@ -15,7 +15,8 @@ function preferredDefaultProjectId(projects: Project[]): string {
   return montesDeMaria?.id ?? projects[0]?.id ?? '';
 }
 
-export const SeguimientoModule: React.FC<SeguimientoModuleProps> = ({ projects, isAdmin }) => {
+export const SeguimientoModule: React.FC<SeguimientoModuleProps> = ({ projects }) => {
+  const { canEdit } = useAuth();
   const [selectedProjectId, setSelectedProjectId] = useState('');
 
   useEffect(() => {
@@ -55,7 +56,7 @@ export const SeguimientoModule: React.FC<SeguimientoModuleProps> = ({ projects, 
       </div>
 
       {selectedProjectId && (
-        <SeguimientoCronograma projectId={selectedProjectId} isAdmin={isAdmin} standalone />
+        <SeguimientoCronograma projectId={selectedProjectId} canEdit={canEdit('seguimiento')} standalone />
       )}
     </div>
   );
