@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarRange, RefreshCw, AlertTriangle, Settings, Save, Search } from 'lucide-react';
+import { CalendarRange, RefreshCw, AlertTriangle, Settings, Save, Search, ChevronDown, ChevronUp } from 'lucide-react';
 
 function extractSheetIds(input: string): { spreadsheetId: string; gid: string } | null {
   const trimmed = input.trim();
@@ -137,6 +137,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
   const [isLoading, setIsLoading] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
+  const [isLogVisible, setIsLogVisible] = useState(true);
   const [isEditingConfig, setIsEditingConfig] = useState(false);
   const [sheetInput, setSheetInput] = useState('');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
@@ -170,6 +171,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
 
   const handleImport = async () => {
     setIsImporting(true);
+    setIsLogVisible(true);
     pushLog('Leyendo la hoja de cálculo conectada (Cronograma, Insumos, Abono, Material Vegetal, Beneficiarios...)...', 'info');
     try {
       const res = await fetch('/api/projects', {
@@ -389,12 +391,24 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; isAdmin: boole
       )}
 
       {isAdmin && log.length > 0 && (
-        <div className="mx-4 mt-3 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 space-y-1 font-mono text-[10.5px] max-h-56 overflow-y-auto">
-          {log.map((entry, idx) => (
-            <p key={idx} className={entry.tone === 'error' ? 'text-rose-600' : entry.tone === 'success' ? 'text-emerald-700' : 'text-slate-500'}>
-              <span className="text-slate-400">[{entry.time}]</span> {entry.message}
-            </p>
-          ))}
+        <div className="mx-4 mt-3">
+          <button
+            type="button"
+            onClick={() => setIsLogVisible((v) => !v)}
+            className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-slate-500 hover:text-slate-700"
+          >
+            {isLogVisible ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {isLogVisible ? 'Ocultar registro de importación' : `Ver registro de importación (${log.length})`}
+          </button>
+          {isLogVisible && (
+            <div className="mt-1.5 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 space-y-1 font-mono text-[10.5px] max-h-56 overflow-y-auto">
+              {log.map((entry, idx) => (
+                <p key={idx} className={entry.tone === 'error' ? 'text-rose-600' : entry.tone === 'success' ? 'text-emerald-700' : 'text-slate-500'}>
+                  <span className="text-slate-400">[{entry.time}]</span> {entry.message}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
