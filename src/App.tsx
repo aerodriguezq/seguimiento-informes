@@ -165,6 +165,7 @@ export default function App() {
           bpin: string;
           company_name: string;
           applicable_type_ids: Array<string | number>;
+          autoAlertsEnabled: boolean;
           startDate: string | null;
           endDate: string | null;
         }) => ({
@@ -173,7 +174,7 @@ export default function App() {
           bpin: project.bpin,
           company: project.company_name,
           generalStatus: 'En Inicio',
-          autoAlertsEnabled: false,
+          autoAlertsEnabled: Boolean(project.autoAlertsEnabled),
           applicableTypeIds: project.applicable_type_ids.map(String),
           startDate: project.startDate || '',
           endDate: project.endDate || '',
@@ -286,7 +287,7 @@ export default function App() {
         bpin: project.bpin,
         company: project.company_name,
         generalStatus: 'En Inicio',
-        autoAlertsEnabled: false,
+        autoAlertsEnabled: Boolean(project.autoAlertsEnabled),
         applicableTypeIds: [],
         startDate: '',
         endDate: '',
@@ -426,20 +427,26 @@ export default function App() {
   };
 
   // Project settings
-  const handleToggleProjectAutoAlerts = (projectId: string) => {
-    setProjects((prev) =>
-      prev.map((p) => {
-        if (p.id !== projectId) return p;
-        const newState = !p.autoAlertsEnabled;
-        showToast(
-          newState
-            ? `Alertas automáticas activadas para ${p.name}`
-            : `Alertas automáticas desactivadas para ${p.name}`,
-          'info'
-        );
-        return { ...p, autoAlertsEnabled: newState };
-      })
-    );
+  const handleToggleProjectAutoAlerts = async (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return;
+    const newState = !project.autoAlertsEnabled;
+    try {
+      const response = await fetch('/api/projects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: Number(projectId), autoAlertsEnabled: newState }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el cambio.');
+      setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, autoAlertsEnabled: newState } : p)));
+      showToast(
+        newState ? `Alertas automáticas activadas para ${project.name}` : `Alertas automáticas desactivadas para ${project.name}`,
+        'info',
+      );
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible guardar el cambio.', 'info');
+    }
   };
 
   const handleUpdateProjectApplicableTypes = async (projectId: string, newTypeIds: string[]) => {

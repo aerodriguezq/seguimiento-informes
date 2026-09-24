@@ -396,19 +396,22 @@ export default async function handler(
         return response.status(400).json({ data: null, meta: {}, errors: ['Fecha de fin inválida.'] });
       }
 
-      const currentProjects = await sql`SELECT fecha_inicio, fecha_fin FROM proyectos WHERE proyecto_id = ${projectId}`;
+      const hasAutoAlerts = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'autoAlertsEnabled');
+
+      const currentProjects = await sql`SELECT fecha_inicio, fecha_fin, alertas_automaticas FROM proyectos WHERE proyecto_id = ${projectId}`;
       if (!currentProjects[0]) {
         return response.status(404).json({ data: null, meta: {}, errors: ['Proyecto no encontrado.'] });
       }
 
       const nextStartDate = hasStartDate ? (startDate || null) : currentProjects[0].fecha_inicio;
       const nextEndDate = hasEndDate ? (endDate || null) : currentProjects[0].fecha_fin;
+      const nextAutoAlerts = hasAutoAlerts ? Boolean(request.body.autoAlertsEnabled) : currentProjects[0].alertas_automaticas;
 
       const updatedProjects = await sql`
         UPDATE proyectos
-        SET fecha_inicio = ${nextStartDate}, fecha_fin = ${nextEndDate}
+        SET fecha_inicio = ${nextStartDate}, fecha_fin = ${nextEndDate}, alertas_automaticas = ${nextAutoAlerts}
         WHERE proyecto_id = ${projectId}
-        RETURNING proyecto_id AS id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate"
+        RETURNING proyecto_id AS id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate", alertas_automaticas AS "autoAlertsEnabled"
       `;
 
       // "Tipos de Informe Aplicables": antes esto solo actualizaba estado
@@ -503,7 +506,7 @@ export default async function handler(
           ${startDate || null},
           ${endDate || null}
         )
-        RETURNING proyecto_id AS id, nombre AS name, bpin, activo AS active, empresa_id AS company_id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate"
+        RETURNING proyecto_id AS id, nombre AS name, bpin, activo AS active, alertas_automaticas AS "autoAlertsEnabled", empresa_id AS company_id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate"
       `;
 
       const project = projects[0];
@@ -525,6 +528,7 @@ export default async function handler(
         p.nombre AS name,
         p.bpin,
         p.activo AS active,
+        p.alertas_automaticas AS "autoAlertsEnabled",
         TO_CHAR(p.fecha_inicio, 'YYYY-MM-DD') AS "startDate",
         TO_CHAR(p.fecha_fin, 'YYYY-MM-DD') AS "endDate",
         e.empresa_id AS company_id,
