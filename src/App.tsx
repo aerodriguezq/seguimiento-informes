@@ -805,6 +805,7 @@ export default function App() {
               onSelectReportDetail={handleNavigateToReport}
               onOpenNewReport={() => handleOpenNewReport(currentProjectId)}
               onViewAllReports={handleViewAllReports}
+              onOpenSeguimiento={() => goToModule('seguimiento')}
             />
           )}
 

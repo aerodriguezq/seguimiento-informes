@@ -317,6 +317,18 @@ export default async function handler(
       }
     }
 
+    // Tarjetas de % de avance del Dashboard: mismo dato que las 3 tarjetas de
+    // Seguimiento, pero sumado entre todos los proyectos que tengan KPIs.
+    if (request.method === 'GET' && request.query.seguimiento === 'kpisResumen') {
+      const kpiRows = (await sql`
+        SELECT tipo, SUM(total) AS total, SUM(avance) AS avance
+        FROM seguimiento_kpis GROUP BY tipo
+      `) as any[];
+      const kpis: Record<string, { total: number; avance: number }> = {};
+      kpiRows.forEach((k: any) => { kpis[k.tipo] = { total: toNumOrNull(k.total) ?? 0, avance: toNumOrNull(k.avance) ?? 0 }; });
+      return response.status(200).json({ data: kpis, meta: {}, errors: [] });
+    }
+
     if (request.method === 'GET' && request.query.seguimiento === 'cronograma') {
       const projectId = Number(request.query.projectId);
       if (!Number.isInteger(projectId) || projectId <= 0) {

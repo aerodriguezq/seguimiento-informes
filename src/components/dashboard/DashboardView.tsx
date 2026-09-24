@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Project, Report, ReportStatus } from '../../types';
 import { calculateDaysRemaining, getSemaforoStatus, STATUS_SEQUENCE } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
@@ -18,6 +18,13 @@ import {
   Users,
 } from 'lucide-react';
 
+type SeguimientoKpi = { total: number; avance: number };
+const SEGUIMIENTO_KPI_META: { key: string; label: string; icon: string; color: string; bg: string }[] = [
+  { key: 'insumo', label: 'Insumo', icon: '📦', color: '#2563eb', bg: '#eff6ff' },
+  { key: 'abono', label: 'Abono', icon: '🌱', color: '#10b981', bg: '#ecfdf5' },
+  { key: 'material_vegetal', label: 'Material Vegetal', icon: '🌿', color: '#d97706', bg: '#fffbeb' },
+];
+
 // Mismos colores que StatusBadge, para que el segmento de la barra combine
 // visualmente con el badge de esa etapa en el resto de la app.
 const STAGE_BAR_COLOR: Record<ReportStatus, string> = {
@@ -34,6 +41,7 @@ interface DashboardViewProps {
   onSelectReportDetail: (reportId: string) => void;
   onOpenNewReport: () => void;
   onViewAllReports: (filterStatus?: ReportStatus | 'vencidos' | 'proximos') => void;
+  onOpenSeguimiento: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -43,7 +51,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSelectReportDetail,
   onOpenNewReport,
   onViewAllReports,
+  onOpenSeguimiento,
 }) => {
+  const [seguimientoKpis, setSeguimientoKpis] = useState<Record<string, SeguimientoKpi> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/projects?seguimiento=kpisResumen')
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!cancelled && payload?.data) setSeguimientoKpis(payload.data);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   const currentDateLabel = new Intl.DateTimeFormat('es-CO', {
     day: 'numeric',
     month: 'long',
@@ -154,6 +175,54 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </section>
         )}
       </div>
+
+      {seguimientoKpis && Object.keys(seguimientoKpis).length > 0 && (
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-teal-700">Cronograma de Entregas</p>
+              <h3 className="text-sm font-bold text-slate-950">Avance de Seguimiento</h3>
+            </div>
+            <button type="button" onClick={onOpenSeguimiento} className="inline-flex items-center gap-1 text-xs font-bold text-teal-700 hover:text-teal-900">
+              Ver Seguimiento <ArrowUpRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {SEGUIMIENTO_KPI_META.map((meta) => {
+              const kpi = seguimientoKpis[meta.key];
+              const total = Number(kpi?.total);
+              const avance = Number(kpi?.avance);
+              if (!kpi || !Number.isFinite(total) || total === 0) return null;
+              const pct = Math.round((avance / total) * 1000) / 10;
+              return (
+                <button
+                  key={meta.key}
+                  type="button"
+                  onClick={onOpenSeguimiento}
+                  className="rounded-[10px] border border-slate-200 bg-white p-4 text-left shadow-[0_10px_24px_rgba(20,32,43,0.045)] transition hover:shadow-[0_14px_30px_rgba(20,32,43,0.09)]"
+                  style={{ borderTop: `4px solid ${meta.color}` }}
+                >
+                  <div className="mb-2.5 flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{meta.label}</span>
+                    <span className="rounded-lg px-2 py-1 text-sm leading-none" style={{ background: meta.bg, color: meta.color }}>{meta.icon}</span>
+                  </div>
+                  <p className="text-[26px] font-extrabold leading-none text-slate-800">{pct.toFixed(1)}%</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">Porcentaje de avance general</p>
+                  <div className="mt-3.5">
+                    <div className="mb-1 flex items-center justify-between text-[11px] text-slate-600">
+                      <span>Beneficiarios</span>
+                      <b className="text-slate-800">{kpi.avance} / {kpi.total}</b>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: meta.color }} />
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-[0_10px_24px_rgba(20,32,43,0.045)]"><div className="flex items-center justify-between border-b border-slate-200 px-5 py-4"><div><div className="flex items-center gap-2"><FolderKanban className="h-4 w-4 text-teal-700" /><h3 className="text-sm font-bold text-slate-950">Cartera bajo seguimiento</h3></div><p className="mt-1 text-xs text-slate-500">Cumplimiento agregado por proyecto.</p></div><span className="text-xs font-semibold text-slate-500">{projects.length} proyectos</span></div>{projectStats.length === 0 ? <div className="flex min-h-32 flex-col items-center justify-center px-6 text-center"><Users className="mb-2 h-5 w-5 text-slate-300" /><p className="text-sm font-semibold text-slate-700">Aún no hay proyectos registrados</p><p className="mt-1 text-xs text-slate-500">Crea un proyecto para comenzar el seguimiento.</p></div> : <div className="overflow-x-auto"><table className="w-full min-w-180 text-left"><thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-widest text-slate-500"><tr><th className="px-5 py-3">Proyecto</th><th className="px-3 py-3">Empresa</th><th className="px-3 py-3">Informes</th><th className="px-3 py-3">Cumplimiento</th><th className="px-5 py-3 text-right">Abrir</th></tr></thead><tbody className="divide-y divide-slate-100 text-xs">{projectStats.map((item) => <tr key={item.project.id} onClick={() => onSelectProjectDetail(item.project.id)} className="group cursor-pointer transition hover:bg-slate-50"><td className="px-5 py-3.5"><div className="font-bold text-slate-900">{item.project.name}</div><div className="mt-0.5 font-mono text-[10px] text-slate-400">BPIN {item.project.bpin}</div></td><td className="px-3 py-3.5 text-slate-600">{item.project.company}</td><td className="px-3 py-3.5 font-medium text-slate-700">{item.sent}/{item.total} enviados{item.overdue > 0 && <span className="ml-2 text-rose-600">· {item.overdue} vencidos</span>}</td><td className="px-3 py-3.5"><div className="flex min-w-32 items-center gap-2"><div className="h-1.5 flex-1 rounded-full bg-slate-100"><div className={`h-full rounded-full ${item.overdue ? 'bg-rose-500' : 'bg-teal-600'}`} style={{ width: `${item.percent}%` }} /></div><span className="w-9 font-bold text-slate-700">{item.percent}%</span></div></td><td className="px-5 py-3.5 text-right"><ArrowUpRight className="ml-auto h-4 w-4 text-slate-400 transition group-hover:text-teal-700" /></td></tr>)}</tbody></table></div>}</section>
     </div>
