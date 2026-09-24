@@ -121,6 +121,25 @@ textarea:focus-visible {
 	#project-seguimiento-cronograma .seg-row-card {
 		break-inside: avoid;
 		page-break-inside: avoid;
+		margin-bottom: 6px !important;
+	}
+	/* Tramos de la línea de tiempo: sin el rayado diagonal ni la sombra —
+	   solo el color de relleno y un borde fino, para que no se vea tan
+	   cargado en papel. */
+	#project-seguimiento-cronograma .seg-segment {
+		background-image: none !important;
+		box-shadow: none !important;
+		border: 1px solid rgba(0, 0, 0, 0.2) !important;
+	}
+	#project-seguimiento-cronograma .seg-kpi-grid {
+		padding: 0 0 8px 0 !important;
+		gap: 8px !important;
+	}
+	#project-seguimiento-cronograma .seg-rows-list {
+		padding: 0 !important;
+	}
+	#project-seguimiento-cronograma .seg-rows-list > * + * {
+		margin-top: 6px !important;
 	}
 	@page {
 		size: landscape;

@@ -550,7 +550,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       ) : (
         <>
           {/* Tarjetas de % de avance */}
-          <div className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="seg-kpi-grid p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
             {KPI_META.map((meta) => {
               const kpi = data.kpis[meta.key];
               const kpiTotal = Number(kpi?.total);
@@ -580,7 +580,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
           </div>
 
           {/* Filtros + búsqueda */}
-          <div className="px-4 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="no-print px-4 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
             {FILTERS.map((f) => (
               <label key={f.key} className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
                 <input
@@ -605,7 +605,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
             </div>
           </div>
 
-          <div className="p-4 pt-0 space-y-2.5">
+          <div className="seg-rows-list p-4 pt-0 space-y-2.5">
             {filteredRows.map((row) => (
               <SeguimientoRowCard
                 key={row.id}
@@ -698,7 +698,7 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
       key: 'proyeccion',
       label: PROYECCION_META.label,
       segments: [{ start: p.fechaInicio as string, end: p.fechaFin as string, segLabel: 'Entrega insumos', color: PROYECCION_META.color, darkText: PROYECCION_META.darkText }],
-      badge: p.beneficiariosPorDia ? `${p.beneficiariosPorDia} benef./día` : '',
+      badge: p.beneficiariosPorDia ? `${Math.round(p.beneficiariosPorDia * 10) / 10} benef./día` : '',
     });
   }
 
@@ -840,7 +840,7 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
                         return (
                           <div
                             key={idx}
-                            className="absolute rounded cursor-default"
+                            className="seg-segment absolute rounded cursor-default"
                             style={{
                               top: 2, bottom: 2, left, width,
                               backgroundColor: seg.color,
