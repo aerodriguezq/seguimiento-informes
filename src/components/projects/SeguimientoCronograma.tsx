@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarRange, RefreshCw, AlertTriangle, Settings, Save, Search, ChevronDown, ChevronUp, Columns3 } from 'lucide-react';
+import { CalendarRange, RefreshCw, AlertTriangle, Settings, Save, Search, ChevronDown, ChevronUp, Columns3, Printer } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 
 const INSUMO_COLUMNS: { key: string; label: string }[] = [
@@ -400,42 +400,52 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
             </p>
           </div>
         </div>
-        {canEdit && (
-          <div className="flex items-center gap-2">
-            {isAdmin && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="no-print inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg"
+          >
+            <Printer className="h-3.5 w-3.5" />
+            Imprimir
+          </button>
+          {canEdit && (
+            <>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={handleOpenColumnsPanel}
+                  className="no-print inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg"
+                >
+                  <Columns3 className="h-3.5 w-3.5" />
+                  Columnas de insumos
+                </button>
+              )}
               <button
                 type="button"
-                onClick={handleOpenColumnsPanel}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg"
+                onClick={() => setIsEditingConfig((v) => !v)}
+                className="no-print inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg"
               >
-                <Columns3 className="h-3.5 w-3.5" />
-                Columnas de insumos
+                <Settings className="h-3.5 w-3.5" />
+                Cambiar hoja
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setIsEditingConfig((v) => !v)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg"
-            >
-              <Settings className="h-3.5 w-3.5" />
-              Cambiar hoja
-            </button>
-            <button
-              type="button"
-              onClick={handleImport}
-              disabled={isImporting}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white rounded-lg disabled:opacity-50"
-              style={{ background: ACCENT }}
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${isImporting ? 'animate-spin' : ''}`} />
-              {isImporting ? 'Importando...' : 'Importar desde Google Sheets'}
-            </button>
-          </div>
-        )}
+              <button
+                type="button"
+                onClick={handleImport}
+                disabled={isImporting}
+                className="no-print inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white rounded-lg disabled:opacity-50"
+                style={{ background: ACCENT }}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isImporting ? 'animate-spin' : ''}`} />
+                {isImporting ? 'Importando...' : 'Importar desde Google Sheets'}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {canEdit && isEditingConfig && (
-        <div className="mx-4 mt-3 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
+        <div className="no-print mx-4 mt-3 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
           <div className="flex-1 min-w-64">
             <label htmlFor="seguimiento-sheet-link-edit" className="block text-[11px] font-semibold text-slate-700 mb-1">
               Nuevo link de Google Sheets (pestaña del cronograma)
@@ -465,7 +475,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       )}
 
       {isAdmin && isColumnsPanelOpen && (
-        <div className="mx-4 mt-3 rounded-lg bg-slate-50 border border-slate-100 p-3">
+        <div className="no-print mx-4 mt-3 rounded-lg bg-slate-50 border border-slate-100 p-3">
           <p className="text-[11px] font-semibold text-slate-700 mb-2">Columnas visibles en "Ver insumos"</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
             {INSUMO_COLUMNS.map((col) => (
@@ -510,7 +520,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       )}
 
       {canEdit && log.length > 0 && (
-        <div className="mx-4 mt-3">
+        <div className="no-print mx-4 mt-3">
           <button
             type="button"
             onClick={() => setIsLogVisible((v) => !v)}
@@ -583,7 +593,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
                 {f.label}
               </label>
             ))}
-            <div className="relative ml-auto w-full sm:w-56">
+            <div className="no-print relative ml-auto w-full sm:w-56">
               <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
@@ -716,6 +726,9 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
 
   const hasTimeline = tracks.length > 0 && days.length > 0;
   const totalW = days.length * DAY_W;
+  // Presupuesto de ancho aproximado para la línea de tiempo en una hoja
+  // horizontal (carta/A4) menos la columna de etiquetas y márgenes.
+  const printScale = Math.min(1, 850 / totalW);
   const todayIso = new Date().toISOString().slice(0, 10);
   const todayIdx = dayIndexOf(days, todayIso);
 
@@ -772,7 +785,7 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
   }, [days.length]);
 
   return (
-    <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${BORDER}`, background: row.isResumen ? '#fafbfc' : '#fff' }}>
+    <div className="seg-row-card rounded-xl overflow-hidden" style={{ border: `1px solid ${BORDER}`, background: row.isResumen ? '#fafbfc' : '#fff' }}>
       <div className="flex flex-wrap items-baseline gap-2.5 px-4 py-3">
         {row.subActividad && (
           <span className="shrink-0 font-mono text-[12px] px-2 py-0.5 rounded-md" style={{ background: ACCENT_LIGHT, color: ACCENT }}>{row.subActividad}</span>
@@ -792,7 +805,7 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
         <p className="px-4 pb-3 text-[11px] italic" style={{ color: MUTED }}>Sin fechas registradas para esta actividad.</p>
       ) : (
         <div className="px-4 pb-3">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="no-print flex items-center gap-2 mb-1">
             <button type="button" onClick={() => scrollByMonth(-1)} className="h-[22px] w-[22px] rounded-md text-[13px] leading-none" style={{ border: `1px solid ${BORDER}`, color: ACCENT }} title="Mes anterior">‹</button>
             <div className="text-xs font-bold capitalize" style={{ minWidth: 90, color: '#1f2937' }}>{monthLabel}</div>
             <button type="button" onClick={() => scrollByMonth(1)} className="h-[22px] w-[22px] rounded-md text-[13px] leading-none" style={{ border: `1px solid ${BORDER}`, color: ACCENT }} title="Mes siguiente">›</button>
@@ -809,8 +822,8 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
               ))}
             </div>
 
-            <div ref={scrollRef} onScroll={updateMonthLabel} className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden rounded-md">
-              <div style={{ position: 'relative', width: totalW }}>
+            <div ref={scrollRef} onScroll={updateMonthLabel} className="seg-timeline-scroll flex-1 min-w-0 overflow-x-auto overflow-y-hidden rounded-md">
+              <div className="seg-timeline-track" style={{ position: 'relative', width: totalW, ['--seg-print-scale' as string]: printScale }}>
                 <div style={{ position: 'relative', height: 15, marginBottom: 2 }}>{dayTicks.dayCells}</div>
                 <div style={{ position: 'relative', width: totalW, background: '#f7f8f9', borderRadius: 4 }}>
                   {dayTicks.weekendBands}
@@ -876,7 +889,7 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
             type="button"
             onClick={handleToggleInsumos}
             disabled={insumosCount === 0}
-            className="w-full flex items-center gap-2 px-4 py-2 text-left text-xs font-semibold disabled:cursor-default disabled:opacity-50"
+            className="no-print w-full flex items-center gap-2 px-4 py-2 text-left text-xs font-semibold disabled:cursor-default disabled:opacity-50"
             style={{ color: ACCENT }}
           >
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isInsumosOpen ? 'rotate-180' : ''}`} />
@@ -945,7 +958,7 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
 
       {hoverTip && (
         <div
-          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-lg px-3 py-2 text-[11px] shadow-lg"
+          className="no-print pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-lg px-3 py-2 text-[11px] shadow-lg"
           style={{ left: hoverTip.x, top: hoverTip.y - 8, background: '#1f2937', color: '#fff', maxWidth: 220 }}
         >
           <p className="font-bold leading-snug">{hoverTip.title}</p>

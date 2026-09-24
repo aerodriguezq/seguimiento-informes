@@ -87,3 +87,43 @@ textarea:focus-visible {
 		padding-right: 0.65rem;
 	}
 }
+
+/* Impresión de Seguimiento: aísla la tarjeta de cronograma (sin importar
+   dónde esté montada — página dedicada o Detalle de Proyecto) y escala la
+   línea de tiempo (posicionada en px absolutos) para que quepa en el ancho
+   de la hoja sin cortarse. */
+@media print {
+	body * {
+		visibility: hidden;
+	}
+	#project-seguimiento-cronograma,
+	#project-seguimiento-cronograma * {
+		visibility: visible;
+	}
+	#project-seguimiento-cronograma {
+		position: absolute;
+		left: 0;
+		top: 0;
+		width: 100%;
+		border: none !important;
+		box-shadow: none !important;
+	}
+	#project-seguimiento-cronograma .no-print {
+		display: none !important;
+	}
+	#project-seguimiento-cronograma .seg-timeline-scroll {
+		overflow: visible !important;
+	}
+	#project-seguimiento-cronograma .seg-timeline-track {
+		transform: scale(var(--seg-print-scale, 1));
+		transform-origin: top left;
+	}
+	#project-seguimiento-cronograma .seg-row-card {
+		break-inside: avoid;
+		page-break-inside: avoid;
+	}
+	@page {
+		size: landscape;
+		margin: 10mm;
+	}
+}
