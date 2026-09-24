@@ -411,7 +411,28 @@ export default async function handler(
         RETURNING proyecto_id AS id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate"
       `;
 
-      return response.status(200).json({ data: updatedProjects[0], meta: {}, errors: [] });
+      // "Tipos de Informe Aplicables": antes esto solo actualizaba estado
+      // local en el navegador y nunca llegaba a la base de datos — se veía
+      // "guardado" pero se perdía al recargar. Reemplaza por completo las
+      // filas de proyecto_tipo_informe para este proyecto.
+      let applicableTypeIds: string[] | undefined;
+      if (Object.prototype.hasOwnProperty.call(request.body ?? {}, 'applicableTypeIds')) {
+        const rawIds = request.body.applicableTypeIds;
+        if (!Array.isArray(rawIds)) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['applicableTypeIds debe ser una lista.'] });
+        }
+        await sql`DELETE FROM proyecto_tipo_informe WHERE proyecto_id = ${projectId}`;
+        for (const typeId of rawIds) {
+          await sql`INSERT INTO proyecto_tipo_informe (proyecto_id, tipo_informe_id) VALUES (${projectId}, ${typeId})`;
+        }
+        applicableTypeIds = rawIds.map(String);
+      }
+
+      return response.status(200).json({
+        data: { ...updatedProjects[0], ...(applicableTypeIds !== undefined ? { applicableTypeIds } : {}) },
+        meta: {},
+        errors: [],
+      });
     }
 
     if (request.method === 'POST') {

@@ -442,14 +442,22 @@ export default function App() {
     );
   };
 
-  const handleUpdateProjectApplicableTypes = (projectId: string, newTypeIds: string[]) => {
-    setProjects((prev) =>
-      prev.map((p) => {
-        if (p.id !== projectId) return p;
-        return { ...p, applicableTypeIds: newTypeIds };
-      })
-    );
-    showToast('Configuración de tipos aplicables actualizada para el proyecto.', 'success');
+  const handleUpdateProjectApplicableTypes = async (projectId: string, newTypeIds: string[]) => {
+    try {
+      const response = await fetch('/api/projects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: Number(projectId), applicableTypeIds: newTypeIds }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar los tipos aplicables.');
+      setProjects((prev) =>
+        prev.map((p) => (p.id === projectId ? { ...p, applicableTypeIds: payload.data.applicableTypeIds ?? newTypeIds } : p))
+      );
+      showToast('Configuración de tipos aplicables actualizada para el proyecto.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible guardar los tipos aplicables.', 'info');
+    }
   };
 
   const handleUpdateProjectVigencia = async (projectId: string, startDate: string, endDate: string) => {
