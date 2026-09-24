@@ -95,6 +95,12 @@ function dayIndexOf(days: string[], iso: string): number {
   return days.indexOf(iso);
 }
 
+const MESES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+function fmtShortDate(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  return `${Number(d)} ${MESES_CORTO[Number(m) - 1]} ${y}`;
+}
+
 // El eje de días es COMPARTIDO por todas las tarjetas (igual que buildTimelineShared en el
 // original): se calcula una sola vez, desde la fecha más temprana hasta la más tardía de TODO el
 // proyecto, y cada fila solo posiciona sus propios tramos sobre ese mismo eje.
@@ -493,6 +499,7 @@ type Track = { key: string; label: string; segments: Segment[]; badge: string };
 const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<string>; days: string[] }> = ({ row, activeFilters, days }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [monthLabel, setMonthLabel] = useState('');
+  const [hoverTip, setHoverTip] = useState<{ x: number; y: number; title: string; range: string; extra: string } | null>(null);
 
   const tracks: Track[] = [];
 
@@ -658,14 +665,28 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
                         return (
                           <div
                             key={idx}
-                            className="absolute rounded"
+                            className="absolute rounded cursor-default"
                             style={{
                               top: 2, bottom: 2, left, width,
                               backgroundColor: seg.color,
                               boxShadow: '0 0 0 1px rgba(0,0,0,0.06)',
                               backgroundImage: 'repeating-linear-gradient(to right, rgba(0,0,0,0.16) 0, rgba(0,0,0,0.16) 1px, transparent 1px, transparent 26px)',
                             }}
-                            title={`${seg.start} → ${seg.end}`}
+                            onMouseEnter={(e) => {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setHoverTip({
+                                x: rect.left + rect.width / 2,
+                                y: rect.top,
+                                title: `${track.label} · ${seg.segLabel}`,
+                                range: seg.start === seg.end ? fmtShortDate(seg.start) : `${fmtShortDate(seg.start)} → ${fmtShortDate(seg.end)}`,
+                                extra: track.badge,
+                              });
+                            }}
+                            onMouseMove={(e) => {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setHoverTip((prev) => (prev ? { ...prev, x: rect.left + rect.width / 2, y: rect.top } : prev));
+                            }}
+                            onMouseLeave={() => setHoverTip(null)}
                           >
                             {width >= 45 && (
                               <span
@@ -684,6 +705,18 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {hoverTip && (
+        <div
+          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-lg px-3 py-2 text-[11px] shadow-lg"
+          style={{ left: hoverTip.x, top: hoverTip.y - 8, background: '#1f2937', color: '#fff', maxWidth: 220 }}
+        >
+          <p className="font-bold leading-snug">{hoverTip.title}</p>
+          <p className="mt-0.5 text-[10.5px]" style={{ color: '#cbd5e1' }}>{hoverTip.range}</p>
+          {hoverTip.extra && <p className="mt-0.5 text-[10.5px]" style={{ color: '#a5f3fc' }}>{hoverTip.extra}</p>}
+          <div className="absolute left-1/2 top-full -translate-x-1/2" style={{ width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid #1f2937' }} />
         </div>
       )}
     </div>
