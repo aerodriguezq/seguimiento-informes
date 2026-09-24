@@ -44,15 +44,30 @@ function serialToIso(serial: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+// Valida que año/mes/día formen una fecha real (rechaza día 0, 31 de
+// febrero, etc.) antes de dejarla salir — un valor así llega intacto hasta
+// el INSERT y Postgres lo rechaza con un error críptico ("date/time field
+// value out of range"), tumbando toda la importación por una sola celda mala.
+function normalizeDateParts(yearStr: string, monthStr: string, dayStr: string): string | null {
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null;
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 export function parseDate(value: SheetValue | undefined): string | null {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value === 'number') return serialToIso(value);
   const t = String(value).trim();
   if (!t) return null;
   let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
-  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  if (m) return normalizeDateParts(m[1], m[2], m[3]);
   m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(t);
-  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  if (m) return normalizeDateParts(m[3], m[2], m[1]);
   return null;
 }
 
