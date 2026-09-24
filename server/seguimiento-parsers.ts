@@ -208,12 +208,14 @@ export function parseInsumosDetalle(grid: Grid): { compra: Record<string, PistaA
   return { compra, entrega, detalle };
 }
 
-// Abono: un renglón por beneficiario. Entregado = fila con la fecha
-// programada llena (sin depender de ninguna columna de "Estado").
+// Abono: un renglón por beneficiario. Entregado = fila con "Fecha Final"
+// llena (fecha real de cierre; reemplaza a la fecha programada que se usaba
+// antes).
 export function parseAbono(grid: Grid): Record<string, PistaAgg> {
   const { headerRow, rows } = withHeaders(grid);
   const lineaCol = findContains(headerRow, 'linea productiva');
-  let fechaCol = findExact(headerRow, 'Fecha Programada de entrega de Abono');
+  let fechaCol = findExact(headerRow, 'Fecha Final');
+  if (fechaCol === -1) fechaCol = findExact(headerRow, 'Fecha Programada de entrega de Abono');
   if (fechaCol === -1) fechaCol = findContains(headerRow, 'fecha programada', 'entrega');
   const kgCol = findExact(headerRow, 'ABONO ORGANICO (KG)');
   const haCol = findContains(headerRow, 'area asignada');
@@ -240,11 +242,13 @@ export function parseAbono(grid: Grid): Record<string, PistaAgg> {
   return byLinea;
 }
 
-// Material Vegetal: mismo patrón que Abono, pero para el material de siembra.
+// Material Vegetal: mismo patrón que Abono ("Fecha Final" reemplaza a la
+// fecha programada), pero para el material de siembra.
 export function parseMaterialVegetal(grid: Grid): Record<string, PistaAgg> {
   const { headerRow, rows } = withHeaders(grid);
   const lineaCol = findContains(headerRow, 'linea productiva');
-  const fechaCol = findExact(headerRow, 'Fecha Programada de entrega de Material Vegetal');
+  let fechaCol = findExact(headerRow, 'Fecha Final');
+  if (fechaCol === -1) fechaCol = findExact(headerRow, 'Fecha Programada de entrega de Material Vegetal');
   const kgCol = findExact(headerRow, 'Cantidad Kg./Beneficiario');
   if (lineaCol === -1) throw new Error('No se encontró la columna "Línea Productiva Asignada" en la pestaña Material Vegetal.');
 
@@ -272,10 +276,11 @@ export function parseMaterialVegetal(grid: Grid): Record<string, PistaAgg> {
 export function parseEntregaInsumos(grid: Grid): Record<string, PistaAgg> {
   const { headerRow, rows } = withHeaders(grid);
   const lineaCol = findContains(headerRow, 'linea productiva');
-  // "Fecha Sugerida Entrega" es el nombre original esperado; la hoja actual
-  // usa "Fecha de entrega" (fecha real) — se prueban ambos por si el nombre
-  // vuelve a cambiar.
-  let fechaCol = findExact(headerRow, 'Fecha Sugerida Entrega');
+  // "Fechas Final" es la fecha real de cierre y reemplaza a las fechas
+  // programadas/sugeridas que se usaban antes.
+  let fechaCol = findExact(headerRow, 'Fechas Final');
+  if (fechaCol === -1) fechaCol = findExact(headerRow, 'Fecha Final');
+  if (fechaCol === -1) fechaCol = findExact(headerRow, 'Fecha Sugerida Entrega');
   if (fechaCol === -1) fechaCol = findExact(headerRow, 'Fecha de entrega');
   const kgCol = findExact(headerRow, 'Cantidad Insumos Kg./Beneficiario');
   if (lineaCol === -1) throw new Error('No se encontró una columna de línea productiva en la pestaña Entrega Insumos.');
@@ -336,9 +341,119 @@ export function parseEntregaEstimada(grid: Grid): Record<string, Proyeccion> {
 
 export type Kpi = { total: number; avance: number };
 
+type BeneficiariosGroupKey = 'abono' | 'materialVegetal' | 'insumo';
+
 // Beneficiarios: única fuente de las 3 tarjetas de % de arriba. Solo se leen
 // agregados (conteos) — nunca cédula, celular ni nombre.
+//
+// La hoja ahora agrupa las columnas en 2 filas de encabezado: una fila con
+// los títulos fusionados "Abono Organico" / "Material Vegetal" / "Entrega
+// Insumos", y debajo la fila real de subcolumnas ("Ultima Fecha", "Fecha
+// anterior", "Fecha final", "Cantidad ..."). "Fecha final" es la fecha real
+// de cierre y reemplaza a la fecha "programada" que se usaba antes.
 export function parseBeneficiariosKpis(grid: Grid): { insumo: Kpi; abono: Kpi; materialVegetal: Kpi } {
+  const grouped = detectBeneficiariosGroupHeader(grid);
+  if (grouped) return parseBeneficiariosKpisGrouped(grid, grouped);
+  return parseBeneficiariosKpisFlat(grid);
+}
+
+function detectBeneficiariosGroupHeader(grid: Grid): { groupRowIdx: number; groups: { key: BeneficiariosGroupKey; col: number }[] } | null {
+  const scanRows = Math.min(grid.length, 6);
+  for (let r = 0; r < scanRows; r++) {
+    const row = grid[r] || [];
+    const groups: { key: BeneficiariosGroupKey; col: number }[] = [];
+    for (let c = 0; c < row.length; c++) {
+      const h = normalizeHeader(row[c]);
+      if (!h) continue;
+      if (h.indexOf('abono') !== -1 && !groups.some((g) => g.key === 'abono')) groups.push({ key: 'abono', col: c });
+      else if (h.indexOf('material vegetal') !== -1 && !groups.some((g) => g.key === 'materialVegetal')) groups.push({ key: 'materialVegetal', col: c });
+      else if (h.indexOf('entrega insumos') !== -1 && !groups.some((g) => g.key === 'insumo')) groups.push({ key: 'insumo', col: c });
+    }
+    if (groups.length >= 2 && grid[r + 1]) {
+      groups.sort((a, b) => a.col - b.col);
+      return { groupRowIdx: r, groups };
+    }
+  }
+  return null;
+}
+
+function parseBeneficiariosKpisGrouped(
+  grid: Grid,
+  { groupRowIdx, groups }: { groupRowIdx: number; groups: { key: BeneficiariosGroupKey; col: number }[] },
+): { insumo: Kpi; abono: Kpi; materialVegetal: Kpi } {
+  const subHeaderRow = (grid[groupRowIdx + 1] || []).map((h) => (h === undefined || h === null ? '' : String(h)));
+  const rows = grid.slice(groupRowIdx + 2);
+  const spanEnd = (idx: number) => (idx + 1 < groups.length ? groups[idx + 1].col : subHeaderRow.length);
+
+  const findInSpan = (start: number, end: number, name: string) => {
+    for (let c = start; c < end; c++) {
+      if (normalizeHeader(subHeaderRow[c]) === normalizeHeader(name)) return c;
+    }
+    return -1;
+  };
+  const findContainsInSpan = (start: number, end: number, term: string) => {
+    for (let c = start; c < end; c++) {
+      if (normalizeHeader(subHeaderRow[c]).indexOf(normalizeHeader(term)) !== -1) return c;
+    }
+    return -1;
+  };
+
+  const cols: Partial<Record<BeneficiariosGroupKey, { fechaFinal: number; cantidad: number }>> = {};
+  groups.forEach((g, idx) => {
+    const end = spanEnd(idx);
+    cols[g.key] = {
+      fechaFinal: findInSpan(g.col, end, 'Fecha final'),
+      cantidad: findContainsInSpan(g.col, end, 'cantidad'),
+    };
+  });
+
+  const todayIso = getTodayIso();
+  const entregadoAFecha = (value: SheetValue | undefined): boolean => {
+    if (!isFilled(value)) return false;
+    const iso = parseDate(value);
+    return iso === null ? true : iso <= todayIso;
+  };
+
+  let insumoTotal = 0;
+  let insumoAvance = 0;
+  let abonoTotal = 0;
+  let abonoAvance = 0;
+  let mvTotal = 0;
+  let mvAvance = 0;
+
+  for (const row of rows) {
+    const hasAnyData = row.some((v) => v !== undefined && v !== null && String(v).trim() !== '');
+    if (!hasAnyData) continue;
+
+    if (cols.insumo) {
+      insumoTotal++;
+      if (cols.insumo.fechaFinal !== -1 && entregadoAFecha(row[cols.insumo.fechaFinal])) insumoAvance++;
+    }
+    if (cols.materialVegetal) {
+      mvTotal++;
+      if (cols.materialVegetal.fechaFinal !== -1 && entregadoAFecha(row[cols.materialVegetal.fechaFinal])) mvAvance++;
+    }
+    if (cols.abono) {
+      const cantidadAbono = cols.abono.cantidad !== -1 ? parseNum(row[cols.abono.cantidad]) : null;
+      const excluido = cols.abono.cantidad !== -1 && (cantidadAbono === null || cantidadAbono === 0);
+      if (!excluido) {
+        abonoTotal++;
+        if (cols.abono.fechaFinal !== -1 && entregadoAFecha(row[cols.abono.fechaFinal])) abonoAvance++;
+      }
+    }
+  }
+
+  return {
+    insumo: { total: insumoTotal, avance: insumoAvance },
+    abono: { total: abonoTotal, avance: abonoAvance },
+    materialVegetal: { total: mvTotal, avance: mvAvance },
+  };
+}
+
+// Estructura anterior (una sola fila de encabezados planos: ABONO, Material
+// Vegetal, Entrega Insumos), conservada como respaldo por si la hoja vuelve
+// a ese formato.
+function parseBeneficiariosKpisFlat(grid: Grid): { insumo: Kpi; abono: Kpi; materialVegetal: Kpi } {
   const { headerRow, rows } = withHeaders(grid);
   const abonoCol = findExact(headerRow, 'ABONO');
   const cantidadAbonoCol = findExact(headerRow, 'Cantidad Abono (Bultos)');
@@ -348,9 +463,6 @@ export function parseBeneficiariosKpis(grid: Grid): { insumo: Kpi; abono: Kpi; m
     throw new Error('No se encontraron las columnas ABONO, Material Vegetal o Entrega Insumos en la pestaña Beneficiarios.');
   }
 
-  // ABONO / Material Vegetal / Entrega Insumos en esta hoja son fechas de
-  // entrega — una fecha futura es una entrega PROGRAMADA, no una entrega real
-  // todavía, así que no debe contar en el % de avance.
   const todayIso = getTodayIso();
   const entregadoAFecha = (value: SheetValue | undefined): boolean => {
     if (!isFilled(value)) return false;
