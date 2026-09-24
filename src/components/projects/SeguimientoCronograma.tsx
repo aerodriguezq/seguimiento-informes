@@ -305,9 +305,12 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
 
   const filteredRows = useMemo(() => {
     if (!data) return [];
+    const withTimeline = data.rows.filter(
+      (r) => r.pistas.some((p) => p.fechaInicio && p.fechaFin) || (r.proyeccion?.fechaInicio && r.proyeccion.fechaFin),
+    );
     const q = search.trim().toLowerCase();
-    if (!q) return data.rows;
-    return data.rows.filter((r) => r.subActividad.toLowerCase().includes(q) || r.concepto.toLowerCase().includes(q));
+    if (!q) return withTimeline;
+    return withTimeline.filter((r) => r.subActividad.toLowerCase().includes(q) || r.concepto.toLowerCase().includes(q));
   }, [data, search]);
 
   const sharedDays = useMemo(() => (data ? buildSharedDays(data.rows) : []), [data]);
