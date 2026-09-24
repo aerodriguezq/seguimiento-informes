@@ -1,5 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarRange, RefreshCw, AlertTriangle, Settings, Save, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { CalendarRange, RefreshCw, AlertTriangle, Settings, Save, Search, ChevronDown, ChevronUp, Columns3 } from 'lucide-react';
+import { useAuth } from '../../auth/AuthContext';
+
+const INSUMO_COLUMNS: { key: string; label: string }[] = [
+  { key: 'insumo', label: 'Insumo' },
+  { key: 'unidad', label: 'Unidad' },
+  { key: 'componente', label: 'Componente' },
+  { key: 'proceso', label: 'Proceso' },
+  { key: 'cantidad', label: 'Cantidad' },
+  { key: 'beneficiarios', label: 'Benef.' },
+  { key: 'fechaCompra', label: 'Fecha compra' },
+  { key: 'fechaEntrega', label: 'Fecha entrega' },
+  { key: 'llego', label: 'Llegó' },
+  { key: 'estado', label: 'Estado' },
+  { key: 'tanda', label: 'Tanda' },
+];
+const INSUMO_COLUMN_KEYS = INSUMO_COLUMNS.map((c) => c.key);
 
 function extractSheetIds(input: string): { spreadsheetId: string; gid: string } | null {
   const trimmed = input.trim();
@@ -41,7 +57,13 @@ type SeguimientoRow = {
 };
 type Kpi = { total: number; avance: number };
 type SeguimientoData = {
-  config: { spreadsheetId: string; cronogramaGid: string; lastImportAt: string | null; lastError: string | null } | null;
+  config: {
+    spreadsheetId: string;
+    cronogramaGid: string;
+    lastImportAt: string | null;
+    lastError: string | null;
+    insumosColumnasVisibles: string[] | null;
+  } | null;
   kpis: Record<string, Kpi>;
   rows: SeguimientoRow[];
 };
@@ -139,6 +161,8 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   canEdit,
   standalone = false,
 }) => {
+  const { user } = useAuth();
+  const isAdmin = !!user?.isAdmin;
   const [data, setData] = useState<SeguimientoData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
@@ -149,6 +173,9 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set(FILTERS.map((f) => f.key)));
+  const [isColumnsPanelOpen, setIsColumnsPanelOpen] = useState(false);
+  const [draftColumns, setDraftColumns] = useState<Set<string>>(new Set(INSUMO_COLUMN_KEYS));
+  const [isSavingColumns, setIsSavingColumns] = useState(false);
 
   const pushLog = (message: string, tone: LogEntry['tone']) => {
     const time = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -229,6 +256,41 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       pushLog(err instanceof Error ? err.message : 'No fue posible guardar la hoja de cálculo.', 'error');
     } finally {
       setIsSavingConfig(false);
+    }
+  };
+
+  const handleOpenColumnsPanel = () => {
+    const visible = data?.config?.insumosColumnasVisibles;
+    setDraftColumns(new Set(visible && visible.length > 0 ? visible : INSUMO_COLUMN_KEYS));
+    setIsColumnsPanelOpen(true);
+  };
+
+  const toggleDraftColumn = (key: string) => {
+    setDraftColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleSaveColumns = async () => {
+    setIsSavingColumns(true);
+    try {
+      const columnas = draftColumns.size === INSUMO_COLUMN_KEYS.length ? null : INSUMO_COLUMN_KEYS.filter((k) => draftColumns.has(k));
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'seguimientoInsumosColumnas', projectId: Number(projectId), columnas }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar las columnas.');
+      setData((prev) => (prev && prev.config ? { ...prev, config: { ...prev.config, insumosColumnasVisibles: columnas } } : prev));
+      setIsColumnsPanelOpen(false);
+    } catch (err) {
+      pushLog(err instanceof Error ? err.message : 'No fue posible guardar las columnas.', 'error');
+    } finally {
+      setIsSavingColumns(false);
     }
   };
 
@@ -337,6 +399,16 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
         </div>
         {canEdit && (
           <div className="flex items-center gap-2">
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleOpenColumnsPanel}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg"
+              >
+                <Columns3 className="h-3.5 w-3.5" />
+                Columnas de insumos
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setIsEditingConfig((v) => !v)}
@@ -386,6 +458,44 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
             <Save className="h-3.5 w-3.5" />
             {isSavingConfig ? 'Guardando...' : 'Guardar'}
           </button>
+        </div>
+      )}
+
+      {isAdmin && isColumnsPanelOpen && (
+        <div className="mx-4 mt-3 rounded-lg bg-slate-50 border border-slate-100 p-3">
+          <p className="text-[11px] font-semibold text-slate-700 mb-2">Columnas visibles en "Ver insumos"</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+            {INSUMO_COLUMNS.map((col) => (
+              <label key={col.key} className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={draftColumns.has(col.key)}
+                  onChange={() => toggleDraftColumn(col.key)}
+                  className="rounded"
+                  style={{ accentColor: ACCENT }}
+                />
+                {col.label}
+              </label>
+            ))}
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSaveColumns}
+              disabled={isSavingColumns || draftColumns.size === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
+            >
+              <Save className="h-3.5 w-3.5" />
+              {isSavingColumns ? 'Guardando...' : 'Guardar'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsColumnsPanelOpen(false)}
+              className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700"
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
       )}
 
@@ -484,7 +594,14 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
 
           <div className="p-4 pt-0 space-y-2.5">
             {filteredRows.map((row) => (
-              <SeguimientoRowCard key={row.id} row={row} activeFilters={activeFilters} days={sharedDays} projectId={projectId} />
+              <SeguimientoRowCard
+                key={row.id}
+                row={row}
+                activeFilters={activeFilters}
+                days={sharedDays}
+                projectId={projectId}
+                visibleInsumoColumns={data.config?.insumosColumnasVisibles && data.config.insumosColumnasVisibles.length > 0 ? data.config.insumosColumnasVisibles : INSUMO_COLUMN_KEYS}
+              />
             ))}
           </div>
         </>
@@ -511,7 +628,7 @@ type InsumoDetalle = {
   tanda: string;
 };
 
-const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<string>; days: string[]; projectId: string }> = ({ row, activeFilters, days, projectId }) => {
+const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<string>; days: string[]; projectId: string; visibleInsumoColumns: string[] }> = ({ row, activeFilters, days, projectId, visibleInsumoColumns }) => {
   const [isInsumosOpen, setIsInsumosOpen] = useState(false);
   const [isLoadingInsumos, setIsLoadingInsumos] = useState(false);
   const [insumos, setInsumos] = useState<InsumoDetalle[] | null>(null);
@@ -777,27 +894,41 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
                   <table className="w-full text-[10.5px] border-collapse">
                     <thead>
                       <tr style={{ background: '#eef2f6' }}>
-                        {['Insumo', 'Unidad', 'Componente', 'Proceso', 'Cantidad', 'Benef.', 'Fecha compra', 'Fecha entrega', 'Llegó', 'Estado', 'Tanda'].map((h) => (
-                          <th key={h} className="px-2 py-1.5 text-left font-bold whitespace-nowrap" style={{ borderBottom: `2px solid ${BORDER}`, color: '#1f2937' }}>{h}</th>
+                        {INSUMO_COLUMNS.filter((c) => visibleInsumoColumns.includes(c.key)).map((c) => (
+                          <th key={c.key} className="px-2 py-1.5 text-left font-bold whitespace-nowrap" style={{ borderBottom: `2px solid ${BORDER}`, color: '#1f2937' }}>{c.label}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {insumos.map((row2, idx) => (
-                        <tr key={idx} style={{ background: idx % 2 === 1 ? '#fafbfc' : '#fff' }}>
-                          <td className="px-2 py-1.5 max-w-56 truncate" title={row2.insumo} style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.insumo}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.unidad}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.componente}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.proceso}</td>
-                          <td className="px-2 py-1.5 text-right" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.cantidad ?? ''}</td>
-                          <td className="px-2 py-1.5 text-right" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.beneficiarios ?? ''}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.fechaCompra ? fmtShortDate(row2.fechaCompra) : ''}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.fechaEntrega ? fmtShortDate(row2.fechaEntrega) : ''}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.llego}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.estado}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.tanda}</td>
-                        </tr>
-                      ))}
+                      {insumos.map((row2, idx) => {
+                        const cellByKey: Record<string, React.ReactNode> = {
+                          insumo: row2.insumo,
+                          unidad: row2.unidad,
+                          componente: row2.componente,
+                          proceso: row2.proceso,
+                          cantidad: row2.cantidad ?? '',
+                          beneficiarios: row2.beneficiarios ?? '',
+                          fechaCompra: row2.fechaCompra ? fmtShortDate(row2.fechaCompra) : '',
+                          fechaEntrega: row2.fechaEntrega ? fmtShortDate(row2.fechaEntrega) : '',
+                          llego: row2.llego,
+                          estado: row2.estado,
+                          tanda: row2.tanda,
+                        };
+                        return (
+                          <tr key={idx} style={{ background: idx % 2 === 1 ? '#fafbfc' : '#fff' }}>
+                            {INSUMO_COLUMNS.filter((c) => visibleInsumoColumns.includes(c.key)).map((c) => (
+                              <td
+                                key={c.key}
+                                className={`px-2 py-1.5 whitespace-nowrap ${c.key === 'insumo' ? 'max-w-56 truncate' : ''} ${c.key === 'cantidad' || c.key === 'beneficiarios' ? 'text-right' : ''}`}
+                                title={c.key === 'insumo' ? row2.insumo : undefined}
+                                style={{ borderBottom: `1px solid ${BORDER}` }}
+                              >
+                                {cellByKey[c.key]}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { canEditModuleRequest } from '../../server/admin-auth.js';
+import { canEditModuleRequest, isAdminRequest } from '../../server/admin-auth.js';
 import { getGoogleOAuthClient } from '../../server/google-oauth.js';
 import { getSheetTitleByGid, getSheetGridWithBackgrounds, getSheetValues } from '../../server/google-sheets.js';
 import { parseCronograma } from '../../server/cronograma-parser.js';
@@ -52,7 +52,8 @@ function toNumOrNull(v: unknown): number | null {
 async function fetchSeguimiento(sql: SqlClient, projectId: number) {
   const [config] = (await sql`
     SELECT spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid",
-      ultima_importacion AS "lastImportAt", ultimo_error AS "lastError"
+      ultima_importacion AS "lastImportAt", ultimo_error AS "lastError",
+      insumos_columnas_visibles AS "insumosColumnasVisibles"
     FROM seguimiento_config WHERE proyecto_id = ${projectId}
   `) as any[];
 
@@ -342,6 +343,30 @@ export default async function handler(
         ORDER BY insumo_id ASC
       `) as any[];
       return response.status(200).json({ data: insumos, meta: { total: insumos.length }, errors: [] });
+    }
+
+    if (request.method === 'POST' && request.body?.kind === 'seguimientoInsumosColumnas') {
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede configurar las columnas visibles.'] });
+      }
+      const projectId = Number(request.body?.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      const columnas = request.body?.columnas;
+      if (columnas !== null && !Array.isArray(columnas)) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El listado de columnas debe ser un arreglo o null.'] });
+      }
+      const columnasJson = columnas === null ? null : JSON.stringify(columnas.map((c: unknown) => String(c)));
+      const rows = await sql`
+        UPDATE seguimiento_config SET insumos_columnas_visibles = ${columnasJson}::jsonb
+        WHERE proyecto_id = ${projectId}
+        RETURNING insumos_columnas_visibles AS "insumosColumnasVisibles"
+      `;
+      if (rows.length === 0) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Este proyecto no tiene configurado un cronograma de Seguimiento.'] });
+      }
+      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
     }
 
     if (request.method === 'POST' && (request.body?.kind === 'importCronograma' || request.body?.kind === 'seguimientoConfig')) {
