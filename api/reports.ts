@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../server/google-drive.js';
 import { findDeliveryEmail } from '../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
+import { isAdminRequest } from '../server/admin-auth.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -345,7 +346,7 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
 }
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
-  if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'PATCH') {
+  if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'PATCH' && request.method !== 'DELETE') {
     return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
   }
 
@@ -356,6 +357,32 @@ export default async function handler(request: VercelRequest, response: VercelRe
     }
     const { neon } = await import('@neondatabase/serverless');
     const sql = neon(databaseUrl);
+
+    if (request.method === 'DELETE') {
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede eliminar informes.'] });
+      }
+      const reportId = Number(request.query.reportId);
+      if (!Number.isInteger(reportId) || reportId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del informe es obligatorio.'] });
+      }
+      // Sin ON DELETE CASCADE en informe_contacto/seguimiento_informe ni en
+      // alerta_contacto/alerta_dia (que referencian a las alertas del paso
+      // actual, que sí cascadean desde informes) — hay que limpiar a mano en
+      // el orden correcto o la FK bloquea el borrado.
+      const linkedAlerts = (await sql`SELECT alerta_id AS id FROM alertas WHERE informe_id = ${reportId}`) as any[];
+      const alertIds = linkedAlerts.map((a: any) => a.id);
+      if (alertIds.length > 0) {
+        await sql`DELETE FROM alerta_contacto WHERE alerta_id = ANY(${alertIds})`;
+        await sql`DELETE FROM alerta_dia WHERE alerta_id = ANY(${alertIds})`;
+        await sql`DELETE FROM alertas WHERE alerta_id = ANY(${alertIds})`;
+      }
+      await sql`DELETE FROM informe_contacto WHERE informe_id = ${reportId}`;
+      await sql`DELETE FROM seguimiento_informe WHERE informe_id = ${reportId}`;
+      const deleted = await sql`DELETE FROM informes WHERE informe_id = ${reportId} RETURNING informe_id AS id`;
+      if (!deleted[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Informe no encontrado.'] });
+      return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+    }
 
     const cronSecret = process.env.CRON_SECRET;
     const isCronRequest = request.method === 'GET' && !!cronSecret && request.headers.authorization === `Bearer ${cronSecret}`;
@@ -416,6 +443,54 @@ export default async function handler(request: VercelRequest, response: VercelRe
         VALUES (
           COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
           ${reportId}, ${status}, NOW(), ${userName || 'Usuario'}, ${comment || ''}
+        )
+      `;
+    } else if (action === 'edit') {
+      // Campos editables después de creado: mes, fecha límite, responsables y
+      // observaciones. Año, tipo y proyecto se dejan fijos a propósito — de
+      // ellos depende el consecutivo y el número de secuencia ya asignados;
+      // si están mal, es más seguro borrar el informe y crear uno nuevo.
+      const { month, dueDate, contactIds, primaryContactId, observations, userName } = request.body ?? {};
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(request.body ?? {}, key);
+
+      if (has('month') && !month) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El mes no puede quedar vacío.'] });
+      }
+      if (has('dueDate') && !dueDate) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['La fecha límite no puede quedar vacía.'] });
+      }
+      if (has('contactIds') && (!Array.isArray(contactIds) || contactIds.length === 0)) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Debe haber al menos un responsable.'] });
+      }
+
+      const current = (await sql`SELECT mes_nombre, fecha, observaciones FROM informes WHERE informe_id = ${reportId}`) as any[];
+      if (!current[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Informe no encontrado.'] });
+
+      const nextMonth = has('month') ? month : current[0].mes_nombre;
+      const nextDueDate = has('dueDate') ? dueDate : current[0].fecha;
+      const nextObservations = has('observations') ? observations : current[0].observaciones;
+
+      await sql`
+        UPDATE informes SET mes_nombre = ${nextMonth}, fecha = ${nextDueDate}, observaciones = ${nextObservations}, updated_at = NOW()
+        WHERE informe_id = ${reportId}
+      `;
+
+      if (has('contactIds')) {
+        const nextPrimary = primaryContactId || contactIds[0];
+        await sql`DELETE FROM informe_contacto WHERE informe_id = ${reportId}`;
+        for (const contactId of contactIds) {
+          await sql`
+            INSERT INTO informe_contacto (informe_id, contacto_id, es_principal)
+            VALUES (${reportId}, ${contactId}, ${contactId === nextPrimary})
+          `;
+        }
+      }
+
+      await sql`
+        INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
+        VALUES (
+          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), ${userName || 'Usuario'}, 'Informe editado.'
         )
       `;
     } else if (action === 'advance_step') {

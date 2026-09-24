@@ -379,6 +379,30 @@ export default function App() {
     }
   };
 
+  const handleEditReport = async (
+    reportId: string,
+    updates: { month?: string; dueDate?: string; contactIds?: string[]; primaryContactId?: string; observations?: string }
+  ) => {
+    const response = await fetch('/api/reports', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'edit', reportId, ...updates }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible editar el informe.');
+    setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+    showToast('Informe actualizado.', 'success');
+  };
+
+  const handleDeleteReport = async (reportId: string) => {
+    const response = await fetch(`/api/reports?reportId=${encodeURIComponent(reportId)}`, { method: 'DELETE' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el informe.');
+    setReports((prev) => prev.filter((rep) => rep.id !== reportId));
+    setSelectedReportId(null);
+    showToast('Informe eliminado.', 'success');
+  };
+
   const handleAdvanceReportStep = async (reportId: string) => {
     try {
       const response = await fetch('/api/reports', {
@@ -901,6 +925,8 @@ export default function App() {
           onUpdateStatus={handleUpdateReportStatus}
           onAddAttachment={handleAddReportAttachment}
           onAdvanceStep={handleAdvanceReportStep}
+          onEditReport={handleEditReport}
+          onDeleteReport={handleDeleteReport}
         />
       )}
 

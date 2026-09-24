@@ -10,9 +10,11 @@ import {
   calculateDaysRemaining,
   getSemaforoStatus,
   STATUS_SEQUENCE,
+  MONTHS_LIST,
 } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
+import { useAuth } from '../../auth/AuthContext';
 import {
   X,
   Calendar,
@@ -31,6 +33,9 @@ import {
   AlertTriangle,
   MessageSquare,
   ChevronRight,
+  Pencil,
+  Trash2,
+  Save,
 } from 'lucide-react';
 
 interface ReportDetailModalProps {
@@ -41,6 +46,8 @@ interface ReportDetailModalProps {
   onUpdateStatus: (reportId: string, newStatus: ReportStatus, comment: string) => void;
   onAddAttachment: (reportId: string, attachment: ReportAttachment) => void;
   onAdvanceStep: (reportId: string) => Promise<void>;
+  onEditReport: (reportId: string, updates: { month?: string; dueDate?: string; contactIds?: string[]; primaryContactId?: string; observations?: string }) => Promise<void>;
+  onDeleteReport: (reportId: string) => Promise<void>;
 }
 
 export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
@@ -51,8 +58,64 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   onUpdateStatus,
   onAddAttachment,
   onAdvanceStep,
+  onEditReport,
+  onDeleteReport,
 }) => {
+  const { user, canEdit } = useAuth();
   const [isAdvancingStep, setIsAdvancingStep] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editMonth, setEditMonth] = useState(report.month);
+  const [editDueDate, setEditDueDate] = useState(report.dueDate);
+  const [editObservations, setEditObservations] = useState(report.observations);
+  const [editContactIds, setEditContactIds] = useState<string[]>(report.contactIds);
+  const [editPrimaryContactId, setEditPrimaryContactId] = useState(report.primaryContactId);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [editError, setEditError] = useState('');
+
+  const startEditing = () => {
+    setEditMonth(report.month);
+    setEditDueDate(report.dueDate);
+    setEditObservations(report.observations);
+    setEditContactIds(report.contactIds);
+    setEditPrimaryContactId(report.primaryContactId);
+    setEditError('');
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (editContactIds.length === 0) {
+      setEditError('Selecciona al menos un responsable.');
+      return;
+    }
+    setIsSavingEdit(true);
+    setEditError('');
+    try {
+      await onEditReport(report.id, {
+        month: editMonth,
+        dueDate: editDueDate,
+        observations: editObservations,
+        contactIds: editContactIds,
+        primaryContactId: editContactIds.includes(editPrimaryContactId) ? editPrimaryContactId : editContactIds[0],
+      });
+      setIsEditing(false);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'No fue posible guardar los cambios.');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(`¿Eliminar el informe ${report.consecutive}? Esta acción no se puede deshacer.`)) return;
+    setIsDeleting(true);
+    try {
+      await onDeleteReport(report.id);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'No fue posible eliminar el informe.');
+      setIsDeleting(false);
+    }
+  };
 
   const handleAdvanceStep = async () => {
     setIsAdvancingStep(true);
@@ -153,15 +216,138 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
             </div>
           </div>
 
-          <button
-            id="close-report-detail-btn"
-            type="button"
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-start gap-1.5 shrink-0">
+            {canEdit('reports') && !isEditing && (
+              <button
+                type="button"
+                onClick={startEditing}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Editar
+              </button>
+            )}
+            {user.isAdmin && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                {isDeleting ? 'Eliminando...' : 'Eliminar'}
+              </button>
+            )}
+            <button
+              id="close-report-detail-btn"
+              type="button"
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
+
+        {isEditing && (
+          <div className="px-6 py-4 border-b border-slate-200 bg-indigo-50/60 shrink-0 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-indigo-700">Editando informe</span>
+              <span className="text-[11px] text-slate-500">Año, tipo y proyecto no se pueden cambiar aquí.</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Mes</label>
+                <select
+                  value={editMonth}
+                  onChange={(e) => setEditMonth(e.target.value)}
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white"
+                >
+                  {MONTHS_LIST.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Fecha límite</label>
+                <input
+                  type="date"
+                  value={editDueDate}
+                  onChange={(e) => setEditDueDate(e.target.value)}
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Observaciones</label>
+              <textarea
+                value={editObservations}
+                onChange={(e) => setEditObservations(e.target.value)}
+                rows={2}
+                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white resize-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">
+                Responsables ({editContactIds.length} seleccionado{editContactIds.length === 1 ? '' : 's'})
+              </label>
+              <div className="max-h-32 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 p-2 bg-white border border-slate-200 rounded-lg">
+                {contacts.map((c) => (
+                  <label key={c.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editContactIds.includes(c.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setEditContactIds((prev) => [...prev, c.id]);
+                        } else {
+                          setEditContactIds((prev) => prev.filter((id) => id !== c.id));
+                        }
+                      }}
+                      className="rounded text-indigo-600"
+                    />
+                    <span className="text-slate-800">{c.name} <span className="text-slate-400">({c.role})</span></span>
+                  </label>
+                ))}
+              </div>
+              {editContactIds.length > 0 && (
+                <div className="mt-1.5">
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Responsable principal</label>
+                  <select
+                    value={editContactIds.includes(editPrimaryContactId) ? editPrimaryContactId : editContactIds[0]}
+                    onChange={(e) => setEditPrimaryContactId(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white"
+                  >
+                    {contacts.filter((c) => editContactIds.includes(c.id)).map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {editError && <p className="text-xs font-semibold text-rose-600">{editError}</p>}
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setIsEditing(false)}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-lg"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                disabled={isSavingEdit}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:opacity-50"
+              >
+                <Save className="w-3.5 h-3.5" />
+                {isSavingEdit ? 'Guardando...' : 'Guardar cambios'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Modal Body with Scroll */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1">
