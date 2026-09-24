@@ -119,16 +119,44 @@ export function parseReferenciaLineas(grid: Grid): Record<string, string> {
 
 // Insumos Detalle: un renglón por insumo entregado. Alimenta la pista
 // "Proveeduría" (dos segmentos: Compra y Entrega) de cada Línea Productiva.
-export function parseInsumosDetalle(grid: Grid): { compra: Record<string, PistaAgg>; entrega: Record<string, PistaAgg> } {
+export type InsumoDetalleRow = {
+  linea: string;
+  insumo: string;
+  unidad: string;
+  componente: string;
+  proceso: string;
+  cantidad: number | null;
+  beneficiarios: number | null;
+  fechaCompra: string | null;
+  fechaEntrega: string | null;
+  notaEntrega: string;
+  llego: string;
+  estado: string;
+  tanda: string;
+};
+
+export function parseInsumosDetalle(grid: Grid): { compra: Record<string, PistaAgg>; entrega: Record<string, PistaAgg>; detalle: InsumoDetalleRow[] } {
   const { headerRow, rows } = withHeaders(grid);
   const lineaCol = findExact(headerRow, 'Linea productiva');
   const compraCol = findExact(headerRow, 'Fecha de compra');
   const entregaCol = findExact(headerRow, 'Fecha de entrega');
   const llegoCol = findExact(headerRow, 'Llego');
+  const insumoCol = findExact(headerRow, 'Insumo');
+  const unidadCol = findExact(headerRow, 'Unidad');
+  const componenteCol = findExact(headerRow, 'Componente');
+  const procesoCol = findExact(headerRow, 'Proceso');
+  const cantidadCol = findExact(headerRow, 'Cantidad');
+  const beneficiariosCol = findExact(headerRow, 'Beneficiarios');
+  const notaCol = findExact(headerRow, 'Nota de entrega');
+  const estadoCol = findExact(headerRow, 'Estado');
+  const tandaCol = findExact(headerRow, 'Tanda');
   if (lineaCol === -1) throw new Error('No se encontró la columna "Linea productiva" en la pestaña Insumos Detalle.');
+
+  const get = (row: SheetValue[], col: number) => (col !== -1 ? String(row[col] ?? '').trim() : '');
 
   const compra: Record<string, PistaAgg> = {};
   const entrega: Record<string, PistaAgg> = {};
+  const detalle: InsumoDetalleRow[] = [];
   for (const row of rows) {
     const linea = String(row[lineaCol] ?? '').trim();
     if (!linea) continue;
@@ -141,10 +169,28 @@ export function parseInsumosDetalle(grid: Grid): { compra: Record<string, PistaA
       compra[linea].entregado++;
       entrega[linea].entregado++;
     }
-    extendRange(compra[linea], compraCol !== -1 ? parseDate(row[compraCol]) : null);
-    extendRange(entrega[linea], entregaCol !== -1 ? parseDate(row[entregaCol]) : null);
+    const fechaCompra = compraCol !== -1 ? parseDate(row[compraCol]) : null;
+    const fechaEntrega = entregaCol !== -1 ? parseDate(row[entregaCol]) : null;
+    extendRange(compra[linea], fechaCompra);
+    extendRange(entrega[linea], fechaEntrega);
+
+    detalle.push({
+      linea,
+      insumo: get(row, insumoCol),
+      unidad: get(row, unidadCol),
+      componente: get(row, componenteCol),
+      proceso: get(row, procesoCol),
+      cantidad: cantidadCol !== -1 ? parseNum(row[cantidadCol]) : null,
+      beneficiarios: beneficiariosCol !== -1 ? parseNum(row[beneficiariosCol]) : null,
+      fechaCompra,
+      fechaEntrega,
+      notaEntrega: get(row, notaCol),
+      llego: get(row, llegoCol),
+      estado: get(row, estadoCol),
+      tanda: get(row, tandaCol),
+    });
   }
-  return { compra, entrega };
+  return { compra, entrega, detalle };
 }
 
 // Abono: un renglón por beneficiario. Entregado = fila con la fecha

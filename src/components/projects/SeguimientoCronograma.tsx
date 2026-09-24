@@ -484,7 +484,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
 
           <div className="p-4 pt-0 space-y-2.5">
             {filteredRows.map((row) => (
-              <SeguimientoRowCard key={row.id} row={row} activeFilters={activeFilters} days={sharedDays} />
+              <SeguimientoRowCard key={row.id} row={row} activeFilters={activeFilters} days={sharedDays} projectId={projectId} />
             ))}
           </div>
         </>
@@ -496,12 +496,54 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
 type Segment = { start: string; end: string; segLabel: string; color: string; darkText: boolean };
 type Track = { key: string; label: string; segments: Segment[]; badge: string };
 
-const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<string>; days: string[] }> = ({ row, activeFilters, days }) => {
+type InsumoDetalle = {
+  insumo: string;
+  unidad: string;
+  componente: string;
+  proceso: string;
+  cantidad: number | null;
+  beneficiarios: number | null;
+  fechaCompra: string | null;
+  fechaEntrega: string | null;
+  notaEntrega: string;
+  llego: string;
+  estado: string;
+  tanda: string;
+};
+
+const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<string>; days: string[]; projectId: string }> = ({ row, activeFilters, days, projectId }) => {
+  const [isInsumosOpen, setIsInsumosOpen] = useState(false);
+  const [isLoadingInsumos, setIsLoadingInsumos] = useState(false);
+  const [insumos, setInsumos] = useState<InsumoDetalle[] | null>(null);
+  const [insumosError, setInsumosError] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const [monthLabel, setMonthLabel] = useState('');
   const [hoverTip, setHoverTip] = useState<{ x: number; y: number; title: string; range: string; extra: string } | null>(null);
 
   const tracks: Track[] = [];
+
+  const insumosCount = row.pistas.find((p) => p.pista === 'proveeduria_entrega')?.cantidadTotal
+    ?? row.pistas.find((p) => p.pista === 'proveeduria_compra')?.cantidadTotal
+    ?? 0;
+
+  const handleToggleInsumos = async () => {
+    const next = !isInsumosOpen;
+    setIsInsumosOpen(next);
+    if (next && insumos === null && row.lineaProductiva) {
+      setIsLoadingInsumos(true);
+      setInsumosError('');
+      try {
+        const res = await fetch(`/api/projects?seguimiento=insumos&projectId=${encodeURIComponent(projectId)}&linea=${encodeURIComponent(row.lineaProductiva)}`);
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible cargar los insumos.');
+        setInsumos(payload.data);
+      } catch (err) {
+        setInsumosError(err instanceof Error ? err.message : 'No fue posible cargar los insumos.');
+      } finally {
+        setIsLoadingInsumos(false);
+      }
+    }
+  };
 
   if (activeFilters.has('proveeduria')) {
     const compra = row.pistas.find((p) => p.pista === 'proveeduria_compra');
@@ -705,6 +747,65 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {row.lineaProductiva && (
+        <div className="border-t" style={{ borderColor: BORDER }}>
+          <button
+            type="button"
+            onClick={handleToggleInsumos}
+            disabled={insumosCount === 0}
+            className="w-full flex items-center gap-2 px-4 py-2 text-left text-xs font-semibold disabled:cursor-default disabled:opacity-50"
+            style={{ color: ACCENT }}
+          >
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isInsumosOpen ? 'rotate-180' : ''}`} />
+            {insumosCount === 0 ? 'Sin insumos asociados' : isInsumosOpen ? 'Ocultar insumos' : 'Ver insumos'}
+            {insumosCount > 0 && (
+              <span className="rounded-full px-2 py-0.5 text-[10px]" style={{ background: ACCENT_LIGHT, color: ACCENT }}>{insumosCount}</span>
+            )}
+          </button>
+
+          {isInsumosOpen && (
+            <div className="px-4 pb-3">
+              {isLoadingInsumos ? (
+                <p className="text-[11px] italic" style={{ color: MUTED }}>Cargando insumos...</p>
+              ) : insumosError ? (
+                <p className="text-[11px] text-rose-600">{insumosError}</p>
+              ) : insumos && insumos.length > 0 ? (
+                <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${BORDER}` }}>
+                  <table className="w-full text-[10.5px] border-collapse">
+                    <thead>
+                      <tr style={{ background: '#eef2f6' }}>
+                        {['Insumo', 'Unidad', 'Componente', 'Proceso', 'Cantidad', 'Benef.', 'Fecha compra', 'Fecha entrega', 'Llegó', 'Estado', 'Tanda'].map((h) => (
+                          <th key={h} className="px-2 py-1.5 text-left font-bold whitespace-nowrap" style={{ borderBottom: `2px solid ${BORDER}`, color: '#1f2937' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {insumos.map((row2, idx) => (
+                        <tr key={idx} style={{ background: idx % 2 === 1 ? '#fafbfc' : '#fff' }}>
+                          <td className="px-2 py-1.5 max-w-56 truncate" title={row2.insumo} style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.insumo}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.unidad}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.componente}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.proceso}</td>
+                          <td className="px-2 py-1.5 text-right" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.cantidad ?? ''}</td>
+                          <td className="px-2 py-1.5 text-right" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.beneficiarios ?? ''}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.fechaCompra ? fmtShortDate(row2.fechaCompra) : ''}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.fechaEntrega ? fmtShortDate(row2.fechaEntrega) : ''}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.llego}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.estado}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap" style={{ borderBottom: `1px solid ${BORDER}` }}>{row2.tanda}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-[11px] italic" style={{ color: MUTED }}>Sin insumos asociados.</p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

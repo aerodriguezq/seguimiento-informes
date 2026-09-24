@@ -143,7 +143,7 @@ async function importSeguimiento(sql: SqlClient, projectId: number) {
   const referencia = parseReferenciaLineas(referenciaGrid);
 
   const insumosGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.insumosDetalle);
-  const { compra, entrega } = parseInsumosDetalle(insumosGrid);
+  const { compra, entrega, detalle: insumosDetalleRows } = parseInsumosDetalle(insumosGrid);
 
   const abonoGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.abono);
   const abono = parseAbono(abonoGrid);
@@ -166,6 +166,7 @@ async function importSeguimiento(sql: SqlClient, projectId: number) {
   await sql`DELETE FROM seguimiento_linea_pistas WHERE proyecto_id = ${projectId}`;
   await sql`DELETE FROM seguimiento_proyeccion WHERE proyecto_id = ${projectId}`;
   await sql`DELETE FROM seguimiento_kpis WHERE proyecto_id = ${projectId}`;
+  await sql`DELETE FROM seguimiento_insumos_detalle WHERE proyecto_id = ${projectId}`;
 
   let orden = 0;
   for (const row of parsedCronograma.rows) {
@@ -217,6 +218,16 @@ async function importSeguimiento(sql: SqlClient, projectId: number) {
   const kpiEntries: [string, Kpi][] = [['insumo', kpis.insumo], ['abono', kpis.abono], ['material_vegetal', kpis.materialVegetal]];
   for (const [tipo, k] of kpiEntries) {
     await sql`INSERT INTO seguimiento_kpis (proyecto_id, tipo, total, avance) VALUES (${projectId}, ${tipo}, ${k.total}, ${k.avance})`;
+  }
+
+  // "Ver insumos": el detalle renglón por renglón, para el panel expandible
+  // de cada tarjeta (igual que en el Apps Script original).
+  for (const r of insumosDetalleRows) {
+    await sql`
+      INSERT INTO seguimiento_insumos_detalle
+        (proyecto_id, linea_productiva, insumo, unidad, componente, proceso, cantidad, beneficiarios, fecha_compra, fecha_entrega, nota_entrega, llego, estado, tanda)
+      VALUES (${projectId}, ${r.linea}, ${r.insumo}, ${r.unidad}, ${r.componente}, ${r.proceso}, ${r.cantidad}, ${r.beneficiarios}, ${r.fechaCompra}, ${r.fechaEntrega}, ${r.notaEntrega}, ${r.llego}, ${r.estado}, ${r.tanda})
+    `;
   }
 
   return {
@@ -312,6 +323,25 @@ export default async function handler(
       }
       const data = await fetchSeguimiento(sql, projectId);
       return response.status(200).json({ data, meta: {}, errors: [] });
+    }
+
+    // "Ver insumos": bajo demanda por línea, para no traer las ~900 filas de
+    // Insumos Detalle en la carga principal de Seguimiento.
+    if (request.method === 'GET' && request.query.seguimiento === 'insumos') {
+      const projectId = Number(request.query.projectId);
+      const linea = typeof request.query.linea === 'string' ? request.query.linea : '';
+      if (!Number.isInteger(projectId) || projectId <= 0 || !linea) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto y la línea productiva son obligatorios.'] });
+      }
+      const insumos = (await sql`
+        SELECT insumo, unidad, componente, proceso, cantidad, beneficiarios,
+          TO_CHAR(fecha_compra, 'YYYY-MM-DD') AS "fechaCompra", TO_CHAR(fecha_entrega, 'YYYY-MM-DD') AS "fechaEntrega",
+          nota_entrega AS "notaEntrega", llego, estado, tanda
+        FROM seguimiento_insumos_detalle
+        WHERE proyecto_id = ${projectId} AND linea_productiva = ${linea}
+        ORDER BY insumo_id ASC
+      `) as any[];
+      return response.status(200).json({ data: insumos, meta: { total: insumos.length }, errors: [] });
     }
 
     if (request.method === 'POST' && (request.body?.kind === 'importCronograma' || request.body?.kind === 'seguimientoConfig')) {
