@@ -74,6 +74,24 @@ function computeAlertStatus(p: Peticion): { status: SemaforoStatus; daysRemainin
   return { status: 'en_tiempo', daysRemaining: days };
 }
 
+// Recuerda el último "correo adicional" usado para no tener que
+// escribirlo de nuevo cada vez que se crea una petición.
+const LAST_CORREO_KEY = 'peticiones:lastCorreoAdicional';
+function getLastCorreoAdicional(): string {
+  try {
+    return window.localStorage.getItem(LAST_CORREO_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+function setLastCorreoAdicional(value: string) {
+  try {
+    if (value) window.localStorage.setItem(LAST_CORREO_KEY, value);
+  } catch {
+    /* localStorage no disponible (modo privado, etc.) — no es crítico */
+  }
+}
+
 function fmtDate(iso: string | null): string {
   if (!iso) return '—';
   const [y, m, d] = iso.split('-');
@@ -225,7 +243,7 @@ export const PeticionesView: React.FC<{ contacts: Contact[] }> = ({ contacts }) 
 
   const openCreate = () => {
     setEditingId(null);
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM, correoPersonaAsignada: getLastCorreoAdicional() });
     setFormError('');
     setIsFormOpen(true);
   };
@@ -257,6 +275,7 @@ export const PeticionesView: React.FC<{ contacts: Contact[] }> = ({ contacts }) 
       });
       const responsePayload = await res.json();
       if (!res.ok) throw new Error(responsePayload.errors?.[0] || 'No fue posible guardar la petición.');
+      setLastCorreoAdicional(payload.correoPersonaAsignada);
       setIsFormOpen(false);
       await fetchPeticiones();
     } catch (err) {
