@@ -659,30 +659,35 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; days: string[]; projec
     }
   };
 
+  // Las 5 pistas siempre se listan (aunque no haya datos), para que todas
+  // las tarjetas tengan la misma estructura; el chip de arriba solo
+  // controla si esa pista se dibuja o no.
   if (activeFilters.has('proveeduria')) {
     const compra = row.pistas.find((p) => p.pista === 'proveeduria_compra');
     const entrega = row.pistas.find((p) => p.pista === 'proveeduria_entrega');
-    if ((compra && compra.fechaInicio) || (entrega && entrega.fechaInicio)) {
-      const segments: Segment[] = [];
-      if (compra?.fechaInicio && compra.fechaFin) {
-        segments.push({ start: compra.fechaInicio, end: compra.fechaFin, segLabel: 'Compra', color: PISTA_META.proveeduria_compra.color, darkText: false });
-      }
-      if (entrega?.fechaInicio && entrega.fechaFin) {
-        segments.push({ start: entrega.fechaInicio, end: entrega.fechaFin, segLabel: 'Entrega', color: PISTA_META.proveeduria_entrega.color, darkText: true });
-      }
-      const total = entrega?.cantidadTotal ?? compra?.cantidadTotal ?? 0;
-      const entregado = entrega?.cantidadEntregada ?? compra?.cantidadEntregada ?? 0;
-      tracks.push({ key: 'proveeduria', label: 'Proveeduría', segments, badge: `${total}/${entregado} insumos` });
+    const segments: Segment[] = [];
+    if (compra?.fechaInicio && compra.fechaFin) {
+      segments.push({ start: compra.fechaInicio, end: compra.fechaFin, segLabel: 'Compra', color: PISTA_META.proveeduria_compra.color, darkText: false });
     }
+    if (entrega?.fechaInicio && entrega.fechaFin) {
+      segments.push({ start: entrega.fechaInicio, end: entrega.fechaFin, segLabel: 'Entrega', color: PISTA_META.proveeduria_entrega.color, darkText: true });
+    }
+    const total = entrega?.cantidadTotal ?? compra?.cantidadTotal ?? null;
+    const entregado = entrega?.cantidadEntregada ?? compra?.cantidadEntregada ?? null;
+    tracks.push({ key: 'proveeduria', label: 'Proveeduría', segments, badge: total !== null ? `${total}/${entregado} insumos` : 'Sin datos' });
   }
 
-  if (activeFilters.has('proyeccion') && row.proyeccion?.fechaInicio && row.proyeccion.fechaFin) {
+  if (activeFilters.has('proyeccion')) {
     const p = row.proyeccion;
+    const segments: Segment[] =
+      p?.fechaInicio && p.fechaFin
+        ? [{ start: p.fechaInicio, end: p.fechaFin, segLabel: 'Entrega insumos', color: PROYECCION_META.color, darkText: PROYECCION_META.darkText }]
+        : [];
     tracks.push({
       key: 'proyeccion',
       label: PROYECCION_META.label,
-      segments: [{ start: p.fechaInicio as string, end: p.fechaFin as string, segLabel: 'Entrega insumos', color: PROYECCION_META.color, darkText: PROYECCION_META.darkText }],
-      badge: p.beneficiariosPorDia ? `${Math.round(p.beneficiariosPorDia * 10) / 10} benef./día` : '',
+      segments,
+      badge: p?.beneficiariosPorDia ? `${Math.round(p.beneficiariosPorDia * 10) / 10} benef./día` : 'Sin datos',
     });
   }
 
@@ -694,18 +699,20 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; days: string[]; projec
   (['entrega_insumos', 'entrega_abono', 'entrega_material_vegetal'] as const).forEach((key) => {
     if (!activeFilters.has(key)) return;
     const pista = row.pistas.find((p) => p.pista === key);
-    if (!pista || !pista.fechaInicio || !pista.fechaFin) return;
     const meta = PISTA_META[key];
-    const badgeParts: string[] = [];
-    const toneladas = Number(pista.toneladasTotal);
-    if (pista.toneladasTotal !== null && Number.isFinite(toneladas)) badgeParts.push(`${toneladas.toFixed(1)}t`);
-    badgeParts.push(`${pista.cantidadEntregada}/${pista.cantidadTotal}`);
-    tracks.push({
-      key,
-      label: meta.label,
-      segments: [{ start: pista.fechaInicio, end: pista.fechaFin, segLabel: SEG_LABELS[key], color: meta.color, darkText: meta.darkText }],
-      badge: badgeParts.join(' · '),
-    });
+    const segments: Segment[] =
+      pista?.fechaInicio && pista.fechaFin
+        ? [{ start: pista.fechaInicio, end: pista.fechaFin, segLabel: SEG_LABELS[key], color: meta.color, darkText: meta.darkText }]
+        : [];
+    let badge = 'Sin datos';
+    if (pista) {
+      const badgeParts: string[] = [];
+      const toneladas = Number(pista.toneladasTotal);
+      if (pista.toneladasTotal !== null && Number.isFinite(toneladas)) badgeParts.push(`${toneladas.toFixed(1)}t`);
+      badgeParts.push(`${pista.cantidadEntregada}/${pista.cantidadTotal}`);
+      badge = badgeParts.join(' · ');
+    }
+    tracks.push({ key, label: meta.label, segments, badge });
   });
 
   // Siempre se muestra la línea de tiempo (aunque esta fila no tenga pistas
