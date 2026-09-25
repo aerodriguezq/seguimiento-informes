@@ -94,13 +94,14 @@ const PISTA_META: Record<string, { label: string; color: string; darkText: boole
 };
 const PROYECCION_META = { label: 'Proyección Entrega de Insumos', color: '#f5d76e', darkText: true };
 
-const FILTERS: { key: string; label: string }[] = [
-  { key: 'proveeduria', label: 'Proveeduría' },
-  { key: 'proyeccion', label: 'Proyección Entrega de Insumos' },
-  { key: 'entrega_insumos', label: 'Entrega de Insumos' },
-  { key: 'entrega_abono', label: 'Entrega Abono' },
-  { key: 'entrega_material_vegetal', label: 'Entrega Material Vegetal' },
+const FILTERS: { key: string; label: string; short: string }[] = [
+  { key: 'proveeduria', label: 'Proveeduría', short: 'P' },
+  { key: 'proyeccion', label: 'Proyección Entrega de Insumos', short: 'PR' },
+  { key: 'entrega_insumos', label: 'Entrega de Insumos', short: 'EI' },
+  { key: 'entrega_abono', label: 'Entrega Abono', short: 'AB' },
+  { key: 'entrega_material_vegetal', label: 'Entrega Material Vegetal', short: 'MV' },
 ];
+const FILTER_KEYS = FILTERS.map((f) => f.key);
 
 // Ancho fijo en px de cada día en la línea de tiempo — igual que DAY_W en el original, para que
 // el "rayado" diagonal de cada tramo (una franja por día) se vea igual.
@@ -172,7 +173,6 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   const [sheetInput, setSheetInput] = useState('');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [search, setSearch] = useState('');
-  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set(FILTERS.map((f) => f.key)));
   const [isColumnsPanelOpen, setIsColumnsPanelOpen] = useState(false);
   const [draftColumns, setDraftColumns] = useState<Set<string>>(new Set(INSUMO_COLUMN_KEYS));
   const [isSavingColumns, setIsSavingColumns] = useState(false);
@@ -292,15 +292,6 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
     } finally {
       setIsSavingColumns(false);
     }
-  };
-
-  const toggleFilter = (key: string) => {
-    setActiveFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
   };
 
   const filteredRows = useMemo(() => {
@@ -579,21 +570,9 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
             })}
           </div>
 
-          {/* Filtros + búsqueda */}
-          <div className="no-print px-4 pb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-            {FILTERS.map((f) => (
-              <label key={f.key} className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={activeFilters.has(f.key)}
-                  onChange={() => toggleFilter(f.key)}
-                  className="rounded"
-                  style={{ accentColor: ACCENT }}
-                />
-                {f.label}
-              </label>
-            ))}
-            <div className="no-print relative ml-auto w-full sm:w-56">
+          {/* Búsqueda */}
+          <div className="no-print px-4 pb-3 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+            <div className="relative w-full sm:w-56">
               <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
@@ -610,7 +589,6 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
               <SeguimientoRowCard
                 key={row.id}
                 row={row}
-                activeFilters={activeFilters}
                 days={sharedDays}
                 projectId={projectId}
                 visibleInsumoColumns={data.config?.insumosColumnasVisibles && data.config.insumosColumnasVisibles.length > 0 ? data.config.insumosColumnasVisibles : INSUMO_COLUMN_KEYS}
@@ -641,7 +619,16 @@ type InsumoDetalle = {
   tanda: string;
 };
 
-const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<string>; days: string[]; projectId: string; visibleInsumoColumns: string[] }> = ({ row, activeFilters, days, projectId, visibleInsumoColumns }) => {
+const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; days: string[]; projectId: string; visibleInsumoColumns: string[] }> = ({ row, days, projectId, visibleInsumoColumns }) => {
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set(FILTER_KEYS));
+  const toggleFilter = (key: string) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
   const [isInsumosOpen, setIsInsumosOpen] = useState(false);
   const [isLoadingInsumos, setIsLoadingInsumos] = useState(false);
   const [insumos, setInsumos] = useState<InsumoDetalle[] | null>(null);
@@ -799,6 +786,27 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; activeFilters: Set<str
         {row.totalToneladas !== null && (
           <span className="shrink-0 text-xs" style={{ color: MUTED }}>{fmtTon(row.totalToneladas)} riego/abono</span>
         )}
+        <div className="no-print shrink-0 flex items-center gap-1">
+          {FILTERS.map((f) => {
+            const active = activeFilters.has(f.key);
+            return (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => toggleFilter(f.key)}
+                title={f.label}
+                className="rounded-full px-2 py-0.5 text-[10px] font-bold border transition"
+                style={
+                  active
+                    ? { borderColor: ACCENT, color: ACCENT, background: ACCENT_LIGHT }
+                    : { borderColor: BORDER, color: '#9ca3af', background: '#fff' }
+                }
+              >
+                {f.short}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {!hasTimeline ? (
