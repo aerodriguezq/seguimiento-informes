@@ -159,7 +159,7 @@ const PeticionForm: React.FC<{
       <div className="sm:col-span-2">
         <label className="block text-[11px] font-semibold text-slate-700 mb-1">{FIELD_LABEL.correoPersonaAsignada}</label>
         <input type="email" value={form.correoPersonaAsignada} onChange={set('correoPersonaAsignada')} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600" />
-        <p className="mt-1 text-[10.5px] text-slate-400">Solo para alguien que no está en Contactos.</p>
+        <p className="mt-1 text-[10.5px] text-slate-400">Va en copia (CC) al correo de los responsables asignados.</p>
       </div>
 
       <div>

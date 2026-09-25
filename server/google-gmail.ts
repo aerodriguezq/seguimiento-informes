@@ -13,10 +13,11 @@ function toBase64Url(value: string) {
 
 export async function sendEmail(
   accessToken: string,
-  options: { to: string[]; subject: string; body: string; html?: boolean },
+  options: { to: string[]; cc?: string[]; subject: string; body: string; html?: boolean },
 ): Promise<void> {
   const rawMessage = [
     `To: ${options.to.join(', ')}`,
+    ...(options.cc && options.cc.length > 0 ? [`Cc: ${options.cc.join(', ')}`] : []),
     `Content-Type: text/${options.html ? 'html' : 'plain'}; charset="UTF-8"`,
     'MIME-Version: 1.0',
     `Subject: =?UTF-8?B?${Buffer.from(options.subject, 'utf-8').toString('base64')}?=`,

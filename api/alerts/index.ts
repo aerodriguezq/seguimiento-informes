@@ -147,16 +147,25 @@ async function sendPeticionReminder(
   level: PeticionNivel,
   daysRemaining: number | null,
 ): Promise<boolean> {
+  // Los responsables (Contactos asignados) reciben el correo principal; el
+  // "correo adicional" libre va solo en copia (CC), nunca como único
+  // destinatario salvo que no haya ningún responsable asignado.
   const recipientRows = (await sql`
     SELECT c.email FROM peticion_responsables pr
     JOIN contactos c ON c.contacto_id = pr.contacto_id
     WHERE pr.peticion_id = ${peticion.id} AND c.email IS NOT NULL AND c.email <> ''
   `) as any[];
-  const emails = recipientRows.map((r: any) => r.email as string);
-  if (peticion.correoPersonaAsignada && peticion.correoPersonaAsignada.includes('@')) {
-    emails.push(peticion.correoPersonaAsignada);
+  const toEmails = recipientRows.map((r: any) => r.email as string);
+  const hasCc = !!peticion.correoPersonaAsignada && peticion.correoPersonaAsignada.includes('@');
+
+  let finalTo = toEmails;
+  let finalCc: string[] | undefined;
+  if (toEmails.length > 0) {
+    finalCc = hasCc ? [peticion.correoPersonaAsignada as string] : undefined;
+  } else if (hasCc) {
+    finalTo = [peticion.correoPersonaAsignada as string];
   }
-  if (emails.length === 0) return false;
+  if (finalTo.length === 0) return false;
 
   const actionUrl = `${(process.env.APP_URL || 'https://seguimiento-informes.vercel.app').replace(/\/$/, '')}/peticiones`;
   const html = buildPeticionReminderEmailHtml({
@@ -170,7 +179,8 @@ async function sendPeticionReminder(
     actionUrl,
   });
   await sendEmail(accessToken, {
-    to: emails,
+    to: finalTo,
+    cc: finalCc,
     subject: `[Peticiones · ${level.toUpperCase()}] ${peticion.radicado} — ${peticion.asunto}`,
     body: html,
     html: true,
