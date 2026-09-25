@@ -103,6 +103,10 @@ const FILTERS: { key: string; label: string; short: string }[] = [
 ];
 const FILTER_KEYS = FILTERS.map((f) => f.key);
 
+// Filas de totales del cronograma que no son subactividades reales — no
+// aportan nada a la vista de Seguimiento por línea productiva.
+const HIDDEN_ROW_NAMES = new Set(['abono organico', 'riego']);
+
 // Ancho fijo en px de cada día en la línea de tiempo — igual que DAY_W en el original, para que
 // el "rayado" diagonal de cada tramo (una franja por día) se vea igual.
 const DAY_W = 26;
@@ -296,9 +300,12 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
 
   const filteredRows = useMemo(() => {
     if (!data) return [];
+    const withoutHidden = data.rows.filter(
+      (r) => !HIDDEN_ROW_NAMES.has(r.concepto.trim().toLowerCase()) && !HIDDEN_ROW_NAMES.has(r.subActividad.trim().toLowerCase()),
+    );
     const q = search.trim().toLowerCase();
-    if (!q) return data.rows;
-    return data.rows.filter((r) => r.subActividad.toLowerCase().includes(q) || r.concepto.toLowerCase().includes(q));
+    if (!q) return withoutHidden;
+    return withoutHidden.filter((r) => r.subActividad.toLowerCase().includes(q) || r.concepto.toLowerCase().includes(q));
   }, [data, search]);
 
   const sharedDays = useMemo(() => (data ? buildSharedDays(data.rows) : []), [data]);
