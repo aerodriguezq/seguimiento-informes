@@ -11,6 +11,25 @@ function computeFechaPlazo(fechaRadicacion: string | null, plazoRespuesta: numbe
   return d.toISOString().slice(0, 10);
 }
 
+async function fetchResponsables(sql: any, peticionId: number) {
+  const rows = (await sql`
+    SELECT c.contacto_id AS id, c.nombre AS name, COALESCE(c.email, '') AS email
+    FROM peticion_responsables pr JOIN contactos c ON c.contacto_id = pr.contacto_id
+    WHERE pr.peticion_id = ${peticionId}
+  `) as any[];
+  return rows.map((r) => ({ id: String(r.id), name: r.name, email: r.email }));
+}
+
+async function setResponsables(sql: any, peticionId: number, responsableIds: unknown[]) {
+  await sql`DELETE FROM peticion_responsables WHERE peticion_id = ${peticionId}`;
+  for (const contactId of responsableIds) {
+    const id = Number(contactId);
+    if (Number.isInteger(id) && id > 0) {
+      await sql`INSERT INTO peticion_responsables (peticion_id, contacto_id) VALUES (${peticionId}, ${id}) ON CONFLICT DO NOTHING`;
+    }
+  }
+}
+
 function readCookie(request: VercelRequest, name: string) {
   const cookies = request.headers.cookie?.split(';').map((c) => c.trim()) ?? [];
   const entry = cookies.find((c) => c.startsWith(`${name}=`));
@@ -131,7 +150,7 @@ export default async function handler(
     }
 
     if (request.method === 'GET' && request.query.kind === 'peticiones') {
-      const rows = await sql`
+      const rows = (await sql`
         SELECT peticion_id AS id, radicado, TO_CHAR(fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
           peticionario, asunto, area_consolida AS "areaConsolida", correo_persona_asignada AS "correoPersonaAsignada",
           areas_intervienen AS "areasIntervienen", plazo_respuesta AS "plazoRespuesta",
@@ -139,8 +158,16 @@ export default async function handler(
           TO_CHAR(fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
           created_at AS "createdAt"
         FROM peticiones ORDER BY COALESCE(fecha_radicacion, created_at::date) DESC, peticion_id DESC
-      `;
-      return response.status(200).json({ data: rows, meta: {}, errors: [] });
+      `) as any[];
+      const responsableRows = (await sql`
+        SELECT pr.peticion_id AS "peticionId", c.contacto_id AS id, c.nombre AS name, COALESCE(c.email, '') AS email
+        FROM peticion_responsables pr JOIN contactos c ON c.contacto_id = pr.contacto_id
+      `) as any[];
+      const data = rows.map((row) => ({
+        ...row,
+        responsables: responsableRows.filter((r) => r.peticionId === row.id).map((r) => ({ id: String(r.id), name: r.name, email: r.email })),
+      }));
+      return response.status(200).json({ data, meta: {}, errors: [] });
     }
 
     if (request.method === 'GET') {
@@ -206,6 +233,8 @@ export default async function handler(
         const nextPlazoRespuesta = has('plazoRespuesta') ? (d.plazoRespuesta === null || d.plazoRespuesta === '' ? null : Number(d.plazoRespuesta)) : current[0].plazo_respuesta;
         const nextFechaRadicadoRespuesta = has('fechaRadicadoRespuesta') ? (d.fechaRadicadoRespuesta || null) : current[0].fecha_radicado_respuesta;
         const nextFechaPlazo = computeFechaPlazo(nextFechaRadicacion, nextPlazoRespuesta);
+        // Si el plazo cambió, los recordatorios ya enviados quedan obsoletos.
+        const plazoChanged = nextFechaPlazo !== current[0].fecha_plazo_respuesta;
 
         const rows = await sql`
           UPDATE peticiones SET
@@ -213,6 +242,8 @@ export default async function handler(
             asunto = ${nextAsunto}, area_consolida = ${nextAreaConsolida}, correo_persona_asignada = ${nextCorreo},
             areas_intervienen = ${nextAreasIntervienen}, plazo_respuesta = ${nextPlazoRespuesta},
             fecha_plazo_respuesta = ${nextFechaPlazo}, fecha_radicado_respuesta = ${nextFechaRadicadoRespuesta},
+            ultimo_recordatorio_nivel = ${plazoChanged ? null : current[0].ultimo_recordatorio_nivel},
+            ultimo_recordatorio_en = ${plazoChanged ? null : current[0].ultimo_recordatorio_en},
             updated_at = NOW()
           WHERE peticion_id = ${peticionId}
           RETURNING peticion_id AS id, radicado, TO_CHAR(fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
@@ -222,7 +253,12 @@ export default async function handler(
             TO_CHAR(fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
             created_at AS "createdAt"
         `;
-        return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+
+        if (Array.isArray(body.responsableIds)) {
+          await setResponsables(sql, peticionId, body.responsableIds);
+        }
+        const responsables = await fetchResponsables(sql, peticionId);
+        return response.status(200).json({ data: { ...rows[0], responsables }, meta: {}, errors: [] });
       }
 
       if (body.kind === 'sweepConfig') {
@@ -381,7 +417,12 @@ export default async function handler(
           TO_CHAR(fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
           created_at AS "createdAt"
       `;
-      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+      const peticionId = rows[0].id;
+      if (Array.isArray(request.body?.responsableIds)) {
+        await setResponsables(sql, peticionId, request.body.responsableIds);
+      }
+      const responsables = await fetchResponsables(sql, peticionId);
+      return response.status(201).json({ data: { ...rows[0], responsables }, meta: {}, errors: [] });
     }
 
     if (kind === 'reportType') {

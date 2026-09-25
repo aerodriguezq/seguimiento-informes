@@ -134,6 +134,12 @@ export type ActiveModule =
   | 'peticiones'
   | 'users';
 
+export interface PeticionResponsable {
+  id: string;
+  name: string;
+  email: string;
+}
+
 export interface Peticion {
   id: string;
   radicado: string;
@@ -146,5 +152,6 @@ export interface Peticion {
   plazoRespuesta: number | null;
   fechaPlazoRespuesta: string | null;
   fechaRadicadoRespuesta: string | null;
+  responsables: PeticionResponsable[];
   createdAt: string;
 }

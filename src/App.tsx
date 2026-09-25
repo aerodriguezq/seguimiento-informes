@@ -917,7 +917,7 @@ export default function App() {
           )}
 
           {!isLoadingWorkspace && !workspaceError && activeModule === 'peticiones' && (
-            <PeticionesView />
+            <PeticionesView contacts={contacts} />
           )}
 
           {/* M09: Usuarios Autorizados (solo administradores) */}

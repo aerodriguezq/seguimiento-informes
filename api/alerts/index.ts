@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../../server/google-drive.js';
-import { sendEmail, buildAlertEmailHtml } from '../../server/google-gmail.js';
+import { sendEmail, buildAlertEmailHtml, buildPeticionReminderEmailHtml } from '../../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../../server/sweep-config.js';
+import { canEditModuleRequest } from '../../server/admin-auth.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -119,6 +120,101 @@ async function handleSend(request: VercelRequest, response: VercelResponse, sql:
   }
 }
 
+type PeticionNivel = 'verde' | 'amarillo' | 'rojo';
+const PETICION_NIVEL_RANK: Record<PeticionNivel, number> = { verde: 1, amarillo: 2, rojo: 3 };
+
+// Umbrales fijos: 5 días antes = verde, 3 días = amarillo, 2 días en
+// adelante (incluye vencido) = rojo. El resto de los días no dispara nada.
+function peticionLevelForDays(days: number): PeticionNivel | null {
+  if (days <= 2) return 'rojo';
+  if (days === 3) return 'amarillo';
+  if (days === 5) return 'verde';
+  return null;
+}
+
+async function sendPeticionReminder(
+  sql: SqlClient,
+  accessToken: string,
+  peticion: {
+    id: number;
+    radicado: string;
+    asunto: string;
+    peticionario: string;
+    areaConsolida: string;
+    fechaPlazoRespuesta: string | null;
+    correoPersonaAsignada: string | null;
+  },
+  level: PeticionNivel,
+  daysRemaining: number | null,
+): Promise<boolean> {
+  const recipientRows = (await sql`
+    SELECT c.email FROM peticion_responsables pr
+    JOIN contactos c ON c.contacto_id = pr.contacto_id
+    WHERE pr.peticion_id = ${peticion.id} AND c.email IS NOT NULL AND c.email <> ''
+  `) as any[];
+  const emails = recipientRows.map((r: any) => r.email as string);
+  if (peticion.correoPersonaAsignada && peticion.correoPersonaAsignada.includes('@')) {
+    emails.push(peticion.correoPersonaAsignada);
+  }
+  if (emails.length === 0) return false;
+
+  const actionUrl = `${(process.env.APP_URL || 'https://seguimiento-informes.vercel.app').replace(/\/$/, '')}/peticiones`;
+  const html = buildPeticionReminderEmailHtml({
+    level,
+    radicado: peticion.radicado,
+    asunto: peticion.asunto,
+    peticionario: peticion.peticionario,
+    areaConsolida: peticion.areaConsolida,
+    daysRemaining,
+    fechaPlazoRespuesta: peticion.fechaPlazoRespuesta,
+    actionUrl,
+  });
+  await sendEmail(accessToken, {
+    to: emails,
+    subject: `[Peticiones · ${level.toUpperCase()}] ${peticion.radicado} — ${peticion.asunto}`,
+    body: html,
+    html: true,
+  });
+  return true;
+}
+
+async function handlePeticionesReminders(sql: SqlClient, accessToken: string): Promise<{ evaluated: number; sent: number }> {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const rows = (await sql`
+    SELECT peticion_id AS id, radicado, asunto, peticionario, area_consolida AS "areaConsolida",
+      correo_persona_asignada AS "correoPersonaAsignada",
+      TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
+      ultimo_recordatorio_nivel AS "ultimoNivel", TO_CHAR(ultimo_recordatorio_en, 'YYYY-MM-DD') AS "ultimoEn"
+    FROM peticiones
+    WHERE fecha_radicado_respuesta IS NULL AND fecha_plazo_respuesta IS NOT NULL
+  `) as any[];
+
+  let sentCount = 0;
+  for (const p of rows) {
+    const due = new Date(`${p.fechaPlazoRespuesta}T00:00:00Z`);
+    const today = new Date(`${todayIso}T00:00:00Z`);
+    const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    const level = peticionLevelForDays(days);
+    if (!level) continue;
+
+    const oldRank = p.ultimoNivel ? PETICION_NIVEL_RANK[p.ultimoNivel as PeticionNivel] ?? 0 : 0;
+    const shouldSend = PETICION_NIVEL_RANK[level] > oldRank || (level === 'rojo' && p.ultimoEn !== todayIso);
+    if (!shouldSend) continue;
+
+    try {
+      const sent = await sendPeticionReminder(sql, accessToken, p, level, days);
+      if (sent) {
+        await sql`UPDATE peticiones SET ultimo_recordatorio_nivel = ${level}, ultimo_recordatorio_en = ${todayIso} WHERE peticion_id = ${p.id}`;
+        sentCount++;
+      }
+    } catch (error) {
+      console.error('Petición reminder send failed', p.id, error);
+    }
+  }
+
+  return { evaluated: rows.length, sent: sentCount };
+}
+
 async function handleCronSweep(sql: SqlClient): Promise<{ evaluated: number; sent: number; skipped?: string }> {
   const accessToken = await getConnectedAccessToken(sql);
   if (!accessToken) {
@@ -158,7 +254,12 @@ async function handleCronSweep(sql: SqlClient): Promise<{ evaluated: number; sen
     }
   }
 
-  return { evaluated: dueAlerts.length, sent: sentCount };
+  const peticionesResult = await handlePeticionesReminders(sql, accessToken);
+
+  return {
+    evaluated: dueAlerts.length + peticionesResult.evaluated,
+    sent: sentCount + peticionesResult.sent,
+  };
 }
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
@@ -249,6 +350,49 @@ export default async function handler(request: VercelRequest, response: VercelRe
     // POST
     if (request.body?.action === 'send') {
       return handleSend(request, response, sql);
+    }
+
+    if (request.body?.action === 'sendPeticionReminder') {
+      if (!(await canEditModuleRequest(request, sql, 'peticiones'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Peticiones.'] });
+      }
+      const peticionId = Number(request.body?.peticionId);
+      if (!Number.isInteger(peticionId) || peticionId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la petición es obligatorio.'] });
+      }
+      const [p] = (await sql`
+        SELECT peticion_id AS id, radicado, asunto, peticionario, area_consolida AS "areaConsolida",
+          correo_persona_asignada AS "correoPersonaAsignada",
+          TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta"
+        FROM peticiones WHERE peticion_id = ${peticionId}
+      `) as any[];
+      if (!p) return response.status(404).json({ data: null, meta: {}, errors: ['Petición no encontrada.'] });
+
+      const accessToken = await getConnectedAccessToken(sql);
+      if (!accessToken) {
+        return response.status(503).json({ data: null, meta: {}, errors: ['Conecta una cuenta de Google (Fuentes Drive) para poder enviar correos.'] });
+      }
+
+      let daysRemaining: number | null = null;
+      let level: 'verde' | 'amarillo' | 'rojo' = 'amarillo';
+      if (p.fechaPlazoRespuesta) {
+        const due = new Date(`${p.fechaPlazoRespuesta}T00:00:00Z`);
+        const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+        daysRemaining = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        level = daysRemaining <= 2 ? 'rojo' : daysRemaining <= 4 ? 'amarillo' : 'verde';
+      }
+
+      try {
+        const sent = await sendPeticionReminder(sql, accessToken, p, level, daysRemaining);
+        if (!sent) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['Esta petición no tiene responsables ni correo asignado con un email válido.'] });
+        }
+        const todayIso = new Date().toISOString().slice(0, 10);
+        await sql`UPDATE peticiones SET ultimo_recordatorio_nivel = ${level}, ultimo_recordatorio_en = ${todayIso} WHERE peticion_id = ${peticionId}`;
+        return response.status(200).json({ data: { sent: true, level }, meta: {}, errors: [] });
+      } catch (error) {
+        return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible enviar el recordatorio.'] });
+      }
     }
 
     const { projectId, name, schedule, time, type, recipientIds } = request.body ?? {};

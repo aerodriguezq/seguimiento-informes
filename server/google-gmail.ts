@@ -122,6 +122,74 @@ export function buildAccessApprovedEmailHtml(options: { name: string | null; log
 </div>`;
 }
 
+const PETICION_LEVEL_COLORS: Record<'verde' | 'amarillo' | 'rojo', UrgencyColors & { label: string; emoji: string }> = {
+  verde: { bg: '#15803d', accent: '#bbf7d0', label: 'Recordatorio', emoji: '🟢' },
+  amarillo: { bg: '#b45309', accent: '#fde68a', label: 'Alerta de vencimiento próximo', emoji: '🟡' },
+  rojo: { bg: '#b91c1c', accent: '#fecaca', label: 'Alerta urgente', emoji: '🔴' },
+};
+
+// Recordatorio de una Petición: verde a los 5 días de plazo, amarillo a los
+// 3, rojo desde 2 días en adelante (incluido vencido) — el rojo siempre
+// incluye toda la información de la petición, no solo el resumen.
+export function buildPeticionReminderEmailHtml(options: {
+  level: 'verde' | 'amarillo' | 'rojo';
+  radicado: string;
+  asunto: string;
+  peticionario: string;
+  areaConsolida: string;
+  daysRemaining: number | null;
+  fechaPlazoRespuesta: string | null;
+  actionUrl: string;
+}): string {
+  const { bg, accent, label, emoji } = PETICION_LEVEL_COLORS[options.level];
+  const escape = (value: string) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c] as string));
+  const daysText =
+    options.daysRemaining === null ? ''
+    : options.daysRemaining < 0 ? `Vencido hace ${Math.abs(options.daysRemaining)} día(s)`
+    : options.daysRemaining === 0 ? 'Vence hoy'
+    : `Quedan ${options.daysRemaining} día(s)`;
+
+  return `<div style="max-width: 480px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dce4ec; border-radius: 8px; font-family: Arial, sans-serif; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+  <div style="background-color: ${bg}; color: #ffffff; padding: 20px; text-align: center;">
+    <div style="font-size: 24px; margin-bottom: 5px;">${emoji}</div>
+    <h2 style="margin: 0; font-size: 18px; font-weight: bold; color: #ffffff;">${label}</h2>
+    <p style="margin: 5px 0 0 0; font-size: 16px; font-weight: 600; color: ${accent};">${escape(daysText)}</p>
+  </div>
+
+  <div style="padding: 20px; background-color: #f8fafc;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #334155;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold; width: 45%;">📄 Radicado:</td>
+        <td style="padding: 10px 0;">${escape(options.radicado)}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">✉️ Asunto:</td>
+        <td style="padding: 10px 0;">${escape(options.asunto)}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">🙋 Peticionario:</td>
+        <td style="padding: 10px 0;">${escape(options.peticionario)}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">🏢 Área consolida:</td>
+        <td style="padding: 10px 0;">${escape(options.areaConsolida)}</td>
+      </tr>
+      <tr>
+        <td style="padding: 10px 0; font-weight: bold;">📅 Fecha plazo respuesta:</td>
+        <td style="padding: 10px 0;">${escape(options.fechaPlazoRespuesta || 'Sin definir')}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">
+    <p style="font-size: 11px; color: #64748b; margin: 0 0 12px 0;">Este mensaje fue enviado automáticamente desde <strong>Seguimiento de Informes</strong>.</p>
+    <a href="${escape(options.actionUrl)}" style="display: inline-block; background-color: ${bg}; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 13px;">Revisar Ahora</a>
+  </div>
+</div>`;
+}
+
 const DRIVE_URL_PATTERN = /https:\/\/(?:drive|docs)\.google\.com\/[^\s"'<>)\]]+/;
 
 function fromBase64Url(value: string) {
