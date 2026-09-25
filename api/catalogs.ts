@@ -1,4 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { canEditModuleRequest } from '../server/admin-auth.js';
+
+// fecha_plazo_respuesta siempre se recalcula a partir de fecha_radicacion +
+// plazo_respuesta (días calendario) — es un dato derivado, no editable a mano.
+function computeFechaPlazo(fechaRadicacion: string | null, plazoRespuesta: number | null): string | null {
+  if (!fechaRadicacion || plazoRespuesta === null || !Number.isFinite(plazoRespuesta)) return null;
+  const d = new Date(`${fechaRadicacion}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setUTCDate(d.getUTCDate() + plazoRespuesta);
+  return d.toISOString().slice(0, 10);
+}
 
 function readCookie(request: VercelRequest, name: string) {
   const cookies = request.headers.cookie?.split(';').map((c) => c.trim()) ?? [];
@@ -86,6 +97,19 @@ export default async function handler(
     const sql = neon(databaseUrl);
 
     if (request.method === 'DELETE') {
+      if (request.query.kind === 'peticion') {
+        if (!(await canEditModuleRequest(request, sql, 'peticiones'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Peticiones.'] });
+        }
+        const peticionId = Number(request.query.id);
+        if (!Number.isInteger(peticionId) || peticionId <= 0) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id de la petición es obligatorio.'] });
+        }
+        const deleted = await sql`DELETE FROM peticiones WHERE peticion_id = ${peticionId} RETURNING peticion_id AS id`;
+        if (!deleted[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Petición no encontrada.'] });
+        return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+      }
+
       if (request.query.kind === 'authorizedUser') {
         if (!(await isAdminRequest(request, sql))) {
           return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede eliminar usuarios autorizados.'] });
@@ -104,6 +128,19 @@ export default async function handler(
       const deleted = await sql`DELETE FROM tipo_informe_pasos WHERE paso_id = ${stepId} RETURNING paso_id AS id`;
       if (!deleted[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Paso no encontrado.'] });
       return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'GET' && request.query.kind === 'peticiones') {
+      const rows = await sql`
+        SELECT peticion_id AS id, radicado, TO_CHAR(fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
+          peticionario, asunto, area_consolida AS "areaConsolida", correo_persona_asignada AS "correoPersonaAsignada",
+          areas_intervienen AS "areasIntervienen", plazo_respuesta AS "plazoRespuesta",
+          TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
+          TO_CHAR(fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
+          created_at AS "createdAt"
+        FROM peticiones ORDER BY COALESCE(fecha_radicacion, created_at::date) DESC, peticion_id DESC
+      `;
+      return response.status(200).json({ data: rows, meta: {}, errors: [] });
     }
 
     if (request.method === 'GET') {
@@ -145,6 +182,48 @@ export default async function handler(
 
     if (request.method === 'PATCH') {
       const body = request.body ?? {};
+
+      if (body.kind === 'peticion') {
+        if (!(await canEditModuleRequest(request, sql, 'peticiones'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Peticiones.'] });
+        }
+        const peticionId = Number(body.id);
+        if (!Number.isInteger(peticionId) || peticionId <= 0) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id de la petición es obligatorio.'] });
+        }
+        const current = await sql`SELECT * FROM peticiones WHERE peticion_id = ${peticionId}`;
+        if (!current[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Petición no encontrada.'] });
+
+        const has = (key: string) => Object.prototype.hasOwnProperty.call(body.data ?? {}, key);
+        const d = body.data ?? {};
+        const nextRadicado = has('radicado') ? String(d.radicado ?? '').trim() : current[0].radicado;
+        const nextFechaRadicacion = has('fechaRadicacion') ? (d.fechaRadicacion || null) : current[0].fecha_radicacion;
+        const nextPeticionario = has('peticionario') ? String(d.peticionario ?? '').trim() : current[0].peticionario;
+        const nextAsunto = has('asunto') ? String(d.asunto ?? '').trim() : current[0].asunto;
+        const nextAreaConsolida = has('areaConsolida') ? String(d.areaConsolida ?? '').trim() : current[0].area_consolida;
+        const nextCorreo = has('correoPersonaAsignada') ? String(d.correoPersonaAsignada ?? '').trim() : current[0].correo_persona_asignada;
+        const nextAreasIntervienen = has('areasIntervienen') ? String(d.areasIntervienen ?? '').trim() : current[0].areas_intervienen;
+        const nextPlazoRespuesta = has('plazoRespuesta') ? (d.plazoRespuesta === null || d.plazoRespuesta === '' ? null : Number(d.plazoRespuesta)) : current[0].plazo_respuesta;
+        const nextFechaRadicadoRespuesta = has('fechaRadicadoRespuesta') ? (d.fechaRadicadoRespuesta || null) : current[0].fecha_radicado_respuesta;
+        const nextFechaPlazo = computeFechaPlazo(nextFechaRadicacion, nextPlazoRespuesta);
+
+        const rows = await sql`
+          UPDATE peticiones SET
+            radicado = ${nextRadicado}, fecha_radicacion = ${nextFechaRadicacion}, peticionario = ${nextPeticionario},
+            asunto = ${nextAsunto}, area_consolida = ${nextAreaConsolida}, correo_persona_asignada = ${nextCorreo},
+            areas_intervienen = ${nextAreasIntervienen}, plazo_respuesta = ${nextPlazoRespuesta},
+            fecha_plazo_respuesta = ${nextFechaPlazo}, fecha_radicado_respuesta = ${nextFechaRadicadoRespuesta},
+            updated_at = NOW()
+          WHERE peticion_id = ${peticionId}
+          RETURNING peticion_id AS id, radicado, TO_CHAR(fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
+            peticionario, asunto, area_consolida AS "areaConsolida", correo_persona_asignada AS "correoPersonaAsignada",
+            areas_intervienen AS "areasIntervienen", plazo_respuesta AS "plazoRespuesta",
+            TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
+            TO_CHAR(fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
+            created_at AS "createdAt"
+        `;
+        return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+      }
 
       if (body.kind === 'sweepConfig') {
         if (!(await isAdminRequest(request, sql))) {
@@ -269,6 +348,40 @@ export default async function handler(
       } catch (error) {
         return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible enviar el correo de prueba.'] });
       }
+    }
+
+    if (kind === 'peticion') {
+      if (!(await canEditModuleRequest(request, sql, 'peticiones'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Peticiones.'] });
+      }
+      const radicado = String(data?.radicado ?? '').trim();
+      const asunto = String(data?.asunto ?? '').trim();
+      if (!radicado || !asunto) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El radicado y el asunto son obligatorios.'] });
+      }
+      const fechaRadicacion = data?.fechaRadicacion || null;
+      const plazoRespuesta = data?.plazoRespuesta === null || data?.plazoRespuesta === undefined || data?.plazoRespuesta === '' ? null : Number(data.plazoRespuesta);
+      const fechaPlazo = computeFechaPlazo(fechaRadicacion, plazoRespuesta);
+
+      const rows = await sql`
+        INSERT INTO peticiones (
+          radicado, fecha_radicacion, peticionario, asunto, area_consolida,
+          correo_persona_asignada, areas_intervienen, plazo_respuesta, fecha_plazo_respuesta, fecha_radicado_respuesta
+        )
+        VALUES (
+          ${radicado}, ${fechaRadicacion}, ${String(data?.peticionario ?? '').trim()}, ${asunto},
+          ${String(data?.areaConsolida ?? '').trim()}, ${String(data?.correoPersonaAsignada ?? '').trim()},
+          ${String(data?.areasIntervienen ?? '').trim()}, ${plazoRespuesta}, ${fechaPlazo},
+          ${data?.fechaRadicadoRespuesta || null}
+        )
+        RETURNING peticion_id AS id, radicado, TO_CHAR(fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
+          peticionario, asunto, area_consolida AS "areaConsolida", correo_persona_asignada AS "correoPersonaAsignada",
+          areas_intervienen AS "areasIntervienen", plazo_respuesta AS "plazoRespuesta",
+          TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
+          TO_CHAR(fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
+          created_at AS "createdAt"
+      `;
+      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
     }
 
     if (kind === 'reportType') {

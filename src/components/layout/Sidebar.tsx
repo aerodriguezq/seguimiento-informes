@@ -15,6 +15,7 @@ import {
   Users,
   ShieldAlert,
   ChevronRight,
+  Inbox,
 } from 'lucide-react';
 import { ActiveModule } from '../../types';
 import { useAuth } from '../../auth/AuthContext';
@@ -150,6 +151,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ],
         },
       ],
+    },
+    {
+      kind: 'leaf',
+      id: 'peticiones',
+      label: 'Peticiones',
+      icon: Inbox,
+      visible: canView('peticiones'),
     },
     {
       kind: 'group',

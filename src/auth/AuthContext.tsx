@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { LogIn, ShieldAlert, ShieldCheck } from 'lucide-react';
 
-export type PermissionModule = 'dashboard' | 'reports' | 'projects' | 'alerts' | 'lists' | 'drive_links' | 'seguimiento';
+export type PermissionModule = 'dashboard' | 'reports' | 'projects' | 'alerts' | 'lists' | 'drive_links' | 'seguimiento' | 'peticiones';
 export type PermissionLevel = 'none' | 'view' | 'edit';
 
 interface AuthUser {

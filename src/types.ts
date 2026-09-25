@@ -131,4 +131,20 @@ export type ActiveModule =
   | 'lists'
   | 'drive_links'
   | 'seguimiento'
+  | 'peticiones'
   | 'users';
+
+export interface Peticion {
+  id: string;
+  radicado: string;
+  fechaRadicacion: string | null;
+  peticionario: string;
+  asunto: string;
+  areaConsolida: string;
+  correoPersonaAsignada: string;
+  areasIntervienen: string;
+  plazoRespuesta: number | null;
+  fechaPlazoRespuesta: string | null;
+  fechaRadicadoRespuesta: string | null;
+  createdAt: string;
+}

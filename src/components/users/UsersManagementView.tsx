@@ -40,6 +40,7 @@ const MODULES: { key: PermissionModule; label: string }[] = [
   { key: 'lists', label: 'Listas Maestras' },
   { key: 'drive_links', label: 'Fuentes Drive' },
   { key: 'seguimiento', label: 'Seguimiento' },
+  { key: 'peticiones', label: 'Peticiones' },
 ];
 
 const PERMISSION_LABEL: Record<PermissionLevel, string> = { none: 'Sin acceso', view: 'Solo ver', edit: 'Editar' };

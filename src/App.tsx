@@ -24,6 +24,7 @@ import { ReportDetailModal } from './components/reports/ReportDetailModal';
 import { ProjectsListView } from './components/projects/ProjectsListView';
 import { ProjectDetailView } from './components/projects/ProjectDetailView';
 import { SeguimientoModule } from './components/projects/SeguimientoModule';
+import { PeticionesView } from './components/peticiones/PeticionesView';
 import { AlertsView } from './components/alerts/AlertsView';
 import { MasterListsView } from './components/master-lists/MasterListsView';
 import { DriveLinksView } from './components/drive/DriveLinksView';
@@ -41,6 +42,7 @@ const MODULE_ROUTES: Record<ActiveModule, string> = {
   lists: '/lists',
   drive_links: '/drive-links',
   seguimiento: '/seguimiento',
+  peticiones: '/peticiones',
   users: '/usuarios',
 };
 
@@ -912,6 +914,10 @@ export default function App() {
 
           {!isLoadingWorkspace && !workspaceError && activeModule === 'seguimiento' && (
             <SeguimientoModule projects={projects} />
+          )}
+
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'peticiones' && (
+            <PeticionesView />
           )}
 
           {/* M09: Usuarios Autorizados (solo administradores) */}
