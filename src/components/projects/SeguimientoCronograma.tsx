@@ -296,12 +296,9 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
 
   const filteredRows = useMemo(() => {
     if (!data) return [];
-    const withTimeline = data.rows.filter(
-      (r) => r.pistas.some((p) => p.fechaInicio && p.fechaFin) || (r.proyeccion?.fechaInicio && r.proyeccion.fechaFin),
-    );
     const q = search.trim().toLowerCase();
-    if (!q) return withTimeline;
-    return withTimeline.filter((r) => r.subActividad.toLowerCase().includes(q) || r.concepto.toLowerCase().includes(q));
+    if (!q) return data.rows;
+    return data.rows.filter((r) => r.subActividad.toLowerCase().includes(q) || r.concepto.toLowerCase().includes(q));
   }, [data, search]);
 
   const sharedDays = useMemo(() => (data ? buildSharedDays(data.rows) : []), [data]);
@@ -711,7 +708,10 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; days: string[]; projec
     });
   });
 
-  const hasTimeline = tracks.length > 0 && days.length > 0;
+  // Siempre se muestra la línea de tiempo (aunque esta fila no tenga pistas
+  // con datos) mientras exista el eje de días compartido, para que la
+  // cuadrícula se vea igual en todas las tarjetas.
+  const hasTimeline = days.length > 0;
   const totalW = days.length * DAY_W;
   // Presupuesto de ancho aproximado para la línea de tiempo en una hoja
   // horizontal (carta/A4) menos la columna de etiquetas y márgenes.
@@ -822,18 +822,24 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; days: string[]; projec
           <div className="flex items-start gap-1.5">
             <div className="shrink-0 space-y-0" style={{ width: 170 }}>
               <div style={{ height: 17 }} />
-              {tracks.map((track) => (
-                <div key={track.key} className="flex flex-col justify-center pr-1.5" style={{ height: 30, borderBottom: '1px solid rgba(15,23,42,0.06)' }}>
-                  <p className="text-[8px] font-bold uppercase truncate" style={{ color: MUTED, letterSpacing: '0.01em' }}>{track.label}</p>
-                  {track.badge && <p className="text-[7.5px] font-semibold truncate mt-px" style={{ color: ACCENT }}>{track.badge}</p>}
+              {tracks.length === 0 ? (
+                <div className="flex flex-col justify-center pr-1.5" style={{ height: 30 }}>
+                  <p className="text-[8px] italic" style={{ color: MUTED }}>Sin datos en este rango</p>
                 </div>
-              ))}
+              ) : (
+                tracks.map((track) => (
+                  <div key={track.key} className="flex flex-col justify-center pr-1.5" style={{ height: 30, borderBottom: '1px solid rgba(15,23,42,0.06)' }}>
+                    <p className="text-[8px] font-bold uppercase truncate" style={{ color: MUTED, letterSpacing: '0.01em' }}>{track.label}</p>
+                    {track.badge && <p className="text-[7.5px] font-semibold truncate mt-px" style={{ color: ACCENT }}>{track.badge}</p>}
+                  </div>
+                ))
+              )}
             </div>
 
             <div ref={scrollRef} onScroll={updateMonthLabel} className="seg-timeline-scroll flex-1 min-w-0 overflow-x-auto overflow-y-hidden rounded-md">
               <div className="seg-timeline-track" style={{ position: 'relative', width: totalW, ['--seg-print-scale' as string]: printScale }}>
                 <div style={{ position: 'relative', height: 15, marginBottom: 2 }}>{dayTicks.dayCells}</div>
-                <div style={{ position: 'relative', width: totalW, background: '#f7f8f9', borderRadius: 4 }}>
+                <div style={{ position: 'relative', width: totalW, height: tracks.length === 0 ? 30 : undefined, background: '#f7f8f9', borderRadius: 4 }}>
                   {dayTicks.weekendBands}
                   {dayTicks.monthLines}
                   {todayIdx !== -1 && <div className="absolute top-0 bottom-0" style={{ left: todayIdx * DAY_W, width: 2, background: '#dc2626', zIndex: 3 }} title="Hoy" />}
