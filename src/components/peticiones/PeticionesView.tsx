@@ -242,8 +242,12 @@ export const PeticionesView: React.FC<{ contacts: Contact[] }> = ({ contacts }) 
   }, [peticiones, search]);
 
   const openCreate = () => {
+    // Prioriza el último correo ya guardado en la base (funciona en
+    // cualquier dispositivo/navegador); si no hay ninguno todavía, usa el
+    // recordado localmente.
+    const lastFromData = (peticiones ?? []).find((p) => p.correoPersonaAsignada)?.correoPersonaAsignada;
     setEditingId(null);
-    setForm({ ...EMPTY_FORM, correoPersonaAsignada: getLastCorreoAdicional() });
+    setForm({ ...EMPTY_FORM, correoPersonaAsignada: lastFromData || getLastCorreoAdicional() });
     setFormError('');
     setIsFormOpen(true);
   };
