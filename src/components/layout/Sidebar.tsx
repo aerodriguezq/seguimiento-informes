@@ -13,7 +13,6 @@ import {
   Cloud,
   Archive,
   Users,
-  ShieldAlert,
   ChevronRight,
   Inbox,
 } from 'lucide-react';
@@ -279,8 +278,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Top branding */}
       <div className="flex-1 min-h-0 flex flex-col">
         <div className="px-5 py-5 border-b border-slate-800 flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center text-white shadow-md shadow-indigo-900/30">
-            <ShieldAlert className="w-5 h-5" />
+          <div className="w-9 h-9 rounded-xl overflow-hidden shrink-0 shadow-md shadow-indigo-900/30">
+            <img src="/logo.svg" alt="" className="w-full h-full object-cover" />
           </div>
           <div className="min-w-0">
             <h1 className="font-bold text-sm text-white tracking-tight leading-tight truncate">
