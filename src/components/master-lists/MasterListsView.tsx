@@ -673,21 +673,17 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       {/* Steps Modal */}
       {stepsModalTypeId && typeForStepsModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-lg w-full space-y-4 animate-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <div>
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-xl w-full max-h-[92vh] flex flex-col animate-in zoom-in-95">
+            {/* Header (fijo) */}
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 shrink-0">
+              <div className="min-w-0">
                 <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                  <GitBranch className="h-4 w-4 text-indigo-600" />
-                  Flujo de entrega: {typeForStepsModal.name}
+                  <GitBranch className="h-4 w-4 text-indigo-600 shrink-0" />
+                  <span className="truncate">Flujo de entrega: {typeForStepsModal.name}</span>
                 </h3>
-                <p className="mt-0.5 text-[11px] text-slate-500">
-                  Define el orden de responsables. Al crear un informe de este tipo, se avisa al paso 1; al confirmar la entrega de cada paso se avanza al siguiente hasta llegar al paso final.
+                <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
+                  Al crear un informe se avisa al paso 1; al confirmar cada entrega se avanza al siguiente hasta el paso final.
                 </p>
-                {typeForStepsModal.periodicity === 'Mensual' && (
-                  <p className="mt-1.5 rounded-md bg-indigo-50 border border-indigo-100 px-2.5 py-1.5 text-[11px] text-indigo-800">
-                    Este tipo es <b>mensual</b>: cada proyecto genera un informe nuevo cada mes (repitiendo este mismo flujo desde el paso 1) hasta la fecha de finalización del proyecto — no es un flujo de una sola vez. El asunto de correo de cada paso aplica a <b>todos</b> esos informes mensuales; el sistema agrega el número de secuencia (01, 02, 03...) al final para diferenciarlos.
-                  </p>
-                )}
               </div>
               <button
                 type="button"
@@ -698,183 +694,225 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
               </button>
             </div>
 
-            {stepsForModalType.length === 0 ? (
-              <p className="text-xs text-slate-500">Este tipo de informe todavía no tiene pasos configurados.</p>
-            ) : (
-              <ol className="space-y-2 text-xs">
-                {stepsForModalType.map((step, idx) => (
-                  <li key={step.id} className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 p-2.5">
+            {/* Cuerpo (scrollable) */}
+            <div className="overflow-y-auto px-5 py-4 space-y-4 text-xs">
+              {typeForStepsModal.periodicity === 'Mensual' && (
+                <div className="rounded-lg bg-indigo-50 border border-indigo-100 px-3 py-2.5 text-[11px] text-indigo-800 leading-relaxed">
+                  <b>Mensual:</b> cada proyecto genera un informe nuevo cada mes (repite este flujo desde el paso 1) hasta que termine el proyecto. El asunto de cada paso aplica a todos esos informes — el sistema le agrega el número de secuencia (01, 02...) al final.
+                </div>
+              )}
+
+              {/* Lista de pasos existentes */}
+              <div>
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                  Pasos configurados {stepsForModalType.length > 0 && `(${stepsForModalType.length})`}
+                </p>
+                {stepsForModalType.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-slate-400">
+                    Este tipo de informe todavía no tiene pasos configurados.
+                  </p>
+                ) : (
+                  <ol className="space-y-1.5">
+                    {stepsForModalType.map((step, idx) => (
+                      <li key={step.id} className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 p-2.5">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] text-indigo-700">{idx + 1}</span>
+                            <span className="truncate">{step.name}</span>
+                            {step.isFinal && (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                                <Flag className="h-3 w-3" /> Final
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 truncate text-[11px] text-slate-500">Asunto: "{step.emailSubject}"</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                            {(step.diaInicio || step.diaLimite) && (
+                              <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+                                {step.diaInicio ? `Inicia día ${step.diaInicio}` : 'Inicia con la entrega anterior'}
+                                {step.diaLimite ? ` · Límite día ${step.diaLimite}` : ''}
+                              </span>
+                            )}
+                            <span className="text-[11px] text-slate-500 truncate">
+                              {step.contactIds.map((id) => contacts.find((c) => c.id === id)?.name).filter(Boolean).join(', ') || 'Sin contactos'}
+                            </span>
+                          </div>
+                        </div>
+                        {canEditLists && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => onMoveReportTypeStep(step.id, 'up')}
+                              disabled={idx === 0}
+                              className="text-slate-400 hover:text-indigo-600 disabled:opacity-30 disabled:hover:text-slate-400"
+                              title="Mover arriba"
+                            >
+                              <ChevronUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onMoveReportTypeStep(step.id, 'down')}
+                              disabled={idx === stepsForModalType.length - 1}
+                              className="text-slate-400 hover:text-indigo-600 disabled:opacity-30 disabled:hover:text-slate-400"
+                              title="Mover abajo"
+                            >
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onDeleteReportTypeStep(step.id)}
+                              className="text-slate-400 hover:text-rose-600"
+                              title="Eliminar paso"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+
+              {stepError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700" role="alert">
+                  {stepError}
+                </div>
+              )}
+
+              {/* Formulario: agregar paso nuevo */}
+              {canEditLists && (
+                <form onSubmit={handleSaveStep} className="space-y-3 border-t border-slate-100 pt-4">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                    Agregar paso {stepsForModalType.length + 1}
+                  </p>
+
+                  {/* Sección: identificación */}
+                  <div className="space-y-2 rounded-lg border border-slate-200 p-3">
                     <div>
-                      <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-100 text-[10px] text-indigo-700">{idx + 1}</span>
-                        {step.name}
-                        {step.isFinal && (
-                          <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
-                            <Flag className="h-3 w-3" /> Final
-                          </span>
+                      <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Nombre del paso</label>
+                      <input
+                        type="text"
+                        required
+                        value={newStepName}
+                        onChange={(e) => setNewStepName(e.target.value)}
+                        placeholder="Ej: Entrega de interventoría"
+                        className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Asunto de correo que confirma la entrega</label>
+                      <input
+                        type="text"
+                        required
+                        value={newStepSubject}
+                        onChange={(e) => setNewStepSubject(e.target.value)}
+                        placeholder='Ej: "Entrega mensual interventoría"'
+                        className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                      />
+                      <p className="mt-1 text-[10.5px] text-slate-400">Asunto base sin número — se reutiliza cada mes; el sistema agrega el número de secuencia solo.</p>
+                    </div>
+                    <div>
+                      <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Palabras clave adicionales (opcional)</label>
+                      <input
+                        type="text"
+                        value={newStepKeywords}
+                        onChange={(e) => setNewStepKeywords(e.target.value)}
+                        placeholder="Separadas por coma"
+                        className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                      />
+                      <p className="mt-1 text-[10.5px] text-slate-400">Se suman al asunto al buscar en Gmail, para no depender solo de que sea exacto.</p>
+                    </div>
+                  </div>
+
+                  {/* Sección: programación */}
+                  <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+                    <p className="text-[10.5px] font-semibold text-slate-500">Programación</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día de inicio del mes</label>
+                        {stepsForModalType.length === 0 ? (
+                          <input
+                            type="number"
+                            min={1}
+                            max={31}
+                            value={newStepDiaInicio}
+                            onChange={(e) => setNewStepDiaInicio(e.target.value)}
+                            placeholder="Ej: 3"
+                            className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                          />
+                        ) : (
+                          <div className="w-full px-2.5 py-1.5 border border-dashed border-slate-200 rounded-lg text-[10.5px] text-slate-400 bg-slate-50">
+                            No aplica
+                          </div>
                         )}
                       </div>
-                      <p className="mt-1 text-[11px] text-slate-500">Asunto esperado: "{step.emailSubject}"</p>
-                      {(step.diaInicio || step.diaLimite) && (
-                        <p className="mt-0.5 text-[11px] text-indigo-600 font-medium">
-                          {step.diaInicio ? `Inicia día ${step.diaInicio} · ` : ''}
-                          {step.diaLimite ? `Límite día ${step.diaLimite}` : 'Sin día límite configurado'}
-                        </p>
-                      )}
-                      <p className="mt-0.5 text-[11px] text-slate-500">
-                        {step.contactIds.map((id) => contacts.find((c) => c.id === id)?.name).filter(Boolean).join(', ') || 'Sin contactos'}
-                      </p>
-                    </div>
-                    {canEditLists && (
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => onMoveReportTypeStep(step.id, 'up')}
-                          disabled={idx === 0}
-                          className="text-slate-400 hover:text-indigo-600 disabled:opacity-30 disabled:hover:text-slate-400"
-                          title="Mover arriba"
-                        >
-                          <ChevronUp className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onMoveReportTypeStep(step.id, 'down')}
-                          disabled={idx === stepsForModalType.length - 1}
-                          className="text-slate-400 hover:text-indigo-600 disabled:opacity-30 disabled:hover:text-slate-400"
-                          title="Mover abajo"
-                        >
-                          <ChevronDown className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteReportTypeStep(step.id)}
-                          className="text-slate-400 hover:text-rose-600"
-                          title="Eliminar paso"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                      <div>
+                        <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día límite del mes</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={newStepDiaLimite}
+                          onChange={(e) => setNewStepDiaLimite(e.target.value)}
+                          placeholder="Ej: 6"
+                          className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                        />
                       </div>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            )}
-
-            {stepError && (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700" role="alert">
-                {stepError}
-              </div>
-            )}
-
-            {canEditLists && (
-            <form onSubmit={handleSaveStep} className="space-y-2.5 border-t border-slate-100 pt-3 text-xs">
-              <p className="font-semibold text-slate-700">Agregar paso {stepsForModalType.length + 1}</p>
-              <input
-                type="text"
-                required
-                value={newStepName}
-                onChange={(e) => setNewStepName(e.target.value)}
-                placeholder="Nombre del paso (ej: Entrega de interventoría)"
-                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-              />
-              <input
-                type="text"
-                required
-                value={newStepSubject}
-                onChange={(e) => setNewStepSubject(e.target.value)}
-                placeholder="Asunto de correo que confirma la entrega"
-                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-              />
-              <p className="text-[10.5px] text-slate-400">
-                Usa un asunto base sin número (ej. "Entrega mensual interventoría") — se reutiliza para cada informe mensual del proyecto; el sistema agrega el número de secuencia solo.
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día de inicio del mes</label>
-                  {stepsForModalType.length === 0 ? (
-                    <input
-                      type="number"
-                      min={1}
-                      max={31}
-                      value={newStepDiaInicio}
-                      onChange={(e) => setNewStepDiaInicio(e.target.value)}
-                      placeholder="Ej: 3"
-                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                    />
-                  ) : (
-                    <div className="w-full px-2.5 py-1.5 border border-dashed border-slate-200 rounded-lg text-[10.5px] text-slate-400 bg-slate-50">
-                      No aplica — inicia solo
                     </div>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día límite del mes</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={31}
-                    value={newStepDiaLimite}
-                    onChange={(e) => setNewStepDiaLimite(e.target.value)}
-                    placeholder="Ej: 6"
-                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-              <p className="text-[10.5px] text-slate-400">
-                {stepsForModalType.length === 0 ? (
-                  'Este es el primer paso: "Día de inicio" es el día fijo del mes en que arranca (ej. 3 = arranca el día 3 de cada mes).'
-                ) : (
-                  `Este paso no tiene día de inicio fijo: arranca automáticamente el mismo día en que se confirme la entrega del paso anterior ("${stepsForModalType[stepsForModalType.length - 1].name}"), sea cual sea la fecha. Por eso el campo está deshabilitado — solo el primer paso lo usa.`
-                )}
-              </p>
-              <input
-                type="text"
-                value={newStepKeywords}
-                onChange={(e) => setNewStepKeywords(e.target.value)}
-                placeholder="Palabras clave adicionales, separadas por coma (opcional)"
-                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-              />
-              <p className="text-[10.5px] text-slate-400">
-                Se suman al asunto en la búsqueda de Gmail, para no depender solo de que el asunto sea exacto.
-              </p>
-              <div className="max-h-28 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1.5">
-                {contacts.map((c) => {
-                  const checked = newStepContactIds.includes(c.id);
-                  return (
-                    <label key={c.id} className="flex items-center gap-2 cursor-pointer">
+                    <p className="text-[10.5px] text-slate-400 leading-relaxed">
+                      {stepsForModalType.length === 0 ? (
+                        'Es el primer paso: "Día de inicio" es el día fijo del mes en que arranca (ej. 3 = el 3 de cada mes).'
+                      ) : (
+                        `Arranca solo, el mismo día en que se confirme la entrega de "${stepsForModalType[stepsForModalType.length - 1].name}" — por eso el día de inicio no aplica aquí.`
+                      )}
+                    </p>
+                  </div>
+
+                  {/* Sección: responsables */}
+                  <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+                    <label className="block text-[10.5px] font-semibold text-slate-500">Responsables de este paso</label>
+                    <div className="max-h-28 overflow-y-auto rounded-lg border border-slate-200 p-2 space-y-1.5">
+                      {contacts.map((c) => {
+                        const checked = newStepContactIds.includes(c.id);
+                        return (
+                          <label key={c.id} className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setNewStepContactIds((prev) => (checked ? prev.filter((id) => id !== c.id) : [...prev, c.id]));
+                              }}
+                              className="rounded text-indigo-600"
+                            />
+                            <span className="text-slate-800">{c.name} ({c.role})</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-700 pt-1">
                       <input
                         type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          setNewStepContactIds((prev) => (checked ? prev.filter((id) => id !== c.id) : [...prev, c.id]));
-                        }}
+                        checked={newStepIsFinal}
+                        onChange={(e) => setNewStepIsFinal(e.target.checked)}
                         className="rounded text-indigo-600"
                       />
-                      <span className="text-slate-800">{c.name} ({c.role})</span>
+                      Este es el paso final (al entregarlo, se cierra el informe)
                     </label>
-                  );
-                })}
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={newStepIsFinal}
-                  onChange={(e) => setNewStepIsFinal(e.target.checked)}
-                  className="rounded text-indigo-600"
-                />
-                Este es el paso final (al entregarlo, se cierra el informe)
-              </label>
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="submit"
-                  disabled={isSavingStep || newStepContactIds.length === 0}
-                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isSavingStep ? 'Guardando...' : 'Agregar paso'}
-                </button>
-              </div>
-            </form>
-            )}
+                  </div>
+
+                  <div className="flex items-center justify-end pt-1">
+                    <button
+                      type="submit"
+                      disabled={isSavingStep || newStepContactIds.length === 0}
+                      className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isSavingStep ? 'Guardando...' : 'Agregar paso'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         </div>
       )}
