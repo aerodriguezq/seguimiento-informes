@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { canEditModuleRequest } from '../server/admin-auth.js';
+import { sendEmail, buildPeticionAssignedEmailHtml } from '../server/google-gmail.js';
 
 // fecha_plazo_respuesta siempre se recalcula a partir de fecha_radicacion +
 // plazo_respuesta (días calendario) — es un dato derivado, no editable a mano.
@@ -27,6 +28,49 @@ async function setResponsables(sql: any, peticionId: number, responsableIds: unk
     if (Number.isInteger(id) && id > 0) {
       await sql`INSERT INTO peticion_responsables (peticion_id, contacto_id) VALUES (${peticionId}, ${id}) ON CONFLICT DO NOTHING`;
     }
+  }
+}
+
+// Correo de "te asignaron esta petición" — se envía una sola vez a cada
+// responsable nuevo (al crear la petición, o al agregarlo después), nunca
+// se repite en cada edición posterior (eso ya lo cubren los recordatorios
+// escalonados).
+async function notifyNewPeticionResponsables(
+  sql: any,
+  peticion: {
+    id: number; radicado: string; asunto: string; peticionario: string; areaConsolida: string;
+    plazoRespuesta: number | null; fechaPlazoRespuesta: string | null; correoPersonaAsignada: string | null;
+  },
+  allResponsables: { id: string; name: string; email: string }[],
+  newlyAssignedIds: string[],
+) {
+  const toNotify = allResponsables.filter((r) => newlyAssignedIds.includes(r.id) && r.email);
+  if (toNotify.length === 0) return;
+
+  const accessToken = await getConnectedAccessToken(sql);
+  if (!accessToken) return; // Sin cuenta de Google conectada, no se puede notificar -- no es un error fatal.
+
+  const actionUrl = `${(process.env.APP_URL || 'https://seguimiento-informes.vercel.app').replace(/\/$/, '')}/peticiones`;
+  const html = buildPeticionAssignedEmailHtml({
+    radicado: peticion.radicado,
+    asunto: peticion.asunto,
+    peticionario: peticion.peticionario,
+    areaConsolida: peticion.areaConsolida,
+    plazoRespuesta: peticion.plazoRespuesta,
+    fechaPlazoRespuesta: peticion.fechaPlazoRespuesta,
+    responsables: allResponsables.map((r) => r.name),
+    actionUrl,
+  });
+  try {
+    await sendEmail(accessToken, {
+      to: toNotify.map((r) => r.email),
+      cc: peticion.correoPersonaAsignada && peticion.correoPersonaAsignada.includes('@') ? [peticion.correoPersonaAsignada] : undefined,
+      subject: `[Peticiones] Se te asignó: ${peticion.radicado} — ${peticion.asunto}`,
+      body: html,
+      html: true,
+    });
+  } catch (error) {
+    console.error('No fue posible enviar el correo de asignación de la petición', peticion.id, error);
   }
 }
 
@@ -310,7 +354,7 @@ export default async function handler(
         // Si el plazo cambió, los recordatorios ya enviados quedan obsoletos.
         const plazoChanged = nextFechaPlazo !== current[0].fecha_plazo_respuesta;
 
-        const rows = await sql`
+        const rows = (await sql`
           UPDATE peticiones SET
             radicado = ${nextRadicado}, fecha_radicacion = ${nextFechaRadicacion}, peticionario = ${nextPeticionario},
             asunto = ${nextAsunto}, area_consolida = ${nextAreaConsolida}, correo_persona_asignada = ${nextCorreo},
@@ -326,12 +370,19 @@ export default async function handler(
             TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
             TO_CHAR(fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
             created_at AS "createdAt"
-        `;
+        `) as any[];
 
+        let responsables = await fetchResponsables(sql, peticionId);
         if (Array.isArray(body.responsableIds)) {
-          await setResponsables(sql, peticionId, body.responsableIds);
+          const previousIds = responsables.map((r) => r.id);
+          const nextIds = body.responsableIds.map(String);
+          const newlyAssignedIds = nextIds.filter((id: string) => !previousIds.includes(id));
+          await setResponsables(sql, peticionId, nextIds);
+          responsables = await fetchResponsables(sql, peticionId);
+          if (newlyAssignedIds.length > 0) {
+            await notifyNewPeticionResponsables(sql, { ...rows[0], id: peticionId }, responsables, newlyAssignedIds);
+          }
         }
-        const responsables = await fetchResponsables(sql, peticionId);
         return response.status(200).json({ data: { ...rows[0], responsables }, meta: {}, errors: [] });
       }
 
@@ -473,7 +524,7 @@ export default async function handler(
       const plazoRespuesta = data?.plazoRespuesta === null || data?.plazoRespuesta === undefined || data?.plazoRespuesta === '' ? null : Number(data.plazoRespuesta);
       const fechaPlazo = computeFechaPlazo(fechaRadicacion, plazoRespuesta);
 
-      const rows = await sql`
+      const rows = (await sql`
         INSERT INTO peticiones (
           radicado, fecha_radicacion, peticionario, asunto, area_consolida,
           correo_persona_asignada, areas_intervienen, plazo_respuesta, fecha_plazo_respuesta, fecha_radicado_respuesta
@@ -490,12 +541,14 @@ export default async function handler(
           TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
           TO_CHAR(fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
           created_at AS "createdAt"
-      `;
+      `) as any[];
       const peticionId = rows[0].id;
-      if (Array.isArray(request.body?.responsableIds)) {
-        await setResponsables(sql, peticionId, request.body.responsableIds);
+      const initialResponsableIds = Array.isArray(request.body?.responsableIds) ? request.body.responsableIds.map(String) : [];
+      if (initialResponsableIds.length > 0) {
+        await setResponsables(sql, peticionId, initialResponsableIds);
       }
       const responsables = await fetchResponsables(sql, peticionId);
+      await notifyNewPeticionResponsables(sql, { ...rows[0], id: peticionId }, responsables, responsables.map((r) => r.id));
       return response.status(201).json({ data: { ...rows[0], responsables }, meta: {}, errors: [] });
     }
 

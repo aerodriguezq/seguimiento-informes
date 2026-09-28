@@ -208,6 +208,68 @@ export function buildPeticionReminderEmailHtml(options: {
 </div>`;
 }
 
+// Notificación de asignación: se envía una sola vez, apenas se crea la
+// petición o se agrega a alguien como responsable — distinta de los
+// recordatorios por urgencia (tono neutro/informativo, no de alerta).
+export function buildPeticionAssignedEmailHtml(options: {
+  radicado: string;
+  asunto: string;
+  peticionario: string;
+  areaConsolida: string;
+  plazoRespuesta: number | null;
+  fechaPlazoRespuesta: string | null;
+  responsables: string[];
+  actionUrl: string;
+}): string {
+  const escape = (value: string) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c] as string));
+  const bg = '#1e3a8a';
+  const accent = '#bfdbfe';
+
+  return `<div style="max-width: 480px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dce4ec; border-radius: 8px; font-family: Arial, sans-serif; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+  <div style="background-color: ${bg}; color: #ffffff; padding: 20px; text-align: center;">
+    <div style="font-size: 24px; margin-bottom: 5px;">📥</div>
+    <h2 style="margin: 0; font-size: 18px; font-weight: bold; color: #ffffff;">Nueva petición asignada</h2>
+    <p style="margin: 5px 0 0 0; font-size: 16px; font-weight: 600; color: ${accent};">${escape(options.radicado)}</p>
+  </div>
+
+  <div style="padding: 20px; background-color: #f8fafc;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #334155;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold; width: 45%;">✉️ Asunto:</td>
+        <td style="padding: 10px 0;">${escape(options.asunto)}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">🙋 Peticionario:</td>
+        <td style="padding: 10px 0;">${escape(options.peticionario)}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">🏢 Área consolida:</td>
+        <td style="padding: 10px 0;">${escape(options.areaConsolida)}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">⏱️ Plazo de respuesta:</td>
+        <td style="padding: 10px 0;">${options.plazoRespuesta !== null ? `${options.plazoRespuesta} día(s)` : 'Sin definir'}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">📅 Fecha plazo respuesta:</td>
+        <td style="padding: 10px 0;">${escape(options.fechaPlazoRespuesta || 'Sin definir')}</td>
+      </tr>
+      <tr>
+        <td style="padding: 10px 0; font-weight: bold;">👥 Responsables:</td>
+        <td style="padding: 10px 0;">${escape(options.responsables.join(', ') || 'Sin asignar')}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">
+    <p style="font-size: 11px; color: #64748b; margin: 0 0 12px 0;">Recibirás recordatorios automáticos a medida que se acerque el plazo. Este mensaje fue enviado desde <strong>Seguimiento de Informes</strong>.</p>
+    <a href="${escape(options.actionUrl)}" style="display: inline-block; background-color: ${bg}; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 13px;">Ver petición</a>
+  </div>
+</div>`;
+}
+
 const DRIVE_URL_PATTERN = /https:\/\/(?:drive|docs)\.google\.com\/[^\s"'<>)\]]+/;
 
 function fromBase64Url(value: string) {
