@@ -155,7 +155,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
         emailSubject: newStepSubject.trim(),
         isFinal: newStepIsFinal,
         contactIds: newStepContactIds,
-        diaInicio: newStepDiaInicio === '' ? undefined : Number(newStepDiaInicio),
+        diaInicio: stepsForModalType.length === 0 && newStepDiaInicio !== '' ? Number(newStepDiaInicio) : undefined,
         diaLimite: newStepDiaLimite === '' ? undefined : Number(newStepDiaLimite),
         palabrasClave: newStepKeywords.trim() || undefined,
       });
@@ -790,16 +790,22 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
               </p>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día de inicio del mes (solo paso 1)</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={31}
-                    value={newStepDiaInicio}
-                    onChange={(e) => setNewStepDiaInicio(e.target.value)}
-                    placeholder="Ej: 3"
-                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                  />
+                  <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día de inicio del mes</label>
+                  {stepsForModalType.length === 0 ? (
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={newStepDiaInicio}
+                      onChange={(e) => setNewStepDiaInicio(e.target.value)}
+                      placeholder="Ej: 3"
+                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                    />
+                  ) : (
+                    <div className="w-full px-2.5 py-1.5 border border-dashed border-slate-200 rounded-lg text-[10.5px] text-slate-400 bg-slate-50">
+                      No aplica — inicia solo
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día límite del mes</label>
@@ -815,7 +821,11 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 </div>
               </div>
               <p className="text-[10.5px] text-slate-400">
-                Los pasos después del primero inician automáticamente cuando se detecta la entrega del paso anterior — el día de inicio solo aplica al primer paso.
+                {stepsForModalType.length === 0 ? (
+                  'Este es el primer paso: "Día de inicio" es el día fijo del mes en que arranca (ej. 3 = arranca el día 3 de cada mes).'
+                ) : (
+                  `Este paso no tiene día de inicio fijo: arranca automáticamente el mismo día en que se confirme la entrega del paso anterior ("${stepsForModalType[stepsForModalType.length - 1].name}"), sea cual sea la fecha. Por eso el campo está deshabilitado — solo el primer paso lo usa.`
+                )}
               </p>
               <input
                 type="text"
