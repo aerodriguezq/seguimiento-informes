@@ -229,10 +229,16 @@ export default async function handler(
         const neighbor = neighborRows[0];
 
         if (neighbor) {
-          // Se intercambia el "orden" con el vecino inmediato -- swap simple,
-          // sin renumerar toda la lista.
-          await sql`UPDATE tipo_informe_pasos SET orden = ${neighbor.orden} WHERE paso_id = ${current.id}`;
-          await sql`UPDATE tipo_informe_pasos SET orden = ${current.orden} WHERE paso_id = ${neighbor.id}`;
+          // Se intercambia el "orden" con el vecino inmediato en un solo
+          // UPDATE: la tabla tiene UNIQUE (tipo_informe_id, orden), así que
+          // hacerlo en dos sentencias separadas viola la restricción a
+          // mitad de camino (el vecino todavía tiene el valor que el otro
+          // está por tomar).
+          await sql`
+            UPDATE tipo_informe_pasos
+            SET orden = CASE paso_id WHEN ${current.id} THEN ${neighbor.orden} WHEN ${neighbor.id} THEN ${current.orden} END
+            WHERE paso_id IN (${current.id}, ${neighbor.id})
+          `;
         }
 
         const stepRows = (await sql`
