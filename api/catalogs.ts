@@ -144,6 +144,34 @@ export default async function handler(
       if (!Number.isInteger(stepId) || stepId <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El id del paso es obligatorio.'] });
       }
+
+      // informes.paso_actual_id apunta a este paso mientras esté "vigente"
+      // (incluso ya completado, como registro histórico) — sin limpiar esa
+      // referencia primero, el DELETE choca con la FK. Si hay informes
+      // ACTIVOS parados justo en este paso, no se puede borrar (bloquearía
+      // su flujo); los ya completados solo lo usan para mostrar el nombre,
+      // así que se puede desvincular sin problema.
+      const [{ activeCount }] = (await sql`
+        SELECT COUNT(*) AS "activeCount" FROM informes WHERE paso_actual_id = ${stepId} AND flujo_completado = FALSE
+      `) as any[];
+      if (Number(activeCount) > 0) {
+        return response.status(409).json({
+          data: null, meta: {},
+          errors: [`No se puede eliminar este paso: ${activeCount} informe(s) están actualmente en él. Espera a que avancen o complétalos antes de eliminarlo.`],
+        });
+      }
+      await sql`UPDATE informes SET paso_actual_id = NULL WHERE paso_actual_id = ${stepId}`;
+
+      // Alertas históricas (ya desactivadas) que quedaron ligadas a este
+      // paso también bloquean el DELETE por su propia FK.
+      const oldAlerts = (await sql`SELECT alerta_id AS id FROM alertas WHERE paso_id = ${stepId}`) as any[];
+      const oldAlertIds = oldAlerts.map((a: any) => a.id);
+      if (oldAlertIds.length > 0) {
+        await sql`DELETE FROM alerta_contacto WHERE alerta_id = ANY(${oldAlertIds})`;
+        await sql`DELETE FROM alerta_dia WHERE alerta_id = ANY(${oldAlertIds})`;
+        await sql`DELETE FROM alertas WHERE alerta_id = ANY(${oldAlertIds})`;
+      }
+
       const deleted = await sql`DELETE FROM tipo_informe_pasos WHERE paso_id = ${stepId} RETURNING paso_id AS id`;
       if (!deleted[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Paso no encontrado.'] });
       return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
