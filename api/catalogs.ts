@@ -229,16 +229,14 @@ export default async function handler(
         const neighbor = neighborRows[0];
 
         if (neighbor) {
-          // Se intercambia el "orden" con el vecino inmediato en un solo
-          // UPDATE: la tabla tiene UNIQUE (tipo_informe_id, orden), así que
-          // hacerlo en dos sentencias separadas viola la restricción a
-          // mitad de camino (el vecino todavía tiene el valor que el otro
-          // está por tomar).
-          await sql`
-            UPDATE tipo_informe_pasos
-            SET orden = CASE paso_id WHEN ${current.id} THEN ${neighbor.orden} WHEN ${neighbor.id} THEN ${current.orden} END
-            WHERE paso_id IN (${current.id}, ${neighbor.id})
-          `;
+          // Se intercambia el "orden" con el vecino inmediato pasando por un
+          // valor temporal negativo -- la tabla tiene UNIQUE (tipo_informe_id,
+          // orden), así que no se puede pisar directamente el valor del otro
+          // en ningún paso intermedio (orden empieza en 1, así que un
+          // negativo nunca choca con nada existente).
+          await sql`UPDATE tipo_informe_pasos SET orden = -1 * orden WHERE paso_id = ${current.id}`;
+          await sql`UPDATE tipo_informe_pasos SET orden = ${current.orden} WHERE paso_id = ${neighbor.id}`;
+          await sql`UPDATE tipo_informe_pasos SET orden = ${neighbor.orden} WHERE paso_id = ${current.id}`;
         }
 
         const stepRows = (await sql`
@@ -585,6 +583,7 @@ export default async function handler(
     return response.status(400).json({ data: null, meta: {}, errors: ['Catálogo no soportado.'] });
   } catch (error) {
     console.error('Catalog query failed', error);
-    return response.status(503).json({ data: null, meta: {}, errors: ['No fue posible guardar o consultar los catálogos.'] });
+    const detail = error instanceof Error ? error.message : String(error);
+    return response.status(503).json({ data: null, meta: {}, errors: [`No fue posible guardar o consultar los catálogos: ${detail}`] });
   }
 }
