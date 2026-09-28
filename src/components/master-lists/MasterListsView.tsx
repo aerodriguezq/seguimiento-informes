@@ -683,6 +683,11 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 <p className="mt-0.5 text-[11px] text-slate-500">
                   Define el orden de responsables. Al crear un informe de este tipo, se avisa al paso 1; al confirmar la entrega de cada paso se avanza al siguiente hasta llegar al paso final.
                 </p>
+                {typeForStepsModal.periodicity === 'Mensual' && (
+                  <p className="mt-1.5 rounded-md bg-indigo-50 border border-indigo-100 px-2.5 py-1.5 text-[11px] text-indigo-800">
+                    Este tipo es <b>mensual</b>: cada proyecto genera un informe nuevo cada mes (repitiendo este mismo flujo desde el paso 1) hasta la fecha de finalización del proyecto — no es un flujo de una sola vez. El asunto de correo de cada paso aplica a <b>todos</b> esos informes mensuales; el sistema agrega el número de secuencia (01, 02, 03...) al final para diferenciarlos.
+                  </p>
+                )}
               </div>
               <button
                 type="button"
@@ -780,6 +785,9 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 placeholder="Asunto de correo que confirma la entrega"
                 className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
               />
+              <p className="text-[10.5px] text-slate-400">
+                Usa un asunto base sin número (ej. "Entrega mensual interventoría") — se reutiliza para cada informe mensual del proyecto; el sistema agrega el número de secuencia solo.
+              </p>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día de inicio del mes (solo paso 1)</label>
