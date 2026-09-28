@@ -15,30 +15,33 @@ async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
 }
 
 // Busca el tipo de informe y calcula los días restantes hasta la fecha
-// límite del informe vinculado a la alerta (si la alerta viene de un paso
-// de flujo). Sin informe vinculado, no hay urgencia que calcular.
-async function resolveReportContext(sql: SqlClient, reportId: unknown) {
+// límite vinculada a la alerta: si viene de un paso de flujo con su propia
+// fecha límite calculada (Fase 1), usa esa; si no, cae a la fecha única del
+// informe. Sin informe vinculado, no hay urgencia que calcular.
+async function resolveReportContext(sql: SqlClient, reportId: unknown, stepId?: unknown) {
   const id = Number(reportId);
   if (!Number.isInteger(id) || id <= 0) return { typeName: null as string | null, daysRemaining: null as number | null };
 
   const [row] = (await sql`
-    SELECT ti.nombre AS "typeName", i.fecha AS "dueDate"
+    SELECT ti.nombre AS "typeName", TO_CHAR(i.fecha, 'YYYY-MM-DD') AS "dueDate",
+      TO_CHAR(ipi.fecha_limite, 'YYYY-MM-DD') AS "stepDueDate"
     FROM informes i
     JOIN tipos_informe ti ON ti.tipo_informe_id = i.tipo_informe_id
+    LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = i.informe_id AND ipi.paso_id = ${Number(stepId) || null}
     WHERE i.informe_id = ${id}
   `) as any[];
   if (!row) return { typeName: null, daysRemaining: null };
 
-  const due = new Date(row.dueDate);
-  due.setUTCHours(0, 0, 0, 0);
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
+  const dueDateStr = row.stepDueDate || row.dueDate;
+  if (!dueDateStr) return { typeName: row.typeName as string | null, daysRemaining: null };
+  const due = new Date(`${dueDateStr}T00:00:00Z`);
+  const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
   const daysRemaining = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   return { typeName: row.typeName as string | null, daysRemaining };
 }
 
-async function buildAlertEmail(sql: SqlClient, alert: { name: string; projectName?: string; type?: string; schedule?: string; reportId?: unknown }) {
-  const context = await resolveReportContext(sql, alert.reportId);
+async function buildAlertEmail(sql: SqlClient, alert: { name: string; projectName?: string; type?: string; schedule?: string; reportId?: unknown; stepId?: unknown }) {
+  const context = await resolveReportContext(sql, alert.reportId, alert.stepId);
   const actionUrl = `${(process.env.APP_URL || 'https://seguimiento-informes.vercel.app').replace(/\/$/, '')}/reports`;
   return buildAlertEmailHtml({
     subtitle: context.typeName || alert.type || 'Seguimiento',
@@ -141,17 +144,24 @@ async function handleSend(request: VercelRequest, response: VercelResponse, sql:
   }
 }
 
-type PeticionNivel = 'verde' | 'amarillo' | 'rojo';
-const PETICION_NIVEL_RANK: Record<PeticionNivel, number> = { verde: 1, amarillo: 2, rojo: 3 };
-
-// Umbrales fijos: 5 días antes = verde, 3 días = amarillo, 2 días en
-// adelante (incluye vencido) = rojo. El resto de los días no dispara nada.
-function peticionLevelForDays(days: number): PeticionNivel | null {
+// Mismos umbrales para cualquier fecha límite del sistema (Peticiones,
+// pasos de flujo de Informes): 5 días antes = verde, 3 días = amarillo, 2
+// días en adelante (incluye vencido) = rojo. El resto de los días no
+// dispara nada. "rojo" se reenvía una vez por día mientras siga vigente;
+// verde/amarillo se envían una sola vez cada uno (dedup por nivel).
+type NivelAlerta = 'verde' | 'amarillo' | 'rojo';
+const NIVEL_RANK: Record<NivelAlerta, number> = { verde: 1, amarillo: 2, rojo: 3 };
+function levelForDays(days: number): NivelAlerta | null {
   if (days <= 2) return 'rojo';
   if (days === 3) return 'amarillo';
   if (days === 5) return 'verde';
   return null;
 }
+function shouldSendForLevel(level: NivelAlerta, lastLevel: string | null, lastSentIso: string | null, todayIso: string): boolean {
+  const oldRank = lastLevel ? NIVEL_RANK[lastLevel as NivelAlerta] ?? 0 : 0;
+  return NIVEL_RANK[level] > oldRank || (level === 'rojo' && lastSentIso !== todayIso);
+}
+type PeticionNivel = NivelAlerta;
 
 async function sendPeticionReminder(
   sql: SqlClient,
@@ -225,12 +235,9 @@ async function handlePeticionesReminders(sql: SqlClient, accessToken: string): P
     const due = new Date(`${p.fechaPlazoRespuesta}T00:00:00Z`);
     const today = new Date(`${todayIso}T00:00:00Z`);
     const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    const level = peticionLevelForDays(days);
+    const level = levelForDays(days);
     if (!level) continue;
-
-    const oldRank = p.ultimoNivel ? PETICION_NIVEL_RANK[p.ultimoNivel as PeticionNivel] ?? 0 : 0;
-    const shouldSend = PETICION_NIVEL_RANK[level] > oldRank || (level === 'rojo' && p.ultimoEn !== todayIso);
-    if (!shouldSend) continue;
+    if (!shouldSendForLevel(level, p.ultimoNivel, p.ultimoEn, todayIso)) continue;
 
     try {
       const sent = await sendPeticionReminder(sql, accessToken, p, level, days);
@@ -246,19 +253,91 @@ async function handlePeticionesReminders(sql: SqlClient, accessToken: string): P
   return { evaluated: rows.length, sent: sentCount };
 }
 
+// Alertas ligadas a un paso de flujo de Informes (informe_id + paso_id):
+// ahora usan la misma escalada verde(5)/amarillo(3)/rojo(2+) que Peticiones
+// en vez de "una vez al día sin importar la urgencia", apoyándose en la
+// fecha límite propia de la etapa (Fase 1). Los pasos sin fecha límite
+// configurada conservan el comportamiento anterior (una vez al día) como
+// respaldo, para no dejar de avisar por falta de configuración.
+async function handleInformeStepReminders(sql: SqlClient, accessToken: string): Promise<{ evaluated: number; sent: number }> {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const rows = (await sql`
+    SELECT a.alerta_id AS id, a.nombre AS name, a.tipo AS type, a.frecuencia AS schedule,
+           a.informe_id AS "reportId", a.paso_id AS "stepId", a.ultimo_disparo AS "lastFiredAt",
+           COALESCE(p.nombre, 'Todos los proyectos') AS "projectName",
+           TO_CHAR(ipi.fecha_limite, 'YYYY-MM-DD') AS "fechaLimite",
+           ipi.ultimo_recordatorio_nivel AS "ultimoNivel", TO_CHAR(ipi.ultimo_recordatorio_en, 'YYYY-MM-DD') AS "ultimoEn"
+    FROM alertas a
+    LEFT JOIN proyectos p ON p.proyecto_id = a.proyecto_id
+    LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = a.informe_id AND ipi.paso_id = a.paso_id
+    WHERE a.activa = TRUE AND a.informe_id IS NOT NULL AND a.paso_id IS NOT NULL
+  `) as any[];
+
+  let sentCount = 0;
+  for (const alert of rows) {
+    let level: NivelAlerta | null = null;
+    let shouldSend: boolean;
+
+    if (alert.fechaLimite) {
+      const due = new Date(`${alert.fechaLimite}T00:00:00Z`);
+      const today = new Date(`${todayIso}T00:00:00Z`);
+      const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      level = levelForDays(days);
+      shouldSend = level !== null && shouldSendForLevel(level, alert.ultimoNivel, alert.ultimoEn, todayIso);
+    } else {
+      // Sin fecha límite propia todavía (paso sin dia_limite configurado):
+      // respaldo al comportamiento anterior, una vez al día.
+      shouldSend = !alert.lastFiredAt || new Date(alert.lastFiredAt) < new Date(Date.now() - 24 * 60 * 60 * 1000);
+    }
+    if (!shouldSend) continue;
+
+    const recipientRows = (await sql`
+      SELECT c.email FROM alerta_contacto ac
+      JOIN contactos c ON c.contacto_id = ac.contacto_id
+      WHERE ac.alerta_id = ${alert.id} AND c.email IS NOT NULL AND c.email <> ''
+    `) as any[];
+    if (recipientRows.length === 0) continue;
+
+    try {
+      const html = await buildAlertEmail(sql, alert);
+      await sendEmail(accessToken, {
+        to: recipientRows.map((r: any) => r.email),
+        subject: `[Seguimiento] ${alert.name}`,
+        body: html,
+        html: true,
+      });
+      await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alert.id}`;
+      if (level) {
+        await sql`
+          UPDATE informe_pasos_instancia SET ultimo_recordatorio_nivel = ${level}, ultimo_recordatorio_en = ${todayIso}
+          WHERE informe_id = ${alert.reportId} AND paso_id = ${alert.stepId}
+        `;
+      }
+      sentCount++;
+    } catch (error) {
+      console.error('Informe step reminder failed', alert.id, error);
+    }
+  }
+
+  return { evaluated: rows.length, sent: sentCount };
+}
+
 async function handleCronSweep(sql: SqlClient): Promise<{ evaluated: number; sent: number; skipped?: string }> {
   const accessToken = await getConnectedAccessToken(sql);
   if (!accessToken) {
     return { evaluated: 0, sent: 0, skipped: 'no-connected-google-account' };
   }
 
+  // Las alertas ligadas a un paso de flujo (informe_id + paso_id) se
+  // manejan aparte con escalada por urgencia -- ver handleInformeStepReminders.
   const dueAlerts = (await sql`
     SELECT a.alerta_id AS id, a.nombre AS name, a.frecuencia AS schedule, a.tipo AS type,
            a.informe_id AS "reportId",
            COALESCE(p.nombre, 'Todos los proyectos') AS "projectName"
     FROM alertas a
     LEFT JOIN proyectos p ON p.proyecto_id = a.proyecto_id
-    WHERE a.activa = TRUE AND (a.ultimo_disparo IS NULL OR a.ultimo_disparo < NOW() - INTERVAL '1 day')
+    WHERE a.activa = TRUE AND a.informe_id IS NULL
+      AND (a.ultimo_disparo IS NULL OR a.ultimo_disparo < NOW() - INTERVAL '1 day')
   `) as any[];
 
   let sentCount = 0;
@@ -285,11 +364,12 @@ async function handleCronSweep(sql: SqlClient): Promise<{ evaluated: number; sen
     }
   }
 
+  const stepRemindersResult = await handleInformeStepReminders(sql, accessToken);
   const peticionesResult = await handlePeticionesReminders(sql, accessToken);
 
   return {
-    evaluated: dueAlerts.length + peticionesResult.evaluated,
-    sent: sentCount + peticionesResult.sent,
+    evaluated: dueAlerts.length + stepRemindersResult.evaluated + peticionesResult.evaluated,
+    sent: sentCount + stepRemindersResult.sent + peticionesResult.sent,
   };
 }
 
