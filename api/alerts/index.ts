@@ -50,6 +50,14 @@ async function buildAlertEmail(sql: SqlClient, alert: { name: string; projectNam
   });
 }
 
+// Igual que composeStepEmailSubject en api/reports.ts: el asunto real que la
+// automatización busca en Gmail es la base configurada en el paso más el
+// número de secuencia del informe (con 2 dígitos), cuando aplica.
+function composeStepEmailSubject(baseSubject: string, sequenceNumber: number | null): string {
+  if (sequenceNumber == null) return baseSubject;
+  return `${baseSubject} ${String(sequenceNumber).padStart(2, '0')}`;
+}
+
 async function fetchAlertsByIds(sql: SqlClient, ids: number[]) {
   if (ids.length === 0) return [];
 
@@ -65,9 +73,13 @@ async function fetchAlertsByIds(sql: SqlClient, ids: number[]) {
       a.activa AS active,
       a.informe_id AS "reportId",
       a.paso_id AS "stepId",
-      a.ultimo_disparo AS "lastFiredAt"
+      a.ultimo_disparo AS "lastFiredAt",
+      wp.asunto_correo AS "emailSubjectBase",
+      i.numero_secuencia AS "sequenceNumber"
     FROM alertas a
     LEFT JOIN proyectos p ON p.proyecto_id = a.proyecto_id
+    LEFT JOIN tipo_informe_pasos wp ON wp.paso_id = a.paso_id
+    LEFT JOIN informes i ON i.informe_id = a.informe_id
     WHERE a.alerta_id = ANY(${ids})
     ORDER BY a.created_at DESC
   `) as any[];
@@ -78,10 +90,19 @@ async function fetchAlertsByIds(sql: SqlClient, ids: number[]) {
     WHERE alerta_id = ANY(${ids})
   `) as any[];
 
+  const stepIds = alertRows.map((a) => a.stepId).filter((id) => id !== null && id !== undefined);
+  const stepContactRows = stepIds.length === 0 ? [] : ((await sql`
+    SELECT tpc.paso_id AS "stepId", c.email FROM tipo_informe_paso_contacto tpc
+    JOIN contactos c ON c.contacto_id = tpc.contacto_id
+    WHERE tpc.paso_id = ANY(${stepIds}) AND c.email IS NOT NULL AND c.email <> ''
+  `) as any[]);
+
   return alertRows.map((alert) => ({
     ...alert,
     recipientIds: recipientRows.filter((r) => r.alertId === alert.id).map((r: any) => String(r.contactId)),
     nextExecution: alert.lastFiredAt ? `Último disparo: ${new Date(alert.lastFiredAt).toLocaleString('es-CO')}` : 'Pendiente primer disparo',
+    expectedEmailSubject: alert.emailSubjectBase ? composeStepEmailSubject(alert.emailSubjectBase, alert.sequenceNumber) : null,
+    expectedFromEmails: stepContactRows.filter((r: any) => r.stepId === alert.stepId).map((r: any) => r.email),
   }));
 }
 
@@ -351,6 +372,12 @@ export default async function handler(request: VercelRequest, response: VercelRe
         for (const contactId of body.recipientIds) {
           await sql`INSERT INTO alerta_contacto (alerta_id, contacto_id) VALUES (${alertId}, ${contactId})`;
         }
+      }
+
+      // El asunto base vive en el paso del tipo de informe (compartido por
+      // todos los informes que usan ese paso), no en la alerta misma.
+      if (has('emailSubjectBase') && current[0].stepId) {
+        await sql`UPDATE tipo_informe_pasos SET asunto_correo = ${String(body.emailSubjectBase ?? '').trim()} WHERE paso_id = ${current[0].stepId}`;
       }
 
       const [alert] = await fetchAlertsByIds(sql, [alertId]);

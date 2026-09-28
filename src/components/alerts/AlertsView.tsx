@@ -39,6 +39,7 @@ interface AlertsViewProps {
     time: string;
     type: ScheduledAlert['type'];
     recipientIds: string[];
+    emailSubjectBase?: string;
   }) => Promise<void>;
   onDeleteAlert: (alertId: string) => Promise<void>;
   onSimulateTrigger: (alert: ScheduledAlert) => Promise<void>;
@@ -67,26 +68,32 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
   const [time, setTime] = useState('08:00 AM');
   const [type, setType] = useState<'Preventiva' | 'Vencimiento' | 'Seguimiento' | 'Confirmación'>('Preventiva');
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([contacts[0]?.id || '']);
+  const [editingAlert, setEditingAlert] = useState<ScheduledAlert | null>(null);
+  const [emailSubjectBase, setEmailSubjectBase] = useState('');
 
   const openCreateModal = () => {
     setEditingAlertId(null);
+    setEditingAlert(null);
     setName('');
     setProjectId(projects[0]?.id || '');
     setSchedule('5 días antes del vencimiento');
     setTime('08:00 AM');
     setType('Preventiva');
     setSelectedContactIds([contacts[0]?.id || '']);
+    setEmailSubjectBase('');
     setShowModal(true);
   };
 
   const openEditModal = (alert: ScheduledAlert) => {
     setEditingAlertId(alert.id);
+    setEditingAlert(alert);
     setName(alert.name);
     setProjectId(alert.projectId || projects[0]?.id || '');
     setSchedule(alert.schedule);
     setTime(alert.time);
     setType(alert.type);
     setSelectedContactIds(alert.recipientIds);
+    setEmailSubjectBase(alert.emailSubjectBase || '');
     setShowModal(true);
   };
 
@@ -122,22 +129,39 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
 
     setIsCreating(true);
     try {
-      const draft = {
-        projectId,
-        name: name.trim(),
-        schedule,
-        time,
-        type,
-        recipientIds: selectedContactIds,
-      };
       if (editingAlertId) {
+        const draft: {
+          projectId?: string;
+          name: string;
+          schedule: string;
+          time: string;
+          type: ScheduledAlert['type'];
+          recipientIds: string[];
+          emailSubjectBase?: string;
+        } = {
+          projectId,
+          name: name.trim(),
+          schedule,
+          time,
+          type,
+          recipientIds: selectedContactIds,
+        };
+        if (editingAlert?.stepId) draft.emailSubjectBase = emailSubjectBase.trim();
         await onUpdateAlert(editingAlertId, draft);
       } else {
-        await onAddNewAlert(draft);
+        await onAddNewAlert({
+          projectId,
+          name: name.trim(),
+          schedule,
+          time,
+          type,
+          recipientIds: selectedContactIds,
+        });
       }
       setShowModal(false);
       setName('');
       setEditingAlertId(null);
+      setEditingAlert(null);
     } catch {
       // El toast de error ya lo muestra App.tsx; dejamos el modal abierto para reintentar.
     } finally {
@@ -342,7 +366,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
               </h3>
               <button
                 type="button"
-                onClick={() => { setShowModal(false); setEditingAlertId(null); }}
+                onClick={() => { setShowModal(false); setEditingAlertId(null); setEditingAlert(null); }}
                 className="text-slate-400 hover:text-slate-600"
               >
                 <X className="w-4 h-4" />
@@ -450,10 +474,40 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                 )}
               </div>
 
+              {editingAlert?.stepId && (
+                <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 p-3 space-y-2">
+                  <p className="font-semibold text-slate-700">Identificación automática del correo de entrega</p>
+                  <p className="text-[11px] text-slate-500">
+                    La automatización revisa el correo conectado buscando un mensaje con este asunto exacto. Cambiar el
+                    texto base afecta a todos los informes que usan este mismo paso del flujo.
+                  </p>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Asunto base que deben usar</label>
+                    <input
+                      type="text"
+                      value={emailSubjectBase}
+                      onChange={(e) => setEmailSubjectBase(e.target.value)}
+                      placeholder="Ej: Entrega Informe Mensual"
+                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  {editingAlert.expectedEmailSubject && (
+                    <p className="text-[11px] text-slate-600">
+                      Asunto exacto esperado ahora mismo: <span className="font-mono font-semibold">{editingAlert.expectedEmailSubject}</span>
+                    </p>
+                  )}
+                  {editingAlert.expectedFromEmails && editingAlert.expectedFromEmails.length > 0 && (
+                    <p className="text-[11px] text-slate-600">
+                      Debe llegar desde: <span className="font-medium">{editingAlert.expectedFromEmails.join(', ')}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => { setShowModal(false); setEditingAlertId(null); }}
+                  onClick={() => { setShowModal(false); setEditingAlertId(null); setEditingAlert(null); }}
                   className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
                 >
                   Cancelar

@@ -54,6 +54,7 @@ export interface ScheduledAlert {
   projectId?: string;
   projectName?: string;
   reportId?: string;
+  stepId?: string;
   name: string;
   schedule: string; // e.g. "5 días antes del vencimiento", "Semanal Lunes"
   time: string; // e.g. "08:00 AM"
@@ -61,6 +62,12 @@ export interface ScheduledAlert {
   recipientIds: string[];
   active: boolean;
   nextExecution: string;
+  // Solo para alertas automáticas ligadas a un paso de flujo (reportId +
+  // stepId): el asunto que la automatización de detección de entregas busca
+  // en Gmail, y los correos desde los que debe llegar.
+  emailSubjectBase?: string | null;
+  expectedEmailSubject?: string | null;
+  expectedFromEmails?: string[];
 }
 
 export interface StatusTransition {

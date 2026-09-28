@@ -56,6 +56,7 @@ function mapAlert(a: any): ScheduledAlert {
     projectId: a.projectId ? String(a.projectId) : undefined,
     projectName: a.projectName || undefined,
     reportId: a.reportId ? String(a.reportId) : undefined,
+    stepId: a.stepId ? String(a.stepId) : undefined,
     name: a.name,
     schedule: a.schedule,
     time: a.time,
@@ -63,6 +64,9 @@ function mapAlert(a: any): ScheduledAlert {
     recipientIds: a.recipientIds,
     active: a.active,
     nextExecution: a.nextExecution,
+    emailSubjectBase: a.emailSubjectBase ?? null,
+    expectedEmailSubject: a.expectedEmailSubject ?? null,
+    expectedFromEmails: a.expectedFromEmails ?? [],
   };
 }
 
@@ -540,6 +544,7 @@ export default function App() {
       time: string;
       type: ScheduledAlert['type'];
       recipientIds: string[];
+      emailSubjectBase?: string;
     }
   ) => {
     try {
