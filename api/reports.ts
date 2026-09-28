@@ -387,12 +387,122 @@ async function advanceReportStep(
 // Fase D: revisa cada informe con un paso pendiente y busca en la cuenta de
 // Google conectada un correo entrante con el asunto esperado de ese paso,
 // de alguno de sus contactos responsables. Si aparece, avanza el flujo.
-async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: number; advanced: number; skipped?: string }> {
+const RECEIVED_STATES = ['RECIBIDA_A_TIEMPO', 'RECIBIDA_TARDE'];
+const OPEN_STATES = ['PENDIENTE', 'ALERTA_GENERADA'];
+
+// Fase 3: agrega informe_pasos_instancia + alertas en los indicadores del
+// dashboard (sección 9 del requerimiento) — generales, por responsable, por
+// etapa y temporales. No inventa datos nuevos, solo cuenta lo que Fase 1/2
+// ya calculan y guardan.
+async function fetchStagesDashboard(sql: SqlClient) {
+  const [general] = (await sql`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE i.flujo_completado = TRUE) AS completados,
+      COUNT(*) FILTER (WHERE i.flujo_completado = FALSE) AS pendientes,
+      COUNT(*) FILTER (WHERE i.flujo_completado = FALSE AND COALESCE(ipi.fecha_limite, i.fecha) < CURRENT_DATE) AS vencidos
+    FROM informes i
+    LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = i.informe_id AND ipi.paso_id = i.paso_actual_id
+  `) as any[];
+
+  const [entregas] = (await sql`
+    SELECT
+      COUNT(*) FILTER (WHERE estado_etapa = ANY(${RECEIVED_STATES})) AS "entregasRecibidas",
+      COUNT(*) FILTER (WHERE estado_etapa = ANY(${OPEN_STATES})) AS "entregasPendientes",
+      COUNT(*) FILTER (WHERE estado_etapa = 'RECIBIDA_TARDE') AS "entregasTardias",
+      COUNT(*) FILTER (WHERE estado_etapa = 'NO_RECIBIDA') AS "procesosEnRiesgo"
+    FROM informe_pasos_instancia
+  `) as any[];
+
+  const [{ alertasActivas }] = (await sql`SELECT COUNT(*) AS "alertasActivas" FROM alertas WHERE activa = TRUE`) as any[];
+
+  const porResponsable = (await sql`
+    SELECT c.contacto_id AS id, c.nombre AS name,
+      COUNT(*) AS "totalAsignaciones",
+      COUNT(*) FILTER (WHERE ipi.estado_etapa = ANY(${RECEIVED_STATES})) AS completadas,
+      COUNT(*) FILTER (WHERE ipi.estado_etapa = ANY(${OPEN_STATES})) AS pendientes,
+      COUNT(*) FILTER (WHERE ipi.estado_etapa = 'NO_RECIBIDA') AS vencidas
+    FROM informe_pasos_instancia ipi
+    JOIN tipo_informe_paso_contacto tpc ON tpc.paso_id = ipi.paso_id
+    JOIN contactos c ON c.contacto_id = tpc.contacto_id
+    GROUP BY c.contacto_id, c.nombre
+    ORDER BY c.nombre ASC
+  `) as any[];
+
+  const porEtapa = (await sql`
+    SELECT ti.nombre AS "typeName", wp.orden AS "order", wp.nombre AS "stepName",
+      COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE ipi.estado_etapa = ANY(${RECEIVED_STATES})) AS completadas,
+      COUNT(*) FILTER (WHERE ipi.estado_etapa = ANY(${OPEN_STATES})) AS pendientes,
+      COUNT(*) FILTER (WHERE ipi.estado_etapa = 'NO_RECIBIDA') AS vencidas
+    FROM informe_pasos_instancia ipi
+    JOIN tipo_informe_pasos wp ON wp.paso_id = ipi.paso_id
+    JOIN tipos_informe ti ON ti.tipo_informe_id = wp.tipo_informe_id
+    GROUP BY ti.nombre, wp.orden, wp.nombre
+    ORDER BY ti.nombre ASC, wp.orden ASC
+  `) as any[];
+
+  const [temporal] = (await sql`
+    SELECT
+      COUNT(*) FILTER (WHERE fecha_limite = CURRENT_DATE AND estado_etapa = ANY(${OPEN_STATES})) AS "entregasHoy",
+      COUNT(*) FILTER (WHERE fecha_limite > CURRENT_DATE AND fecha_limite <= CURRENT_DATE + 7 AND estado_etapa = ANY(${OPEN_STATES})) AS "entregasProximas",
+      COUNT(*) FILTER (WHERE estado_etapa = 'NO_RECIBIDA' OR (fecha_limite < CURRENT_DATE AND estado_etapa = ANY(${OPEN_STATES}))) AS "entregasVencidas",
+      COUNT(*) FILTER (WHERE ultimo_recordatorio_nivel IN ('verde', 'amarillo') AND estado_etapa = ANY(${OPEN_STATES})) AS "alertasProximas",
+      COUNT(*) FILTER (WHERE ultimo_recordatorio_nivel = 'rojo' AND estado_etapa IN ('PENDIENTE', 'ALERTA_GENERADA', 'NO_RECIBIDA')) AS "alertasCriticas"
+    FROM informe_pasos_instancia
+  `) as any[];
+
+  const toNum = (v: unknown) => Number(v) || 0;
+  return {
+    general: {
+      totalInformes: toNum(general.total),
+      completados: toNum(general.completados),
+      pendientes: toNum(general.pendientes),
+      vencidos: toNum(general.vencidos),
+      entregasRecibidas: toNum(entregas.entregasRecibidas),
+      entregasPendientes: toNum(entregas.entregasPendientes),
+      entregasTardias: toNum(entregas.entregasTardias),
+      alertasActivas: toNum(alertasActivas),
+      procesosEnRiesgo: toNum(entregas.procesosEnRiesgo),
+    },
+    porResponsable: porResponsable.map((r: any) => {
+      const total = toNum(r.totalAsignaciones);
+      const completadas = toNum(r.completadas);
+      return {
+        id: String(r.id),
+        name: r.name,
+        totalAsignaciones: total,
+        completadas,
+        pendientes: toNum(r.pendientes),
+        vencidas: toNum(r.vencidas),
+        cumplimiento: total > 0 ? Math.round((completadas / total) * 100) : 0,
+      };
+    }),
+    porEtapa: porEtapa.map((e: any) => ({
+      typeName: e.typeName,
+      order: toNum(e.order),
+      stepName: e.stepName,
+      total: toNum(e.total),
+      completadas: toNum(e.completadas),
+      pendientes: toNum(e.pendientes),
+      vencidas: toNum(e.vencidas),
+    })),
+    temporal: {
+      entregasHoy: toNum(temporal.entregasHoy),
+      entregasProximas: toNum(temporal.entregasProximas),
+      entregasVencidas: toNum(temporal.entregasVencidas),
+      alertasProximas: toNum(temporal.alertasProximas),
+      alertasCriticas: toNum(temporal.alertasCriticas),
+    },
+  };
+}
+
+async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: number; advanced: number; flaggedForReview: number; skipped?: string }> {
   const session = await sql`
     SELECT session_id, token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
   `;
   if (!session[0]) {
-    return { checked: 0, advanced: 0, skipped: 'no-connected-google-account' };
+    return { checked: 0, advanced: 0, flaggedForReview: 0, skipped: 'no-connected-google-account' };
   }
 
   let accessToken: string;
@@ -400,20 +510,30 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
     accessToken = await getDriveAccessToken(session[0].token_json);
   } catch (error) {
     console.error('Delivery sweep: no fue posible obtener el token de acceso', error);
-    return { checked: 0, advanced: 0, skipped: 'token-error' };
+    return { checked: 0, advanced: 0, flaggedForReview: 0, skipped: 'token-error' };
   }
 
+  // Los pasos ya marcados EN_REVISION (correo ambiguo detectado en una
+  // corrida anterior) se excluyen: sin esto, cada corrida del barrido
+  // volvería a encontrar el mismo correo ambiguo y duplicaría la nota en
+  // el historial (Regla 6/7). Quedan así hasta que alguien los resuelva a
+  // mano (confirmar entrega avanza el paso y limpia el estado).
   const pendingSteps = (await sql`
     SELECT i.informe_id AS "reportId", wp.paso_id AS "stepId", wp.asunto_correo AS "emailSubjectBase",
+           wp.palabras_clave AS "keywordsRaw",
            i.numero_secuencia AS "sequenceNumber", i.updated_at AS "stepStartedAt"
     FROM informes i
     JOIN tipo_informe_pasos wp ON wp.paso_id = i.paso_actual_id
+    LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = i.informe_id AND ipi.paso_id = i.paso_actual_id
     WHERE i.flujo_completado = FALSE AND i.paso_actual_id IS NOT NULL
+      AND (ipi.estado_etapa IS NULL OR ipi.estado_etapa <> 'EN_REVISION')
   `) as any[];
 
   let advanced = 0;
+  let flaggedForReview = 0;
   for (const step of pendingSteps) {
     const expectedSubject = composeStepEmailSubject(step.emailSubjectBase, step.sequenceNumber);
+    const keywords: string[] = step.keywordsRaw ? String(step.keywordsRaw).split(',').map((k: string) => k.trim()).filter(Boolean) : [];
     const contactRows = (await sql`
       SELECT c.email FROM tipo_informe_paso_contacto tpc
       JOIN contactos c ON c.contacto_id = tpc.contacto_id
@@ -426,31 +546,52 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
         expectedSubject,
         contactRows.map((c: any) => c.email),
         new Date(step.stepStartedAt),
+        keywords,
       );
-      if (match.found) {
-        if (match.driveUrl) {
-          await sql`
-            INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
-            VALUES (
-              COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
-              ${step.reportId}, ${`Evidencia recibida por correo (${expectedSubject})`}, ${match.driveUrl},
-              ${match.fromEmail || 'Detección automática'}, NOW()
-            )
-          `;
-        }
-        await advanceReportStep(sql, step.reportId, {
-          receivedAt: match.receivedAt ? new Date(match.receivedAt) : new Date(),
-          messageId: match.messageId,
-          fromEmail: match.fromEmail,
-        });
-        advanced++;
+      if (!match.found) continue;
+
+      // Regla 9: si hay varios correos coincidentes no se puede saber cuál
+      // es el correcto -- se marca la etapa para revisión manual y NO se
+      // avanza el flujo solo, para evitar un falso positivo.
+      if (match.ambiguous) {
+        await sql`
+          UPDATE informe_pasos_instancia SET estado_etapa = 'EN_REVISION', updated_at = NOW()
+          WHERE informe_id = ${step.reportId} AND paso_id = ${step.stepId}
+        `;
+        await sql`
+          INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
+          VALUES (
+            COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+            ${step.reportId}, 'En revisión', NOW(), 'Sistema (detección automática)',
+            ${`Se encontraron ${match.matchCount} correos coincidentes con el asunto "${expectedSubject}" -- requiere revisión manual antes de avanzar.`}
+          )
+        `;
+        flaggedForReview++;
+        continue;
       }
+
+      if (match.driveUrl) {
+        await sql`
+          INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
+          VALUES (
+            COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
+            ${step.reportId}, ${`Evidencia recibida por correo (${expectedSubject})`}, ${match.driveUrl},
+            ${match.fromEmail || 'Detección automática'}, NOW()
+          )
+        `;
+      }
+      await advanceReportStep(sql, step.reportId, {
+        receivedAt: match.receivedAt ? new Date(match.receivedAt) : new Date(),
+        messageId: match.messageId,
+        fromEmail: match.fromEmail,
+      });
+      advanced++;
     } catch (error) {
       console.error('Delivery sweep failed for report', step.reportId, error);
     }
   }
 
-  return { checked: pendingSteps.length, advanced };
+  return { checked: pendingSteps.length, advanced, flaggedForReview };
 }
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
@@ -508,6 +649,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
         await recordSweepRun(sql, 'deteccion_entregas', false, { error: error instanceof Error ? error.message : String(error) });
         throw error;
       }
+    }
+
+    // Fase 3 del motor de etapas: indicadores consolidados (generales, por
+    // responsable, por etapa y temporales) para el dashboard, calculados
+    // sobre informe_pasos_instancia -- no reinterpreta nada, solo agrega
+    // lo que ya escriben Fase 1/2.
+    if (request.method === 'GET' && request.query.view === 'stagesDashboard') {
+      const data = await fetchStagesDashboard(sql);
+      return response.status(200).json({ data, meta: {}, errors: [] });
     }
 
     if (request.method === 'GET') {

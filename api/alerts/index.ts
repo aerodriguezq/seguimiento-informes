@@ -277,11 +277,12 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
   for (const alert of rows) {
     let level: NivelAlerta | null = null;
     let shouldSend: boolean;
+    let days: number | null = null;
 
     if (alert.fechaLimite) {
       const due = new Date(`${alert.fechaLimite}T00:00:00Z`);
       const today = new Date(`${todayIso}T00:00:00Z`);
-      const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       level = levelForDays(days);
       shouldSend = level !== null && shouldSendForLevel(level, alert.ultimoNivel, alert.ultimoEn, todayIso);
     } else {
@@ -289,6 +290,18 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
       // respaldo al comportamiento anterior, una vez al día.
       shouldSend = !alert.lastFiredAt || new Date(alert.lastFiredAt) < new Date(Date.now() - 24 * 60 * 60 * 1000);
     }
+
+    // Etapa vencida y todavía sin entrega: el estado pasa a NO_RECIBIDA
+    // (motor de estados) independientemente de si toca reenviar el correo
+    // hoy o no -- así el dashboard de "procesos en riesgo" refleja la
+    // realidad aunque el nivel rojo ya se haya enviado hoy.
+    if (days !== null && days < 0) {
+      await sql`
+        UPDATE informe_pasos_instancia SET estado_etapa = 'NO_RECIBIDA', updated_at = NOW()
+        WHERE informe_id = ${alert.reportId} AND paso_id = ${alert.stepId} AND estado_etapa IN ('PENDIENTE', 'ALERTA_GENERADA')
+      `;
+    }
+
     if (!shouldSend) continue;
 
     const recipientRows = (await sql`

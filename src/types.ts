@@ -28,6 +28,9 @@ export interface ReportTypeStep {
   // mes límite para completarla. Ambos opcionales.
   diaInicio?: number | null;
   diaLimite?: number | null;
+  // Palabras clave opcionales (separadas por coma) que se suman al asunto
+  // en la búsqueda en Gmail, para no depender solo del asunto exacto.
+  palabrasClave?: string | null;
 }
 
 export interface ReportStageInstance {

@@ -215,22 +215,34 @@ export type DeliveryEmailMatch = {
   // Fecha real del correo (según Gmail), no la hora en que corrió el
   // barrido — así la trazabilidad conserva el momento real de la entrega.
   receivedAt: string | null;
+  // Si Gmail devolvió más de un correo coincidente en la ventana buscada,
+  // no hay forma confiable de saber cuál es el correcto: se marca ambiguo
+  // para que quien llama NO asuma automáticamente que es válido (Regla 9:
+  // "si existe una inconsistencia, marcarla para revisión").
+  ambiguous: boolean;
+  matchCount: number;
 };
 
 // Busca un correo entrante con el asunto esperado de alguno de los
-// contactos responsables. Si lo encuentra, también intenta extraer un link
-// de Google Drive/Docs del cuerpo del mensaje para adjuntarlo como evidencia.
+// contactos responsables (y, opcionalmente, palabras clave adicionales
+// configuradas para ese paso). Si lo encuentra, también intenta extraer un
+// link de Google Drive/Docs del cuerpo del mensaje para adjuntarlo como
+// evidencia.
 export async function findDeliveryEmail(
   accessToken: string,
   subject: string,
   fromEmails: string[],
   afterDate: Date,
+  keywords: string[] = [],
 ): Promise<DeliveryEmailMatch> {
   const afterSeconds = Math.floor(afterDate.getTime() / 1000);
   const senderQuery = fromEmails.length > 0 ? `(${fromEmails.map((email) => `from:${email}`).join(' OR ')})` : '';
-  const query = [`subject:"${subject}"`, senderQuery, `after:${afterSeconds}`].filter(Boolean).join(' ');
+  const keywordTerms = keywords.map((k) => k.trim()).filter(Boolean).map((k) => (k.includes(' ') ? `"${k}"` : k));
+  const query = [`subject:"${subject}"`, senderQuery, `after:${afterSeconds}`, ...keywordTerms].filter(Boolean).join(' ');
 
-  const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=1`;
+  // Se piden hasta 5 para poder detectar ambigüedad (varios correos
+  // coincidentes), no solo el primero.
+  const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=5`;
   const listResponse = await fetch(listUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -242,14 +254,17 @@ export async function findDeliveryEmail(
   }
 
   const listPayload = await listResponse.json();
-  const messageId = listPayload.messages?.[0]?.id;
-  if (!messageId) return { found: false, driveUrl: null, fromEmail: null, messageId: null, receivedAt: null };
+  const matches = listPayload.messages ?? [];
+  const matchCount = matches.length;
+  const messageId = matches[0]?.id;
+  if (!messageId) return { found: false, driveUrl: null, fromEmail: null, messageId: null, receivedAt: null, ambiguous: false, matchCount: 0 };
+  const ambiguous = matchCount > 1;
 
   const detailUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`;
   const detailResponse = await fetch(detailUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!detailResponse.ok) return { found: true, driveUrl: null, fromEmail: null, messageId, receivedAt: null };
+  if (!detailResponse.ok) return { found: true, driveUrl: null, fromEmail: null, messageId, receivedAt: null, ambiguous, matchCount };
 
   const detail = await detailResponse.json();
   const fromHeader = detail.payload?.headers?.find((h: any) => h.name === 'From')?.value || '';
@@ -260,5 +275,5 @@ export async function findDeliveryEmail(
   // epoch), independiente de cuándo corra el barrido.
   const receivedAt = detail.internalDate ? new Date(Number(detail.internalDate)).toISOString() : null;
 
-  return { found: true, driveUrl, fromEmail, messageId, receivedAt };
+  return { found: true, driveUrl, fromEmail, messageId, receivedAt, ambiguous, matchCount };
 }

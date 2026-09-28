@@ -29,7 +29,7 @@ interface MasterListsViewProps {
   reportTypeSteps: ReportTypeStep[];
   onAddReportType: (type: ReportType) => Promise<void>;
   onAddContact: (contact: Contact) => Promise<void>;
-  onAddReportTypeStep: (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number }) => Promise<void>;
+  onAddReportTypeStep: (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => Promise<void>;
   onDeleteReportTypeStep: (stepId: string) => Promise<void>;
 }
 
@@ -52,6 +52,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [newStepContactIds, setNewStepContactIds] = useState<string[]>([]);
   const [newStepDiaInicio, setNewStepDiaInicio] = useState('');
   const [newStepDiaLimite, setNewStepDiaLimite] = useState('');
+  const [newStepKeywords, setNewStepKeywords] = useState('');
   const [stepError, setStepError] = useState('');
   const [isSavingStep, setIsSavingStep] = useState(false);
   const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'statuses' | 'periods'>('types');
@@ -152,6 +153,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
         contactIds: newStepContactIds,
         diaInicio: newStepDiaInicio === '' ? undefined : Number(newStepDiaInicio),
         diaLimite: newStepDiaLimite === '' ? undefined : Number(newStepDiaLimite),
+        palabrasClave: newStepKeywords.trim() || undefined,
       });
       setNewStepName('');
       setNewStepSubject('');
@@ -159,6 +161,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       setNewStepContactIds([]);
       setNewStepDiaInicio('');
       setNewStepDiaLimite('');
+      setNewStepKeywords('');
     } catch (error) {
       setStepError(error instanceof Error ? error.message : 'No fue posible guardar el paso.');
     } finally {
@@ -781,6 +784,16 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
               </div>
               <p className="text-[10.5px] text-slate-400">
                 Los pasos después del primero inician automáticamente cuando se detecta la entrega del paso anterior — el día de inicio solo aplica al primer paso.
+              </p>
+              <input
+                type="text"
+                value={newStepKeywords}
+                onChange={(e) => setNewStepKeywords(e.target.value)}
+                placeholder="Palabras clave adicionales, separadas por coma (opcional)"
+                className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+              />
+              <p className="text-[10.5px] text-slate-400">
+                Se suman al asunto en la búsqueda de Gmail, para no depender solo de que el asunto sea exacto.
               </p>
               <div className="max-h-28 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1.5">
                 {contacts.map((c) => {

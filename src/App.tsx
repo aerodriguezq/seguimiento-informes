@@ -645,7 +645,7 @@ export default function App() {
     showToast(`Contacto "${newContact.name}" registrado en la lista maestra.`, 'success');
   };
 
-  const handleAddReportTypeStep = async (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number }) => {
+  const handleAddReportTypeStep = async (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => {
     const response = await fetch('/api/catalogs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
