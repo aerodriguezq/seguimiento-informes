@@ -20,6 +20,8 @@ import {
   Bell,
   GitBranch,
   Flag,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 
@@ -31,6 +33,7 @@ interface MasterListsViewProps {
   onAddContact: (contact: Contact) => Promise<void>;
   onAddReportTypeStep: (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => Promise<void>;
   onDeleteReportTypeStep: (stepId: string) => Promise<void>;
+  onMoveReportTypeStep: (stepId: string, direction: 'up' | 'down') => Promise<void>;
 }
 
 export const MasterListsView: React.FC<MasterListsViewProps> = ({
@@ -41,6 +44,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   onAddContact,
   onAddReportTypeStep,
   onDeleteReportTypeStep,
+  onMoveReportTypeStep,
 }) => {
   const { canEdit } = useAuth();
   const canEditLists = canEdit('lists');
@@ -717,14 +721,34 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                       </p>
                     </div>
                     {canEditLists && (
-                      <button
-                        type="button"
-                        onClick={() => onDeleteReportTypeStep(step.id)}
-                        className="text-slate-400 hover:text-rose-600 shrink-0"
-                        title="Eliminar paso"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => onMoveReportTypeStep(step.id, 'up')}
+                          disabled={idx === 0}
+                          className="text-slate-400 hover:text-indigo-600 disabled:opacity-30 disabled:hover:text-slate-400"
+                          title="Mover arriba"
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onMoveReportTypeStep(step.id, 'down')}
+                          disabled={idx === stepsForModalType.length - 1}
+                          className="text-slate-400 hover:text-indigo-600 disabled:opacity-30 disabled:hover:text-slate-400"
+                          title="Mover abajo"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteReportTypeStep(step.id)}
+                          className="text-slate-400 hover:text-rose-600"
+                          title="Eliminar paso"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     )}
                   </li>
                 ))}

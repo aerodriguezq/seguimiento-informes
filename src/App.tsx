@@ -669,6 +669,26 @@ export default function App() {
     }
   };
 
+  const handleMoveReportTypeStep = async (stepId: string, direction: 'up' | 'down') => {
+    try {
+      const response = await fetch('/api/catalogs', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'reportTypeStepOrder', stepId: Number(stepId), direction }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible reordenar el paso.');
+      const updatedSteps: ReportTypeStep[] = payload.data;
+      setReportTypeSteps((prev) => {
+        const typeId = updatedSteps[0]?.typeId;
+        const others = prev.filter((s) => s.typeId !== typeId);
+        return [...others, ...updatedSteps];
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible reordenar el paso.', 'info');
+    }
+  };
+
   const handleAddAuthorizedUser = async (email: string, name: string) => {
     const response = await fetch('/api/catalogs', {
       method: 'POST',
@@ -913,6 +933,7 @@ export default function App() {
               onAddContact={handleAddContact}
               onAddReportTypeStep={handleAddReportTypeStep}
               onDeleteReportTypeStep={handleDeleteReportTypeStep}
+              onMoveReportTypeStep={handleMoveReportTypeStep}
             />
           )}
 

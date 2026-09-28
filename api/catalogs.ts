@@ -211,6 +211,47 @@ export default async function handler(
     if (request.method === 'PATCH') {
       const body = request.body ?? {};
 
+      if (body.kind === 'reportTypeStepOrder') {
+        const stepId = Number(body.stepId);
+        const direction = body.direction;
+        if (!Number.isInteger(stepId) || stepId <= 0 || (direction !== 'up' && direction !== 'down')) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El paso y la dirección (up/down) son obligatorios.'] });
+        }
+
+        const [current] = (await sql`SELECT paso_id AS id, tipo_informe_id AS "typeId", orden FROM tipo_informe_pasos WHERE paso_id = ${stepId}`) as any[];
+        if (!current) return response.status(404).json({ data: null, meta: {}, errors: ['Paso no encontrado.'] });
+
+        const neighborRows = (
+          direction === 'up'
+            ? await sql`SELECT paso_id AS id, orden FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND orden < ${current.orden} ORDER BY orden DESC LIMIT 1`
+            : await sql`SELECT paso_id AS id, orden FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND orden > ${current.orden} ORDER BY orden ASC LIMIT 1`
+        ) as any[];
+        const neighbor = neighborRows[0];
+
+        if (neighbor) {
+          // Se intercambia el "orden" con el vecino inmediato -- swap simple,
+          // sin renumerar toda la lista.
+          await sql`UPDATE tipo_informe_pasos SET orden = ${neighbor.orden} WHERE paso_id = ${current.id}`;
+          await sql`UPDATE tipo_informe_pasos SET orden = ${current.orden} WHERE paso_id = ${neighbor.id}`;
+        }
+
+        const stepRows = (await sql`
+          SELECT paso_id AS id, tipo_informe_id AS "typeId", orden AS "order", nombre AS name,
+            asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
+            palabras_clave AS "palabrasClave"
+          FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} ORDER BY orden ASC
+        `) as any[];
+        const stepIds = stepRows.map((s: any) => s.id);
+        const contactRows = stepIds.length === 0 ? [] : ((await sql`
+          SELECT paso_id AS "stepId", contacto_id AS "contactId" FROM tipo_informe_paso_contacto WHERE paso_id = ANY(${stepIds})
+        `) as any[]);
+        const data = stepRows.map((s: any) => ({
+          ...s,
+          contactIds: contactRows.filter((c: any) => c.stepId === s.id).map((c: any) => String(c.contactId)),
+        }));
+        return response.status(200).json({ data, meta: {}, errors: [] });
+      }
+
       if (body.kind === 'peticion') {
         if (!(await canEditModuleRequest(request, sql, 'peticiones'))) {
           return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Peticiones.'] });
