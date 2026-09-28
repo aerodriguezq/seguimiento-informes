@@ -210,6 +210,7 @@ export default function App() {
           currentStepIsFinal: report.currentStepIsFinal ?? undefined,
           currentStepEmailSubject: report.currentStepEmailSubject || undefined,
           isWorkflowCompleted: report.isWorkflowCompleted ?? undefined,
+          stageInstances: report.stageInstances,
         }));
 
         const loadedAlerts: ScheduledAlert[] = alertsPayload.data.map(mapAlert);
@@ -644,7 +645,7 @@ export default function App() {
     showToast(`Contacto "${newContact.name}" registrado en la lista maestra.`, 'success');
   };
 
-  const handleAddReportTypeStep = async (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[] }) => {
+  const handleAddReportTypeStep = async (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number }) => {
     const response = await fetch('/api/catalogs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

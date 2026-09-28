@@ -459,6 +459,63 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
             </div>
           )}
 
+          {/* Etapas: fecha de inicio/límite y estado calculado de cada paso */}
+          {report.stageInstances && report.stageInstances.length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-slate-100">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Etapas del proceso</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <th className="py-2 px-4">Etapa</th>
+                      <th className="py-2 px-3">Inicio</th>
+                      <th className="py-2 px-3">Límite</th>
+                      <th className="py-2 px-3">Estado</th>
+                      <th className="py-2 px-3">Recepción real</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {report.stageInstances.map((stage) => {
+                      const STAGE_LABEL: Record<string, string> = {
+                        PENDIENTE: 'Pendiente',
+                        ALERTA_GENERADA: 'Alerta generada',
+                        RECIBIDA_A_TIEMPO: 'Recibida a tiempo',
+                        RECIBIDA_TARDE: 'Recibida tarde',
+                        NO_RECIBIDA: 'No recibida',
+                        EN_REVISION: 'En revisión',
+                      };
+                      const STAGE_COLOR: Record<string, string> = {
+                        PENDIENTE: 'bg-slate-100 text-slate-600',
+                        ALERTA_GENERADA: 'bg-amber-50 text-amber-800 border border-amber-200',
+                        RECIBIDA_A_TIEMPO: 'bg-emerald-50 text-emerald-800 border border-emerald-200',
+                        RECIBIDA_TARDE: 'bg-orange-50 text-orange-800 border border-orange-200',
+                        NO_RECIBIDA: 'bg-rose-50 text-rose-700 border border-rose-200',
+                        EN_REVISION: 'bg-indigo-50 text-indigo-700 border border-indigo-200',
+                      };
+                      return (
+                        <tr key={stage.stepId}>
+                          <td className="py-2.5 px-4 font-semibold text-slate-900">{stage.order}. {stage.stepName}</td>
+                          <td className="py-2.5 px-3 text-slate-600">{stage.startDate || '—'}</td>
+                          <td className="py-2.5 px-3 text-slate-600">{stage.dueDate || '—'}</td>
+                          <td className="py-2.5 px-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold whitespace-nowrap ${STAGE_COLOR[stage.status] || 'bg-slate-100 text-slate-600'}`}>
+                              {STAGE_LABEL[stage.status] || stage.status}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600">
+                            {stage.receivedAt ? new Date(stage.receivedAt).toLocaleString('es-CO') : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Navigation Tabs */}
           <div className="flex items-center gap-2 border-b border-slate-200 pb-1 text-xs">
             <button

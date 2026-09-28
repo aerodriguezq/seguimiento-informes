@@ -22,6 +22,18 @@ function addOneMonth(dateStr: string) {
   return date.toISOString().slice(0, 10);
 }
 
+// Convierte un "día del mes" configurado (ej. 6, 8, 31) en una fecha real,
+// recortándolo al último día real de ese mes (Regla 10: meses de 28-31
+// días no deben romper el cálculo). No conoce festivos — eso queda para
+// una fase futura si se necesita un calendario de festivos configurable.
+function dateFromDayOfMonth(year: number, monthName: string, day: number): string | null {
+  const idx = MONTHS_ES.indexOf(monthName);
+  if (idx === -1) return null;
+  const daysInMonth = new Date(Date.UTC(year, idx + 1, 0)).getUTCDate();
+  const clampedDay = Math.min(Math.max(Math.trunc(day), 1), daysInMonth);
+  return new Date(Date.UTC(year, idx, clampedDay)).toISOString().slice(0, 10);
+}
+
 // Compone el asunto real esperado a partir de la base configurada en el
 // paso más el número de secuencia del informe (01, 02, 03...), ej.
 // "Entrega Mensual Informe de Ejecución 02".
@@ -88,6 +100,18 @@ async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
     WHERE informe_id = ANY(${ids})
   `) as any[];
 
+  // Fase 1 del motor de etapas: fechas calculadas + estado por paso (no
+  // solo el paso actual), para poder ver la cadena completa de un informe.
+  const stageInstanceRows = (await sql`
+    SELECT ipi.informe_id AS "reportId", ipi.paso_id AS "stepId", wp.nombre AS "stepName", wp.orden AS "order",
+      TO_CHAR(ipi.fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(ipi.fecha_limite, 'YYYY-MM-DD') AS "dueDate",
+      ipi.estado_etapa AS status, ipi.fecha_recepcion_real AS "receivedAt", ipi.correo_remitente AS "fromEmail"
+    FROM informe_pasos_instancia ipi
+    JOIN tipo_informe_pasos wp ON wp.paso_id = ipi.paso_id
+    WHERE ipi.informe_id = ANY(${ids})
+    ORDER BY wp.orden ASC
+  `) as any[];
+
   return reportRows.map((report: any) => {
     const contacts = contactRows.filter((c: any) => c.reportId === report.id);
     const primary = contacts.find((c: any) => c.isPrimary);
@@ -102,11 +126,82 @@ async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
       currentStepEmailSubject: report.currentStepEmailSubjectBase
         ? composeStepEmailSubject(report.currentStepEmailSubjectBase, report.sequenceNumber)
         : null,
+      stageInstances: stageInstanceRows.filter((s: any) => s.reportId === report.id),
     };
   });
 }
 
-async function createStepAlert(sql: SqlClient, reportId: number, projectId: number, stepId: number, stepName: string) {
+// Calcula y guarda la fecha de inicio/límite de una etapa concreta de un
+// informe (tabla informe_pasos_instancia). El primer paso usa su día de
+// inicio configurado; los siguientes reciben su fecha de inicio real desde
+// afuera (dynamicStartDate: el momento en que se detectó/confirmó la etapa
+// anterior), no un día fijo — así una entrega temprana adelanta la
+// siguiente etapa sin tocar su fecha límite configurada (Regla del
+// requerimiento: "si la entrega se recibe antes, la siguiente etapa se
+// activa de inmediato").
+async function upsertStepInstance(
+  sql: SqlClient,
+  reportId: number,
+  stepId: number,
+  year: number,
+  monthName: string,
+  dynamicStartDate?: string,
+) {
+  const [step] = (await sql`
+    SELECT orden, dia_inicio AS "diaInicio", dia_limite AS "diaLimite" FROM tipo_informe_pasos WHERE paso_id = ${stepId}
+  `) as any[];
+  if (!step) return;
+
+  const fechaLimite = step.diaLimite ? dateFromDayOfMonth(year, monthName, step.diaLimite) : null;
+  const fechaInicio = dynamicStartDate ?? (step.orden === 1 && step.diaInicio ? dateFromDayOfMonth(year, monthName, step.diaInicio) : null);
+
+  await sql`
+    INSERT INTO informe_pasos_instancia (informe_id, paso_id, fecha_inicio, fecha_limite, estado_etapa)
+    VALUES (${reportId}, ${stepId}, ${fechaInicio}, ${fechaLimite}, 'ALERTA_GENERADA')
+    ON CONFLICT (informe_id, paso_id) DO UPDATE SET
+      fecha_inicio = EXCLUDED.fecha_inicio, fecha_limite = EXCLUDED.fecha_limite, updated_at = NOW()
+  `;
+}
+
+// Cierra la etapa actual como recibida (a tiempo o tarde, comparando contra
+// su propia fecha límite) y conserva la fecha REAL del evento -- la del
+// correo cuando viene de la detección automática, o "ahora" cuando es un
+// avance manual -- nunca se pierde ni se sobrescribe con la hora del
+// barrido (Regla 4 del requerimiento).
+async function finalizeStepInstance(
+  sql: SqlClient,
+  reportId: number,
+  stepId: number,
+  delivery: { receivedAt: Date; messageId?: string | null; fromEmail?: string | null },
+) {
+  const [instance] = (await sql`
+    SELECT TO_CHAR(fecha_limite, 'YYYY-MM-DD') AS "dueDate" FROM informe_pasos_instancia WHERE informe_id = ${reportId} AND paso_id = ${stepId}
+  `) as any[];
+  const receivedIso = delivery.receivedAt.toISOString();
+  const receivedDateOnly = receivedIso.slice(0, 10);
+  const estado = instance?.dueDate ? (receivedDateOnly <= instance.dueDate ? 'RECIBIDA_A_TIEMPO' : 'RECIBIDA_TARDE') : 'RECIBIDA_A_TIEMPO';
+
+  await sql`
+    INSERT INTO informe_pasos_instancia (informe_id, paso_id, estado_etapa, fecha_recepcion_real, correo_gmail_id, correo_remitente)
+    VALUES (${reportId}, ${stepId}, ${estado}, ${receivedIso}, ${delivery.messageId ?? null}, ${delivery.fromEmail ?? null})
+    ON CONFLICT (informe_id, paso_id) DO UPDATE SET
+      estado_etapa = EXCLUDED.estado_etapa, fecha_recepcion_real = EXCLUDED.fecha_recepcion_real,
+      correo_gmail_id = EXCLUDED.correo_gmail_id, correo_remitente = EXCLUDED.correo_remitente, updated_at = NOW()
+  `;
+}
+
+async function createStepAlert(
+  sql: SqlClient,
+  reportId: number,
+  projectId: number,
+  stepId: number,
+  stepName: string,
+  year: number,
+  monthName: string,
+  dynamicStartDate?: string,
+) {
+  await upsertStepInstance(sql, reportId, stepId, year, monthName, dynamicStartDate);
+
   const stepContacts = (await sql`SELECT contacto_id AS "contactId" FROM tipo_informe_paso_contacto WHERE paso_id = ${stepId}`) as any[];
   if (stepContacts.length === 0) return;
 
@@ -126,7 +221,7 @@ async function createStepAlert(sql: SqlClient, reportId: number, projectId: numb
 
 // Crea la alerta del primer paso configurado para el tipo de informe (si existe)
 // y deja el informe apuntando a ese paso. Sin pasos configurados, no hace nada.
-async function seedFirstWorkflowStep(sql: SqlClient, reportId: number, typeId: number, projectId: number) {
+async function seedFirstWorkflowStep(sql: SqlClient, reportId: number, typeId: number, projectId: number, year: number, monthName: string) {
   const [firstStep] = (await sql`
     SELECT paso_id AS id, nombre AS name
     FROM tipo_informe_pasos
@@ -137,7 +232,7 @@ async function seedFirstWorkflowStep(sql: SqlClient, reportId: number, typeId: n
   if (!firstStep) return;
 
   await sql`UPDATE informes SET paso_actual_id = ${firstStep.id} WHERE informe_id = ${reportId}`;
-  await createStepAlert(sql, reportId, projectId, firstStep.id, firstStep.name);
+  await createStepAlert(sql, reportId, projectId, firstStep.id, firstStep.name, year, monthName);
 }
 
 type CreateReportInput = {
@@ -196,7 +291,7 @@ async function createReportRow(sql: SqlClient, input: CreateReportInput): Promis
     )
   `;
 
-  await seedFirstWorkflowStep(sql, reportId, input.typeId, input.projectId);
+  await seedFirstWorkflowStep(sql, reportId, input.typeId, input.projectId, input.year, input.month);
   return reportId;
 }
 
@@ -242,9 +337,14 @@ async function maybeScheduleNextMonth(sql: SqlClient, reportId: number) {
 // detección automática por correo (Fase D / barrido cron).
 class NoWorkflowStepError extends Error {}
 
-async function advanceReportStep(sql: SqlClient, reportId: number): Promise<void> {
+async function advanceReportStep(
+  sql: SqlClient,
+  reportId: number,
+  delivery?: { receivedAt: Date; messageId?: string | null; fromEmail?: string | null },
+): Promise<void> {
   const [current] = (await sql`
     SELECT i.proyecto_id AS "projectId", i.tipo_informe_id AS "typeId", i.paso_actual_id AS "currentStepId",
+           i.mes_nombre AS "monthName", i.anio AS "year",
            p.orden AS "currentOrder", p.es_final AS "isFinal"
     FROM informes i
     LEFT JOIN tipo_informe_pasos p ON p.paso_id = i.paso_actual_id
@@ -255,7 +355,10 @@ async function advanceReportStep(sql: SqlClient, reportId: number): Promise<void
     throw new NoWorkflowStepError('Este informe no tiene un flujo de pasos configurado.');
   }
 
+  const resolvedDelivery = delivery ?? { receivedAt: new Date() };
+
   await sql`UPDATE alertas SET activa = FALSE, updated_at = NOW() WHERE informe_id = ${reportId} AND paso_id = ${current.currentStepId}`;
+  await finalizeStepInstance(sql, reportId, current.currentStepId, resolvedDelivery);
 
   if (current.isFinal) {
     await sql`UPDATE informes SET flujo_completado = TRUE, estado = 'Enviado', updated_at = NOW() WHERE informe_id = ${reportId}`;
@@ -273,7 +376,8 @@ async function advanceReportStep(sql: SqlClient, reportId: number): Promise<void
 
   if (nextStep) {
     await sql`UPDATE informes SET paso_actual_id = ${nextStep.id}, updated_at = NOW() WHERE informe_id = ${reportId}`;
-    await createStepAlert(sql, reportId, current.projectId, nextStep.id, nextStep.name);
+    const dynamicStartDate = resolvedDelivery.receivedAt.toISOString().slice(0, 10);
+    await createStepAlert(sql, reportId, current.projectId, nextStep.id, nextStep.name, current.year, current.monthName, dynamicStartDate);
   } else {
     await sql`UPDATE informes SET flujo_completado = TRUE, estado = 'Enviado', updated_at = NOW() WHERE informe_id = ${reportId}`;
     await maybeScheduleNextMonth(sql, reportId);
@@ -334,7 +438,11 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
             )
           `;
         }
-        await advanceReportStep(sql, step.reportId);
+        await advanceReportStep(sql, step.reportId, {
+          receivedAt: match.receivedAt ? new Date(match.receivedAt) : new Date(),
+          messageId: match.messageId,
+          fromEmail: match.fromEmail,
+        });
         advanced++;
       }
     } catch (error) {

@@ -23,6 +23,22 @@ export interface ReportTypeStep {
   emailSubject: string;
   isFinal: boolean;
   contactIds: string[];
+  // Día del mes en que inicia esta etapa (solo aplica al primer paso; los
+  // siguientes inician con la fecha real de la entrega anterior) y día del
+  // mes límite para completarla. Ambos opcionales.
+  diaInicio?: number | null;
+  diaLimite?: number | null;
+}
+
+export interface ReportStageInstance {
+  stepId: string;
+  stepName: string;
+  order: number;
+  startDate: string | null;
+  dueDate: string | null;
+  status: string;
+  receivedAt: string | null;
+  fromEmail: string | null;
 }
 
 export interface Contact {
@@ -109,6 +125,7 @@ export interface Report {
   currentStepIsFinal?: boolean;
   currentStepEmailSubject?: string;
   isWorkflowCompleted?: boolean;
+  stageInstances?: ReportStageInstance[];
 }
 
 export interface SystemNotification {

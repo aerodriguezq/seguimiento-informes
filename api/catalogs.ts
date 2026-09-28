@@ -193,7 +193,7 @@ export default async function handler(
         `,
         sql`
           SELECT paso_id AS id, tipo_informe_id AS "typeId", orden AS "order", nombre AS name,
-            asunto_correo AS "emailSubject", es_final AS "isFinal"
+            asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite"
           FROM tipo_informe_pasos ORDER BY tipo_informe_id ASC, orden ASC
         `,
         sql`SELECT paso_id AS "stepId", contacto_id AS "contactId" FROM tipo_informe_paso_contacto`,
@@ -484,21 +484,23 @@ export default async function handler(
     }
 
     if (kind === 'reportTypeStep') {
-      const { typeId, name, emailSubject, isFinal, contactIds } = data ?? {};
+      const { typeId, name, emailSubject, isFinal, contactIds, diaInicio, diaLimite } = data ?? {};
       if (!typeId || !name || !emailSubject || !Array.isArray(contactIds) || contactIds.length === 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Tipo de informe, nombre, asunto de correo y al menos un contacto son obligatorios.'] });
       }
+      const parsedDiaInicio = diaInicio === null || diaInicio === undefined || diaInicio === '' ? null : Number(diaInicio);
+      const parsedDiaLimite = diaLimite === null || diaLimite === undefined || diaLimite === '' ? null : Number(diaLimite);
 
       const stepRows = await sql`
-        INSERT INTO tipo_informe_pasos (paso_id, tipo_informe_id, orden, nombre, asunto_correo, es_final)
+        INSERT INTO tipo_informe_pasos (paso_id, tipo_informe_id, orden, nombre, asunto_correo, es_final, dia_inicio, dia_limite)
         VALUES (
           COALESCE((SELECT MAX(paso_id) FROM tipo_informe_pasos), 0) + 1,
           ${typeId},
           COALESCE((SELECT MAX(orden) FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId}), 0) + 1,
-          ${String(name).trim()}, ${String(emailSubject).trim()}, ${Boolean(isFinal)}
+          ${String(name).trim()}, ${String(emailSubject).trim()}, ${Boolean(isFinal)}, ${parsedDiaInicio}, ${parsedDiaLimite}
         )
         RETURNING paso_id AS id, tipo_informe_id AS "typeId", orden AS "order", nombre AS name,
-          asunto_correo AS "emailSubject", es_final AS "isFinal"
+          asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite"
       `;
       const stepId = stepRows[0].id;
 

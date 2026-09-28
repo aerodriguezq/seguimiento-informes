@@ -211,6 +211,10 @@ export type DeliveryEmailMatch = {
   found: boolean;
   driveUrl: string | null;
   fromEmail: string | null;
+  messageId: string | null;
+  // Fecha real del correo (según Gmail), no la hora en que corrió el
+  // barrido — así la trazabilidad conserva el momento real de la entrega.
+  receivedAt: string | null;
 };
 
 // Busca un correo entrante con el asunto esperado de alguno de los
@@ -239,19 +243,22 @@ export async function findDeliveryEmail(
 
   const listPayload = await listResponse.json();
   const messageId = listPayload.messages?.[0]?.id;
-  if (!messageId) return { found: false, driveUrl: null, fromEmail: null };
+  if (!messageId) return { found: false, driveUrl: null, fromEmail: null, messageId: null, receivedAt: null };
 
   const detailUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`;
   const detailResponse = await fetch(detailUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  if (!detailResponse.ok) return { found: true, driveUrl: null, fromEmail: null };
+  if (!detailResponse.ok) return { found: true, driveUrl: null, fromEmail: null, messageId, receivedAt: null };
 
   const detail = await detailResponse.json();
   const fromHeader = detail.payload?.headers?.find((h: any) => h.name === 'From')?.value || '';
   const fromEmail = fromHeader.match(/<([^>]+)>/)?.[1] || fromHeader || null;
   const bodyText = extractPlainText(detail.payload);
   const driveUrl = bodyText.match(DRIVE_URL_PATTERN)?.[0] || null;
+  // internalDate es la hora real en que Gmail recibió el mensaje (ms desde
+  // epoch), independiente de cuándo corra el barrido.
+  const receivedAt = detail.internalDate ? new Date(Number(detail.internalDate)).toISOString() : null;
 
-  return { found: true, driveUrl, fromEmail };
+  return { found: true, driveUrl, fromEmail, messageId, receivedAt };
 }

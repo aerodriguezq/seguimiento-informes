@@ -29,7 +29,7 @@ interface MasterListsViewProps {
   reportTypeSteps: ReportTypeStep[];
   onAddReportType: (type: ReportType) => Promise<void>;
   onAddContact: (contact: Contact) => Promise<void>;
-  onAddReportTypeStep: (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[] }) => Promise<void>;
+  onAddReportTypeStep: (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number }) => Promise<void>;
   onDeleteReportTypeStep: (stepId: string) => Promise<void>;
 }
 
@@ -50,6 +50,8 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [newStepSubject, setNewStepSubject] = useState('');
   const [newStepIsFinal, setNewStepIsFinal] = useState(false);
   const [newStepContactIds, setNewStepContactIds] = useState<string[]>([]);
+  const [newStepDiaInicio, setNewStepDiaInicio] = useState('');
+  const [newStepDiaLimite, setNewStepDiaLimite] = useState('');
   const [stepError, setStepError] = useState('');
   const [isSavingStep, setIsSavingStep] = useState(false);
   const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'statuses' | 'periods'>('types');
@@ -148,11 +150,15 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
         emailSubject: newStepSubject.trim(),
         isFinal: newStepIsFinal,
         contactIds: newStepContactIds,
+        diaInicio: newStepDiaInicio === '' ? undefined : Number(newStepDiaInicio),
+        diaLimite: newStepDiaLimite === '' ? undefined : Number(newStepDiaLimite),
       });
       setNewStepName('');
       setNewStepSubject('');
       setNewStepIsFinal(false);
       setNewStepContactIds([]);
+      setNewStepDiaInicio('');
+      setNewStepDiaLimite('');
     } catch (error) {
       setStepError(error instanceof Error ? error.message : 'No fue posible guardar el paso.');
     } finally {
@@ -697,6 +703,12 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                         )}
                       </div>
                       <p className="mt-1 text-[11px] text-slate-500">Asunto esperado: "{step.emailSubject}"</p>
+                      {(step.diaInicio || step.diaLimite) && (
+                        <p className="mt-0.5 text-[11px] text-indigo-600 font-medium">
+                          {step.diaInicio ? `Inicia día ${step.diaInicio} · ` : ''}
+                          {step.diaLimite ? `Límite día ${step.diaLimite}` : 'Sin día límite configurado'}
+                        </p>
+                      )}
                       <p className="mt-0.5 text-[11px] text-slate-500">
                         {step.contactIds.map((id) => contacts.find((c) => c.id === id)?.name).filter(Boolean).join(', ') || 'Sin contactos'}
                       </p>
@@ -741,6 +753,35 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 placeholder="Asunto de correo que confirma la entrega"
                 className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
               />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día de inicio del mes (solo paso 1)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={newStepDiaInicio}
+                    onChange={(e) => setNewStepDiaInicio(e.target.value)}
+                    placeholder="Ej: 3"
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día límite del mes</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={newStepDiaLimite}
+                    onChange={(e) => setNewStepDiaLimite(e.target.value)}
+                    placeholder="Ej: 6"
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+              <p className="text-[10.5px] text-slate-400">
+                Los pasos después del primero inician automáticamente cuando se detecta la entrega del paso anterior — el día de inicio solo aplica al primer paso.
+              </p>
               <div className="max-h-28 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1.5">
                 {contacts.map((c) => {
                   const checked = newStepContactIds.includes(c.id);
