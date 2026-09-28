@@ -388,7 +388,11 @@ async function advanceReportStep(
 // Google conectada un correo entrante con el asunto esperado de ese paso,
 // de alguno de sus contactos responsables. Si aparece, avanza el flujo.
 const RECEIVED_STATES = ['RECIBIDA_A_TIEMPO', 'RECIBIDA_TARDE'];
-const OPEN_STATES = ['PENDIENTE', 'ALERTA_GENERADA'];
+// EN_REVISION cuenta como "abierta" (no completada, no necesariamente
+// vencida): un correo ambiguo detectado por Fase 4 debe seguir viéndose en
+// pendientes/general hasta que alguien lo resuelva a mano, no desaparecer
+// de los indicadores.
+const OPEN_STATES = ['PENDIENTE', 'ALERTA_GENERADA', 'EN_REVISION'];
 
 // Fase 3: agrega informe_pasos_instancia + alertas en los indicadores del
 // dashboard (sección 9 del requerimiento) — generales, por responsable, por
@@ -410,7 +414,7 @@ async function fetchStagesDashboard(sql: SqlClient) {
       COUNT(*) FILTER (WHERE estado_etapa = ANY(${RECEIVED_STATES})) AS "entregasRecibidas",
       COUNT(*) FILTER (WHERE estado_etapa = ANY(${OPEN_STATES})) AS "entregasPendientes",
       COUNT(*) FILTER (WHERE estado_etapa = 'RECIBIDA_TARDE') AS "entregasTardias",
-      COUNT(*) FILTER (WHERE estado_etapa = 'NO_RECIBIDA') AS "procesosEnRiesgo"
+      COUNT(*) FILTER (WHERE estado_etapa IN ('NO_RECIBIDA', 'EN_REVISION')) AS "procesosEnRiesgo"
     FROM informe_pasos_instancia
   `) as any[];
 
