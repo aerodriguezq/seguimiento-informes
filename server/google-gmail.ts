@@ -45,8 +45,12 @@ type UrgencyColors = { bg: string; accent: string };
 
 // 1 día o menos (incluye vencido) = rojo, 2-3 días = amarillo, 4+ días = verde.
 // Sin fecha límite conocida (alerta sin informe vinculado) = azul neutro.
+// Vencido (días negativos) = un nivel MÁS severo que "rojo": ya no es "se
+// vence pronto", es un incumplimiento real -- por eso lleva su propio color
+// (rojo oscuro/casi negro) y encabezado, no solo el mismo rojo más intenso.
 function urgencyColors(daysRemaining: number | null): UrgencyColors {
   if (daysRemaining === null) return { bg: '#1e3a8a', accent: '#93c5fd' };
+  if (daysRemaining < 0) return { bg: '#450a0a', accent: '#fca5a5' };
   if (daysRemaining <= 1) return { bg: '#b91c1c', accent: '#fecaca' };
   if (daysRemaining <= 3) return { bg: '#b45309', accent: '#fde68a' };
   return { bg: '#15803d', accent: '#bbf7d0' };
@@ -61,15 +65,21 @@ export function buildAlertEmailHtml(options: {
   actionUrl: string;
 }): string {
   const { bg, accent } = urgencyColors(options.daysRemaining);
+  const isBreach = options.daysRemaining !== null && options.daysRemaining < 0;
+  const headerEmoji = isBreach ? '🚨' : '🛡️';
+  const headerTitle = isBreach ? 'INCUMPLIMIENTO — Entrega vencida' : 'Aviso: Recordatorio de Entrega';
   const escape = (value: string) => String(value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c] as string));
+  const daysLine = isBreach
+    ? `Vencido hace ${Math.abs(options.daysRemaining as number)} día(s) — esto atrasa el siguiente paso del flujo`
+    : escape(options.subtitle);
 
   return `<div style="max-width: 480px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dce4ec; border-radius: 8px; font-family: Arial, sans-serif; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
   <div style="background-color: ${bg}; color: #ffffff; padding: 20px; text-align: center;">
-    <div style="font-size: 24px; margin-bottom: 5px;">🛡️</div>
-    <h2 style="margin: 0; font-size: 18px; font-weight: bold; color: #ffffff;">Aviso: Recordatorio de Entrega</h2>
-    <p style="margin: 5px 0 0 0; font-size: 16px; font-weight: 600; color: ${accent};">${escape(options.subtitle)}</p>
+    <div style="font-size: 24px; margin-bottom: 5px;">${headerEmoji}</div>
+    <h2 style="margin: 0; font-size: 18px; font-weight: bold; color: #ffffff;">${headerTitle}</h2>
+    <p style="margin: 5px 0 0 0; font-size: 16px; font-weight: 600; color: ${accent};">${daysLine}</p>
   </div>
 
   <div style="padding: 20px; background-color: #f8fafc;">
@@ -128,6 +138,12 @@ const PETICION_LEVEL_COLORS: Record<'verde' | 'amarillo' | 'rojo', UrgencyColors
   amarillo: { bg: '#b45309', accent: '#fde68a', label: 'Alerta de vencimiento próximo', emoji: '🟡' },
   rojo: { bg: '#b91c1c', accent: '#fecaca', label: 'Alerta urgente', emoji: '🔴' },
 };
+// Una vez realmente vencido (no solo "por vencer"), el rojo se queda corto
+// -- se usa un tono más severo y un rótulo de incumplimiento en vez de
+// "alerta urgente" repetido día tras día.
+const PETICION_BREACH_COLORS: UrgencyColors & { label: string; emoji: string } = {
+  bg: '#450a0a', accent: '#fca5a5', label: 'INCUMPLIMIENTO — Plazo vencido', emoji: '🚨',
+};
 
 // Recordatorio de una Petición: verde a los 5 días de plazo, amarillo a los
 // 3, rojo desde 2 días en adelante (incluido vencido) — el rojo siempre
@@ -142,7 +158,8 @@ export function buildPeticionReminderEmailHtml(options: {
   fechaPlazoRespuesta: string | null;
   actionUrl: string;
 }): string {
-  const { bg, accent, label, emoji } = PETICION_LEVEL_COLORS[options.level];
+  const isBreach = options.daysRemaining !== null && options.daysRemaining < 0;
+  const { bg, accent, label, emoji } = isBreach ? PETICION_BREACH_COLORS : PETICION_LEVEL_COLORS[options.level];
   const escape = (value: string) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c] as string));
