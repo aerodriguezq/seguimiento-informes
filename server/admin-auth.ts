@@ -14,8 +14,14 @@ export async function isAdminRequest(request: { headers: { cookie?: string } }, 
   return Boolean(row?.isAdmin);
 }
 
-// Admin siempre puede; si no, revisa si esta persona tiene permiso "edit"
-// explícito para ese módulo (permisos es un JSONB tipo {"seguimiento": "edit"}).
+// Admin siempre puede; si no, revisa el permiso de esta persona para ese
+// módulo. Un módulo SIN entrada en permisos (nunca se guardó explícitamente)
+// se trata como "edit" por defecto -- igual que levelOf() en
+// src/auth/AuthContext.tsx ("user.permissions[module] ?? 'edit'"). Antes
+// este backend exigía 'edit' explícito, así que cualquier usuario sin ese
+// módulo guardado en su JSONB (el caso normal para módulos nuevos como
+// "seguimiento"/"peticiones" en cuentas creadas antes de que existieran)
+// veía el botón habilitado en el frontend pero el backend lo rechazaba.
 export async function canEditModuleRequest(
   request: { headers: { cookie?: string } },
   sql: SqlClient,
@@ -31,5 +37,6 @@ export async function canEditModuleRequest(
   `) as any[];
   if (!row) return false;
   if (row.isAdmin) return true;
-  return (row.permissions ?? {})[moduleKey] === 'edit';
+  const level = (row.permissions ?? {})[moduleKey];
+  return level === undefined || level === null || level === 'edit';
 }
