@@ -2,17 +2,21 @@ name: Barridos automaticos
 
 on:
   schedule:
-    # Deteccion de entregas por correo: cada 30 minutos, todo el dia
-    - cron: '*/30 * * * *'
+    # Deteccion de entregas por correo: cada 2 horas (antes cada 30 min --
+    # se redujo para bajar el consumo de compute en Neon; las fechas limite
+    # de informes son a nivel de dia, no de minuto, asi que no hace falta
+    # mas frecuencia que esta).
+    - cron: '0 */2 * * *'
     # Recordatorios de alertas pendientes: una vez al dia, 8:00am hora Colombia (13:00 UTC)
     - cron: '0 13 * * *'
-    # Importacion del cronograma de Seguimiento desde Google Sheets: cada hora
-    - cron: '0 * * * *'
+    # Importacion del cronograma de Seguimiento desde Google Sheets: cada 6
+    # horas (antes cada hora -- mismo motivo que arriba).
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
   deteccion-entregas:
-    if: github.event.schedule == '*/30 * * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '0 */2 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Barrido de deteccion de entregas (avanza el flujo si llego el correo)
@@ -30,7 +34,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
 
   importacion-cronograma:
-    if: github.event.schedule == '0 * * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '0 */6 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Reimportar el cronograma de Seguimiento desde Google Sheets
