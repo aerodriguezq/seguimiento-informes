@@ -2,21 +2,21 @@ name: Barridos automaticos
 
 on:
   schedule:
-    # Deteccion de entregas por correo: cada 2 horas (antes cada 30 min --
-    # se redujo para bajar el consumo de compute en Neon; las fechas limite
-    # de informes son a nivel de dia, no de minuto, asi que no hace falta
-    # mas frecuencia que esta).
-    - cron: '0 */2 * * *'
-    # Recordatorios de alertas pendientes: una vez al dia, 8:00am hora Colombia (13:00 UTC)
-    - cron: '0 13 * * *'
-    # Importacion del cronograma de Seguimiento desde Google Sheets: cada 6
-    # horas (antes cada hora -- mismo motivo que arriba).
-    - cron: '0 */6 * * *'
+    # Deteccion de entregas por correo: solo 3 veces al dia, hora Colombia
+    # (UTC-5) -- 8:00am, 1:00pm y 6:00pm -- en vez de cada 2 horas, para
+    # bajar aun mas el consumo de compute en Neon.
+    - cron: '0 13 * * *' # 8:00am Colombia
+    - cron: '0 18 * * *' # 1:00pm Colombia
+    - cron: '0 23 * * *' # 6:00pm Colombia
   workflow_dispatch:
 
 jobs:
   deteccion-entregas:
-    if: github.event.schedule == '0 */2 * * *' || github.event_name == 'workflow_dispatch'
+    if: >
+      github.event.schedule == '0 13 * * *' ||
+      github.event.schedule == '0 18 * * *' ||
+      github.event.schedule == '0 23 * * *' ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Barrido de deteccion de entregas (avanza el flujo si llego el correo)
@@ -25,6 +25,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
 
   recordatorios-alertas:
+    # Se aprovecha el mismo disparo de las 8:00am para no sumar un cron mas.
     if: github.event.schedule == '0 13 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -33,8 +34,11 @@ jobs:
           curl -sf -X GET "https://seguimiento-informes.vercel.app/api/alerts" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
 
+  # Importacion del cronograma de Seguimiento desde Google Sheets: ya no
+  # corre sola -- solo manual, desde el boton "Ejecutar ahora" en Usuarios
+  # Autorizados > Barridos, o disparando este workflow a mano.
   importacion-cronograma:
-    if: github.event.schedule == '0 */6 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Reimportar el cronograma de Seguimiento desde Google Sheets
