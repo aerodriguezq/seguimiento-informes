@@ -167,9 +167,17 @@ export interface PeticionResponsable {
   email: string;
 }
 
+export interface Empresa {
+  id: string;
+  name: string;
+  code: string;
+}
+
 export interface Peticion {
   id: string;
   radicado: string;
+  empresaId: string | null;
+  empresaName: string;
   fechaRadicacion: string | null;
   peticionario: string;
   asunto: string;

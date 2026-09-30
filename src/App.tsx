@@ -11,6 +11,7 @@ import {
   ReportStatus,
   ReportAttachment,
   ReportTypeStep,
+  Empresa,
 } from './types';
 import {
   getSemaforoStatus,
@@ -119,6 +120,7 @@ export default function App() {
   const [authorizedUsers, setAuthorizedUsers] = useState<AuthorizedUser[]>([]);
   const [sweeps, setSweeps] = useState<SweepConfig[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
@@ -221,6 +223,7 @@ export default function App() {
         setAuthorizedUsers(catalogsPayload.data.authorizedUsers || []);
         setSweeps(catalogsPayload.data.sweeps || []);
         setContacts(catalogsPayload.data.contacts);
+        setEmpresas(catalogsPayload.data.empresas || []);
         setReports(loadedReports);
         setAlerts(loadedAlerts);
         setCurrentProjectId((currentId) => currentId || loadedProjects[0]?.id || '');
@@ -944,7 +947,7 @@ export default function App() {
           )}
 
           {!isLoadingWorkspace && !workspaceError && activeModule === 'peticiones' && (
-            <PeticionesView contacts={contacts} />
+            <PeticionesView contacts={contacts} empresas={empresas} />
           )}
 
           {/* M09: Usuarios Autorizados (solo administradores) */}

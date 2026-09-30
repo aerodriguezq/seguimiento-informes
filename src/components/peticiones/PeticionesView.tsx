@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Inbox, Plus, Pencil, Trash2, X, Search, BellRing } from 'lucide-react';
-import { Contact, Peticion, SemaforoStatus } from '../../types';
+import { Contact, Empresa, Peticion, SemaforoStatus } from '../../types';
 import { SemaforoBadge } from '../common/SemaforoBadge';
 import { useAuth } from '../../auth/AuthContext';
 
 type PeticionFormState = {
-  radicado: string;
+  empresaId: string;
   fechaRadicacion: string;
   peticionario: string;
   asunto: string;
@@ -18,7 +18,7 @@ type PeticionFormState = {
 };
 
 const EMPTY_FORM: PeticionFormState = {
-  radicado: '',
+  empresaId: '',
   fechaRadicacion: '',
   peticionario: '',
   asunto: '',
@@ -32,7 +32,7 @@ const EMPTY_FORM: PeticionFormState = {
 
 function formToPayload(form: PeticionFormState) {
   return {
-    radicado: form.radicado.trim(),
+    empresaId: form.empresaId ? Number(form.empresaId) : null,
     fechaRadicacion: form.fechaRadicacion || null,
     peticionario: form.peticionario.trim(),
     asunto: form.asunto.trim(),
@@ -46,7 +46,7 @@ function formToPayload(form: PeticionFormState) {
 
 function peticionToForm(p: Peticion): PeticionFormState {
   return {
-    radicado: p.radicado,
+    empresaId: p.empresaId ?? '',
     fechaRadicacion: p.fechaRadicacion ?? '',
     peticionario: p.peticionario,
     asunto: p.asunto,
@@ -99,7 +99,7 @@ function fmtDate(iso: string | null): string {
 }
 
 const FIELD_LABEL: Record<string, string> = {
-  radicado: 'Radicado',
+  empresa: 'Empresa',
   fechaRadicacion: 'Fecha Radicación',
   peticionario: 'Peticionario',
   asunto: 'Asunto',
@@ -114,8 +114,9 @@ const PeticionForm: React.FC<{
   form: PeticionFormState;
   onChange: (form: PeticionFormState) => void;
   contacts: Contact[];
-}> = ({ form, onChange, contacts }) => {
-  const set = (key: keyof PeticionFormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  empresas: Empresa[];
+}> = ({ form, onChange, contacts, empresas }) => {
+  const set = (key: keyof PeticionFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     onChange({ ...form, [key]: e.target.value });
 
   const toggleResponsable = (contactId: string) => {
@@ -128,8 +129,14 @@ const PeticionForm: React.FC<{
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
-        <label className="block text-[11px] font-semibold text-slate-700 mb-1">{FIELD_LABEL.radicado} *</label>
-        <input value={form.radicado} onChange={set('radicado')} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600" />
+        <label className="block text-[11px] font-semibold text-slate-700 mb-1">{FIELD_LABEL.empresa} *</label>
+        <select value={form.empresaId} onChange={set('empresaId')} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600 bg-white">
+          <option value="">Selecciona una empresa...</option>
+          {empresas.map((e) => (
+            <option key={e.id} value={e.id}>{e.name}{e.code ? ` (${e.code})` : ''}</option>
+          ))}
+        </select>
+        <p className="mt-1 text-[10.5px] text-slate-400">El radicado se genera solo: año-empresa-consecutivo.</p>
       </div>
       <div>
         <label className="block text-[11px] font-semibold text-slate-700 mb-1">{FIELD_LABEL.fechaRadicacion}</label>
@@ -193,7 +200,7 @@ const PeticionForm: React.FC<{
   );
 };
 
-export const PeticionesView: React.FC<{ contacts: Contact[] }> = ({ contacts }) => {
+export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[] }> = ({ contacts, empresas }) => {
   const { canEdit } = useAuth();
   const editable = canEdit('peticiones');
 
@@ -204,6 +211,7 @@ export const PeticionesView: React.FC<{ contacts: Contact[] }> = ({ contacts }) 
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingRadicado, setEditingRadicado] = useState<string | null>(null);
   const [form, setForm] = useState<PeticionFormState>(EMPTY_FORM);
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -247,6 +255,7 @@ export const PeticionesView: React.FC<{ contacts: Contact[] }> = ({ contacts }) 
     // recordado localmente.
     const lastFromData = (peticiones ?? []).find((p) => p.correoPersonaAsignada)?.correoPersonaAsignada;
     setEditingId(null);
+    setEditingRadicado(null);
     setForm({ ...EMPTY_FORM, correoPersonaAsignada: lastFromData || getLastCorreoAdicional() });
     setFormError('');
     setIsFormOpen(true);
@@ -254,14 +263,15 @@ export const PeticionesView: React.FC<{ contacts: Contact[] }> = ({ contacts }) 
 
   const openEdit = (p: Peticion) => {
     setEditingId(p.id);
+    setEditingRadicado(p.radicado);
     setForm(peticionToForm(p));
     setFormError('');
     setIsFormOpen(true);
   };
 
   const handleSave = async () => {
-    if (!form.radicado.trim() || !form.asunto.trim()) {
-      setFormError('El radicado y el asunto son obligatorios.');
+    if (!form.empresaId || !form.asunto.trim()) {
+      setFormError('La empresa y el asunto son obligatorios.');
       return;
     }
     setIsSaving(true);
@@ -452,13 +462,16 @@ export const PeticionesView: React.FC<{ contacts: Contact[] }> = ({ contacts }) 
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <h3 className="text-sm font-bold text-slate-900">{editingId ? 'Editar petición' : 'Nueva petición'}</h3>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">{editingId ? 'Editar petición' : 'Nueva petición'}</h3>
+                {editingRadicado && <p className="mt-0.5 text-[11px] font-mono text-slate-500">Radicado: {editingRadicado}</p>}
+              </div>
               <button type="button" onClick={() => setIsFormOpen(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="p-5 space-y-3">
-              <PeticionForm form={form} onChange={setForm} contacts={contacts} />
+              <PeticionForm form={form} onChange={setForm} contacts={contacts} empresas={empresas} />
               {formError && <p className="text-xs text-rose-600">{formError}</p>}
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100">

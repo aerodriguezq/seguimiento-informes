@@ -12,6 +12,21 @@ function computeFechaPlazo(fechaRadicacion: string | null, plazoRespuesta: numbe
   return d.toISOString().slice(0, 10);
 }
 
+// Radicado automático: AÑO-EMPRESA-CONSECUTIVO (ej. 2026-CRI-00001). El
+// consecutivo reinicia cada año por empresa. Se usa el código corto de la
+// empresa (empresas.codigo); si no tiene código configurado, se cae al
+// nombre completo en mayúsculas sin espacios, para no dejar el radicado sin
+// esa parte.
+async function generateRadicado(sql: any, empresaId: number, year: number): Promise<string> {
+  const [empresa] = (await sql`SELECT nombre AS name, codigo AS code FROM empresas WHERE empresa_id = ${empresaId}`) as any[];
+  const empresaTag = (empresa?.code || empresa?.name || 'GEN').toString().trim().toUpperCase().replace(/\s+/g, '');
+  const [{ count }] = (await sql`
+    SELECT COUNT(*) AS count FROM peticiones WHERE empresa_id = ${empresaId} AND EXTRACT(YEAR FROM created_at) = ${year}
+  `) as any[];
+  const consecutive = Number(count) + 1;
+  return `${year}-${empresaTag}-${String(consecutive).padStart(5, '0')}`;
+}
+
 async function fetchResponsables(sql: any, peticionId: number) {
   const rows = (await sql`
     SELECT c.contacto_id AS id, c.nombre AS name, COALESCE(c.email, '') AS email
@@ -223,13 +238,15 @@ export default async function handler(
 
     if (request.method === 'GET' && request.query.kind === 'peticiones') {
       const rows = (await sql`
-        SELECT peticion_id AS id, radicado, TO_CHAR(fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
-          peticionario, asunto, area_consolida AS "areaConsolida", correo_persona_asignada AS "correoPersonaAsignada",
-          areas_intervienen AS "areasIntervienen", plazo_respuesta AS "plazoRespuesta",
-          TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
-          TO_CHAR(fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
-          created_at AS "createdAt"
-        FROM peticiones ORDER BY COALESCE(fecha_radicacion, created_at::date) DESC, peticion_id DESC
+        SELECT p.peticion_id AS id, p.radicado, p.empresa_id AS "empresaId", COALESCE(e.nombre, '') AS "empresaName",
+          TO_CHAR(p.fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
+          p.peticionario, p.asunto, p.area_consolida AS "areaConsolida", p.correo_persona_asignada AS "correoPersonaAsignada",
+          p.areas_intervienen AS "areasIntervienen", p.plazo_respuesta AS "plazoRespuesta",
+          TO_CHAR(p.fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
+          TO_CHAR(p.fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
+          p.created_at AS "createdAt"
+        FROM peticiones p LEFT JOIN empresas e ON e.empresa_id = p.empresa_id
+        ORDER BY COALESCE(p.fecha_radicacion, p.created_at::date) DESC, p.peticion_id DESC
       `) as any[];
       const responsableRows = (await sql`
         SELECT pr.peticion_id AS "peticionId", c.contacto_id AS id, c.nombre AS name, COALESCE(c.email, '') AS email
@@ -248,7 +265,7 @@ export default async function handler(
         ? await sql`SELECT email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions FROM usuarios_autorizados ORDER BY created_at ASC`
         : [];
       const sweeps = isAdmin ? await fetchSweepConfig(sql) : [];
-      const [reportTypes, contacts, steps, stepContacts] = await Promise.all([
+      const [reportTypes, contacts, steps, stepContacts, empresas] = await Promise.all([
         sql`
           SELECT tipo_informe_id AS id, COALESCE(codigo, '') AS code, nombre AS name,
             periodicidad AS periodicity, descripcion AS description, activo AS active
@@ -270,6 +287,7 @@ export default async function handler(
           FROM tipo_informe_pasos ORDER BY tipo_informe_id ASC, orden ASC
         `,
         sql`SELECT paso_id AS "stepId", contacto_id AS "contactId" FROM tipo_informe_paso_contacto`,
+        sql`SELECT empresa_id AS id, nombre AS name, COALESCE(codigo, '') AS code FROM empresas ORDER BY nombre ASC`,
       ]);
 
       const reportTypeSteps = (steps as any[]).map((step) => ({
@@ -277,7 +295,7 @@ export default async function handler(
         contactIds: (stepContacts as any[]).filter((sc) => sc.stepId === step.id).map((sc) => String(sc.contactId)),
       }));
 
-      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, isAdmin }, meta: {}, errors: [] });
+      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, isAdmin, empresas }, meta: {}, errors: [] });
     }
 
     if (request.method === 'PATCH') {
@@ -342,6 +360,7 @@ export default async function handler(
         const has = (key: string) => Object.prototype.hasOwnProperty.call(body.data ?? {}, key);
         const d = body.data ?? {};
         const nextRadicado = has('radicado') ? String(d.radicado ?? '').trim() : current[0].radicado;
+        const nextEmpresaId = has('empresaId') ? (Number.isInteger(Number(d.empresaId)) && Number(d.empresaId) > 0 ? Number(d.empresaId) : null) : current[0].empresa_id;
         const nextFechaRadicacion = has('fechaRadicacion') ? (d.fechaRadicacion || null) : current[0].fecha_radicacion;
         const nextPeticionario = has('peticionario') ? String(d.peticionario ?? '').trim() : current[0].peticionario;
         const nextAsunto = has('asunto') ? String(d.asunto ?? '').trim() : current[0].asunto;
@@ -356,7 +375,7 @@ export default async function handler(
 
         const rows = (await sql`
           UPDATE peticiones SET
-            radicado = ${nextRadicado}, fecha_radicacion = ${nextFechaRadicacion}, peticionario = ${nextPeticionario},
+            radicado = ${nextRadicado}, empresa_id = ${nextEmpresaId}, fecha_radicacion = ${nextFechaRadicacion}, peticionario = ${nextPeticionario},
             asunto = ${nextAsunto}, area_consolida = ${nextAreaConsolida}, correo_persona_asignada = ${nextCorreo},
             areas_intervienen = ${nextAreasIntervienen}, plazo_respuesta = ${nextPlazoRespuesta},
             fecha_plazo_respuesta = ${nextFechaPlazo}, fecha_radicado_respuesta = ${nextFechaRadicadoRespuesta},
@@ -364,7 +383,7 @@ export default async function handler(
             ultimo_recordatorio_en = ${plazoChanged ? null : current[0].ultimo_recordatorio_en},
             updated_at = NOW()
           WHERE peticion_id = ${peticionId}
-          RETURNING peticion_id AS id, radicado, TO_CHAR(fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
+          RETURNING peticion_id AS id, radicado, empresa_id AS "empresaId", TO_CHAR(fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
             peticionario, asunto, area_consolida AS "areaConsolida", correo_persona_asignada AS "correoPersonaAsignada",
             areas_intervienen AS "areasIntervienen", plazo_respuesta AS "plazoRespuesta",
             TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
@@ -515,27 +534,30 @@ export default async function handler(
       if (!(await canEditModuleRequest(request, sql, 'peticiones'))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Peticiones.'] });
       }
-      const radicado = String(data?.radicado ?? '').trim();
       const asunto = String(data?.asunto ?? '').trim();
-      if (!radicado || !asunto) {
-        return response.status(400).json({ data: null, meta: {}, errors: ['El radicado y el asunto son obligatorios.'] });
+      const empresaId = Number(data?.empresaId);
+      if (!asunto || !Number.isInteger(empresaId) || empresaId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El asunto y la empresa son obligatorios.'] });
       }
       const fechaRadicacion = data?.fechaRadicacion || null;
       const plazoRespuesta = data?.plazoRespuesta === null || data?.plazoRespuesta === undefined || data?.plazoRespuesta === '' ? null : Number(data.plazoRespuesta);
       const fechaPlazo = computeFechaPlazo(fechaRadicacion, plazoRespuesta);
+      // Año que usa el radicado: el de la fecha de radicación si se dio, si no el de hoy.
+      const radicadoYear = fechaRadicacion ? Number(fechaRadicacion.slice(0, 4)) : new Date().getUTCFullYear();
+      const radicado = await generateRadicado(sql, empresaId, radicadoYear);
 
       const rows = (await sql`
         INSERT INTO peticiones (
-          radicado, fecha_radicacion, peticionario, asunto, area_consolida,
+          radicado, empresa_id, fecha_radicacion, peticionario, asunto, area_consolida,
           correo_persona_asignada, areas_intervienen, plazo_respuesta, fecha_plazo_respuesta, fecha_radicado_respuesta
         )
         VALUES (
-          ${radicado}, ${fechaRadicacion}, ${String(data?.peticionario ?? '').trim()}, ${asunto},
+          ${radicado}, ${empresaId}, ${fechaRadicacion}, ${String(data?.peticionario ?? '').trim()}, ${asunto},
           ${String(data?.areaConsolida ?? '').trim()}, ${String(data?.correoPersonaAsignada ?? '').trim()},
           ${String(data?.areasIntervienen ?? '').trim()}, ${plazoRespuesta}, ${fechaPlazo},
           ${data?.fechaRadicadoRespuesta || null}
         )
-        RETURNING peticion_id AS id, radicado, TO_CHAR(fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
+        RETURNING peticion_id AS id, radicado, empresa_id AS "empresaId", TO_CHAR(fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
           peticionario, asunto, area_consolida AS "areaConsolida", correo_persona_asignada AS "correoPersonaAsignada",
           areas_intervienen AS "areasIntervienen", plazo_respuesta AS "plazoRespuesta",
           TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
