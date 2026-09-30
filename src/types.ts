@@ -173,6 +173,11 @@ export interface Empresa {
   code: string;
 }
 
+export interface AreaConsolida {
+  id: string;
+  name: string;
+}
+
 export interface Peticion {
   id: string;
   radicado: string;

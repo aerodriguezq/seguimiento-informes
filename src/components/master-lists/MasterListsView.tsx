@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ReportType, Contact, ReportStatus, ReportTypeStep } from '../../types';
+import { ReportType, Contact, ReportStatus, ReportTypeStep, AreaConsolida } from '../../types';
 import { STATUS_SEQUENCE, MONTHS_LIST, YEARS_LIST } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import {
@@ -22,6 +22,7 @@ import {
   Flag,
   ChevronUp,
   ChevronDown,
+  Briefcase,
 } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 
@@ -34,6 +35,9 @@ interface MasterListsViewProps {
   onAddReportTypeStep: (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => Promise<void>;
   onDeleteReportTypeStep: (stepId: string) => Promise<void>;
   onMoveReportTypeStep: (stepId: string, direction: 'up' | 'down') => Promise<void>;
+  areasConsolida: AreaConsolida[];
+  onAddAreaConsolida: (name: string) => Promise<void>;
+  onDeleteAreaConsolida: (areaId: string) => Promise<void>;
 }
 
 export const MasterListsView: React.FC<MasterListsViewProps> = ({
@@ -45,6 +49,9 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   onAddReportTypeStep,
   onDeleteReportTypeStep,
   onMoveReportTypeStep,
+  areasConsolida,
+  onAddAreaConsolida,
+  onDeleteAreaConsolida,
 }) => {
   const { canEdit } = useAuth();
   const canEditLists = canEdit('lists');
@@ -59,7 +66,36 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [newStepKeywords, setNewStepKeywords] = useState('');
   const [stepError, setStepError] = useState('');
   const [isSavingStep, setIsSavingStep] = useState(false);
-  const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'statuses' | 'periods'>('types');
+  const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'statuses' | 'periods' | 'areas'>('types');
+  const [newAreaName, setNewAreaName] = useState('');
+  const [areaError, setAreaError] = useState('');
+  const [isSavingArea, setIsSavingArea] = useState(false);
+  const [deletingAreaId, setDeletingAreaId] = useState<string | null>(null);
+
+  const handleAddArea = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAreaName.trim()) return;
+    setIsSavingArea(true);
+    setAreaError('');
+    try {
+      await onAddAreaConsolida(newAreaName.trim());
+      setNewAreaName('');
+    } catch (error) {
+      setAreaError(error instanceof Error ? error.message : 'No fue posible agregar el área.');
+    } finally {
+      setIsSavingArea(false);
+    }
+  };
+
+  const handleDeleteArea = async (areaId: string) => {
+    if (!window.confirm('¿Eliminar esta área? Las peticiones que ya la usan conservan el texto, solo deja de aparecer en el desplegable.')) return;
+    setDeletingAreaId(areaId);
+    try {
+      await onDeleteAreaConsolida(areaId);
+    } finally {
+      setDeletingAreaId(null);
+    }
+  };
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -258,7 +294,78 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
           <Calendar className="w-4 h-4" />
           <span>Períodos & Vigencias</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveTab('areas'); setSearchTerm(''); }}
+          className={`px-4 py-2.5 font-bold border-b-2 transition-colors inline-flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'areas'
+              ? 'border-indigo-600 text-indigo-600'
+              : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <Briefcase className="w-4 h-4" />
+          <span>Áreas Consolida ({areasConsolida.length})</span>
+        </button>
       </div>
+
+      {/* Tab: Áreas que Consolidan (Peticiones) */}
+      {activeTab === 'areas' && (
+        <div className="space-y-3">
+          <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-xs">
+            <p className="text-xs text-slate-500 mb-2">Lista desplegable de "Área Consolida" al crear una Petición.</p>
+            {canEditLists && (
+              <form onSubmit={handleAddArea} className="flex items-end gap-2">
+                <div className="flex-1">
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Nueva área</label>
+                  <input
+                    type="text"
+                    value={newAreaName}
+                    onChange={(e) => setNewAreaName(e.target.value)}
+                    placeholder="Ej: Comunicaciones"
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSavingArea || !newAreaName.trim()}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  {isSavingArea ? 'Agregando...' : 'Agregar'}
+                </button>
+              </form>
+            )}
+            {areaError && <p className="mt-2 text-xs font-medium text-rose-700">{areaError}</p>}
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs divide-y divide-slate-100">
+            {areasConsolida.length === 0 ? (
+              <div className="flex min-h-24 flex-col items-center justify-center px-6 text-center">
+                <Briefcase className="mb-2 h-5 w-5 text-slate-300" />
+                <p className="text-sm font-semibold text-slate-700">Sin áreas configuradas todavía</p>
+              </div>
+            ) : (
+              areasConsolida.map((a) => (
+                <div key={a.id} className="flex items-center justify-between px-4 py-3 text-xs">
+                  <span className="font-semibold text-slate-800">{a.name}</span>
+                  {canEditLists && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteArea(a.id)}
+                      disabled={deletingAreaId === a.id}
+                      className="text-slate-400 hover:text-rose-600 disabled:opacity-50"
+                      title="Eliminar área"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Tab: Tipos de Informe */}
       {activeTab === 'types' && (

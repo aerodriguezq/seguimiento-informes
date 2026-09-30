@@ -12,6 +12,7 @@ import {
   ReportAttachment,
   ReportTypeStep,
   Empresa,
+  AreaConsolida,
 } from './types';
 import {
   getSemaforoStatus,
@@ -121,6 +122,7 @@ export default function App() {
   const [sweeps, setSweeps] = useState<SweepConfig[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const [areasConsolida, setAreasConsolida] = useState<AreaConsolida[]>([]);
   const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
@@ -224,6 +226,7 @@ export default function App() {
         setSweeps(catalogsPayload.data.sweeps || []);
         setContacts(catalogsPayload.data.contacts);
         setEmpresas(catalogsPayload.data.empresas || []);
+        setAreasConsolida(catalogsPayload.data.areasConsolida || []);
         setReports(loadedReports);
         setAlerts(loadedAlerts);
         setCurrentProjectId((currentId) => currentId || loadedProjects[0]?.id || '');
@@ -660,6 +663,35 @@ export default function App() {
     showToast(`Paso "${step.name}" agregado al flujo.`, 'success');
   };
 
+  const handleAddAreaConsolida = async (name: string) => {
+    try {
+      const response = await fetch('/api/catalogs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'areaConsolida', data: { name } }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible agregar el área.');
+      setAreasConsolida((prev) => [...prev, payload.data].sort((a, b) => a.name.localeCompare(b.name)));
+      showToast(`Área "${name}" agregada.`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible agregar el área.', 'info');
+      throw error;
+    }
+  };
+
+  const handleDeleteAreaConsolida = async (areaId: string) => {
+    try {
+      const response = await fetch(`/api/catalogs?kind=areaConsolida&id=${encodeURIComponent(areaId)}`, { method: 'DELETE' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el área.');
+      setAreasConsolida((prev) => prev.filter((a) => a.id !== areaId));
+      showToast('Área eliminada.', 'info');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible eliminar el área.', 'info');
+    }
+  };
+
   const handleDeleteReportTypeStep = async (stepId: string) => {
     try {
       const response = await fetch(`/api/catalogs?stepId=${encodeURIComponent(stepId)}`, { method: 'DELETE' });
@@ -937,6 +969,9 @@ export default function App() {
               onAddReportTypeStep={handleAddReportTypeStep}
               onDeleteReportTypeStep={handleDeleteReportTypeStep}
               onMoveReportTypeStep={handleMoveReportTypeStep}
+              areasConsolida={areasConsolida}
+              onAddAreaConsolida={handleAddAreaConsolida}
+              onDeleteAreaConsolida={handleDeleteAreaConsolida}
             />
           )}
 
@@ -947,7 +982,7 @@ export default function App() {
           )}
 
           {!isLoadingWorkspace && !workspaceError && activeModule === 'peticiones' && (
-            <PeticionesView contacts={contacts} empresas={empresas} />
+            <PeticionesView contacts={contacts} empresas={empresas} areasConsolida={areasConsolida} />
           )}
 
           {/* M09: Usuarios Autorizados (solo administradores) */}

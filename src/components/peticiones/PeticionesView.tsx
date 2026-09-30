@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Inbox, Plus, Pencil, Trash2, X, Search, BellRing } from 'lucide-react';
-import { Contact, Empresa, Peticion, SemaforoStatus } from '../../types';
+import { AreaConsolida, Contact, Empresa, Peticion, SemaforoStatus } from '../../types';
 import { SemaforoBadge } from '../common/SemaforoBadge';
 import { useAuth } from '../../auth/AuthContext';
 
@@ -115,7 +115,8 @@ const PeticionForm: React.FC<{
   onChange: (form: PeticionFormState) => void;
   contacts: Contact[];
   empresas: Empresa[];
-}> = ({ form, onChange, contacts, empresas }) => {
+  areasConsolida: AreaConsolida[];
+}> = ({ form, onChange, contacts, empresas, areasConsolida }) => {
   const set = (key: keyof PeticionFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     onChange({ ...form, [key]: e.target.value });
 
@@ -152,7 +153,15 @@ const PeticionForm: React.FC<{
       </div>
       <div>
         <label className="block text-[11px] font-semibold text-slate-700 mb-1">{FIELD_LABEL.areaConsolida}</label>
-        <input value={form.areaConsolida} onChange={set('areaConsolida')} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600" />
+        <select value={form.areaConsolida} onChange={set('areaConsolida')} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600 bg-white">
+          <option value="">Selecciona un área...</option>
+          {areasConsolida.map((a) => (
+            <option key={a.id} value={a.name}>{a.name}</option>
+          ))}
+          {form.areaConsolida && !areasConsolida.some((a) => a.name === form.areaConsolida) && (
+            <option value={form.areaConsolida}>{form.areaConsolida} (no está en la lista)</option>
+          )}
+        </select>
       </div>
       <div className="sm:col-span-2">
         <label className="block text-[11px] font-semibold text-slate-700 mb-1">{FIELD_LABEL.areasIntervienen}</label>
@@ -200,7 +209,7 @@ const PeticionForm: React.FC<{
   );
 };
 
-export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[] }> = ({ contacts, empresas }) => {
+export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]; areasConsolida: AreaConsolida[] }> = ({ contacts, empresas, areasConsolida }) => {
   const { canEdit } = useAuth();
   const editable = canEdit('peticiones');
 
@@ -471,7 +480,7 @@ export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]
               </button>
             </div>
             <div className="p-5 space-y-3">
-              <PeticionForm form={form} onChange={setForm} contacts={contacts} empresas={empresas} />
+              <PeticionForm form={form} onChange={setForm} contacts={contacts} empresas={empresas} areasConsolida={areasConsolida} />
               {formError && <p className="text-xs text-rose-600">{formError}</p>}
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100">

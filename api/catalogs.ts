@@ -199,6 +199,16 @@ export default async function handler(
         return response.status(200).json({ data: deletedUser[0], meta: {}, errors: [] });
       }
 
+      if (request.query.kind === 'areaConsolida') {
+        const areaId = Number(request.query.id);
+        if (!Number.isInteger(areaId) || areaId <= 0) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id del área es obligatorio.'] });
+        }
+        const deletedArea = await sql`DELETE FROM areas_consolida WHERE area_id = ${areaId} RETURNING area_id AS id`;
+        if (!deletedArea[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Área no encontrada.'] });
+        return response.status(200).json({ data: deletedArea[0], meta: {}, errors: [] });
+      }
+
       const stepId = Number(request.query.stepId);
       if (!Number.isInteger(stepId) || stepId <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El id del paso es obligatorio.'] });
@@ -265,7 +275,7 @@ export default async function handler(
         ? await sql`SELECT email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions FROM usuarios_autorizados ORDER BY created_at ASC`
         : [];
       const sweeps = isAdmin ? await fetchSweepConfig(sql) : [];
-      const [reportTypes, contacts, steps, stepContacts, empresas] = await Promise.all([
+      const [reportTypes, contacts, steps, stepContacts, empresas, areasConsolida] = await Promise.all([
         sql`
           SELECT tipo_informe_id AS id, COALESCE(codigo, '') AS code, nombre AS name,
             periodicidad AS periodicity, descripcion AS description, activo AS active
@@ -288,6 +298,7 @@ export default async function handler(
         `,
         sql`SELECT paso_id AS "stepId", contacto_id AS "contactId" FROM tipo_informe_paso_contacto`,
         sql`SELECT empresa_id AS id, nombre AS name, COALESCE(codigo, '') AS code FROM empresas ORDER BY nombre ASC`,
+        sql`SELECT area_id AS id, nombre AS name FROM areas_consolida ORDER BY nombre ASC`,
       ]);
 
       const reportTypeSteps = (steps as any[]).map((step) => ({
@@ -295,7 +306,7 @@ export default async function handler(
         contactIds: (stepContacts as any[]).filter((sc) => sc.stepId === step.id).map((sc) => String(sc.contactId)),
       }));
 
-      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, isAdmin, empresas }, meta: {}, errors: [] });
+      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, isAdmin, empresas, areasConsolida }, meta: {}, errors: [] });
     }
 
     if (request.method === 'PATCH') {
@@ -572,6 +583,25 @@ export default async function handler(
       const responsables = await fetchResponsables(sql, peticionId);
       await notifyNewPeticionResponsables(sql, { ...rows[0], id: peticionId }, responsables, responsables.map((r) => r.id));
       return response.status(201).json({ data: { ...rows[0], responsables }, meta: {}, errors: [] });
+    }
+
+    if (kind === 'areaConsolida') {
+      const name = String(data?.name ?? '').trim();
+      if (!name) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El nombre del área es obligatorio.'] });
+      }
+      try {
+        const rows = await sql`
+          INSERT INTO areas_consolida (nombre) VALUES (${name})
+          RETURNING area_id AS id, nombre AS name
+        `;
+        return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+      } catch (error) {
+        if ((error as { code?: string })?.code === '23505') {
+          return response.status(409).json({ data: null, meta: {}, errors: ['Ya existe un área con ese nombre.'] });
+        }
+        throw error;
+      }
     }
 
     if (kind === 'reportType') {
