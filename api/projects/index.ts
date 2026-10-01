@@ -53,7 +53,7 @@ async function fetchSeguimiento(sql: SqlClient, projectId: number) {
   const [config] = (await sql`
     SELECT spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid",
       ultima_importacion AS "lastImportAt", ultimo_error AS "lastError",
-      insumos_columnas_visibles AS "insumosColumnasVisibles"
+      insumos_columnas_visibles AS "insumosColumnasVisibles", drive_folder_url AS "driveFolderUrl"
     FROM seguimiento_config WHERE proyecto_id = ${projectId}
   `) as any[];
 
@@ -378,6 +378,27 @@ export default async function handler(
       if (rows.length === 0) {
         return response.status(404).json({ data: null, meta: {}, errors: ['Este proyecto no tiene configurado un cronograma de Seguimiento.'] });
       }
+      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'POST' && request.body?.kind === 'seguimientoDriveFolder') {
+      if (!(await canEditModuleRequest(request, sql, 'seguimiento'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Seguimiento.'] });
+      }
+      const projectId = Number(request.body?.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      const driveFolderUrl = String(request.body?.driveFolderUrl ?? '').trim();
+      if (!driveFolderUrl) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El link de la carpeta de Drive es obligatorio.'] });
+      }
+      const rows = await sql`
+        INSERT INTO seguimiento_config (proyecto_id, drive_folder_url)
+        VALUES (${projectId}, ${driveFolderUrl})
+        ON CONFLICT (proyecto_id) DO UPDATE SET drive_folder_url = EXCLUDED.drive_folder_url
+        RETURNING drive_folder_url AS "driveFolderUrl"
+      `;
       return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
     }
 
