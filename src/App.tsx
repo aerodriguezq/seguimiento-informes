@@ -13,6 +13,7 @@ import {
   ReportTypeStep,
   Empresa,
   AreaConsolida,
+  PeticionesConfig,
 } from './types';
 import {
   getSemaforoStatus,
@@ -123,6 +124,7 @@ export default function App() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [areasConsolida, setAreasConsolida] = useState<AreaConsolida[]>([]);
+  const [peticionesConfig, setPeticionesConfig] = useState<PeticionesConfig>({ driveRootFolderId: null, driveRootFolderUrl: null });
   const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
@@ -227,6 +229,7 @@ export default function App() {
         setContacts(catalogsPayload.data.contacts);
         setEmpresas(catalogsPayload.data.empresas || []);
         setAreasConsolida(catalogsPayload.data.areasConsolida || []);
+        setPeticionesConfig(catalogsPayload.data.peticionesConfig || { driveRootFolderId: null, driveRootFolderUrl: null });
         setReports(loadedReports);
         setAlerts(loadedAlerts);
         setCurrentProjectId((currentId) => currentId || loadedProjects[0]?.id || '');
@@ -692,6 +695,18 @@ export default function App() {
     }
   };
 
+  const handleSavePeticionesConfig = async (driveRootFolderUrl: string) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'peticionesConfig', data: { driveRootFolderUrl } }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar la carpeta de Drive.');
+    setPeticionesConfig(payload.data);
+    showToast('Carpeta raíz de Drive para Peticiones configurada.', 'success');
+  };
+
   const handleDeleteReportTypeStep = async (stepId: string) => {
     try {
       const response = await fetch(`/api/catalogs?stepId=${encodeURIComponent(stepId)}`, { method: 'DELETE' });
@@ -984,7 +999,13 @@ export default function App() {
           )}
 
           {!isLoadingWorkspace && !workspaceError && activeModule === 'peticiones' && (
-            <PeticionesView contacts={contacts} empresas={empresas} areasConsolida={areasConsolida} />
+            <PeticionesView
+              contacts={contacts}
+              empresas={empresas}
+              areasConsolida={areasConsolida}
+              peticionesConfig={peticionesConfig}
+              onSavePeticionesConfig={handleSavePeticionesConfig}
+            />
           )}
 
           {/* M09: Usuarios Autorizados (solo administradores) */}

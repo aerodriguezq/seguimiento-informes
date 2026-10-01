@@ -195,6 +195,17 @@ export interface Peticion {
   plazoRespuesta: number | null;
   fechaPlazoRespuesta: string | null;
   fechaRadicadoRespuesta: string | null;
+  observaciones: string;
+  driveFolderUrl: string | null;
+  documentoPeticionNombre: string | null;
+  documentoPeticionUrl: string | null;
+  documentoRespuestaNombre: string | null;
+  documentoRespuestaUrl: string | null;
   responsables: PeticionResponsable[];
   createdAt: string;
+}
+
+export interface PeticionesConfig {
+  driveRootFolderId: string | null;
+  driveRootFolderUrl: string | null;
 }

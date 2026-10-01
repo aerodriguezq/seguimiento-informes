@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { canEditModuleRequest } from '../server/admin-auth.js';
 import { sendEmail, buildPeticionAssignedEmailHtml } from '../server/google-gmail.js';
+import { ensureDriveFolder, uploadDriveFile, extractDriveFolderId } from '../server/google-drive.js';
 
 // fecha_plazo_respuesta siempre se recalcula a partir de fecha_radicacion +
 // plazo_respuesta (días calendario) — es un dato derivado, no editable a mano.
@@ -55,6 +56,7 @@ async function notifyNewPeticionResponsables(
   peticion: {
     id: number; radicado: string; asunto: string; peticionario: string; areaConsolida: string;
     plazoRespuesta: number | null; fechaPlazoRespuesta: string | null; correoPersonaAsignada: string | null;
+    observaciones?: string | null;
   },
   allResponsables: { id: string; name: string; email: string }[],
   newlyAssignedIds: string[],
@@ -73,6 +75,7 @@ async function notifyNewPeticionResponsables(
     areaConsolida: peticion.areaConsolida,
     plazoRespuesta: peticion.plazoRespuesta,
     fechaPlazoRespuesta: peticion.fechaPlazoRespuesta,
+    observaciones: peticion.observaciones,
     responsables: allResponsables.map((r) => r.name),
     actionUrl,
   });
@@ -254,6 +257,9 @@ export default async function handler(
           p.areas_intervienen AS "areasIntervienen", p.plazo_respuesta AS "plazoRespuesta",
           TO_CHAR(p.fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
           TO_CHAR(p.fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
+          p.observaciones, p.drive_folder_url AS "driveFolderUrl",
+          p.documento_peticion_nombre AS "documentoPeticionNombre", p.documento_peticion_drive_url AS "documentoPeticionUrl",
+          p.documento_respuesta_nombre AS "documentoRespuestaNombre", p.documento_respuesta_drive_url AS "documentoRespuestaUrl",
           p.created_at AS "createdAt"
         FROM peticiones p LEFT JOIN empresas e ON e.empresa_id = p.empresa_id
         ORDER BY COALESCE(p.fecha_radicacion, p.created_at::date) DESC, p.peticion_id DESC
@@ -275,7 +281,7 @@ export default async function handler(
         ? await sql`SELECT email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions FROM usuarios_autorizados ORDER BY created_at ASC`
         : [];
       const sweeps = isAdmin ? await fetchSweepConfig(sql) : [];
-      const [reportTypes, contacts, steps, stepContacts, empresas, areasConsolida] = await Promise.all([
+      const [reportTypes, contacts, steps, stepContacts, empresas, areasConsolida, peticionesConfigRows] = await Promise.all([
         sql`
           SELECT tipo_informe_id AS id, COALESCE(codigo, '') AS code, nombre AS name,
             periodicidad AS periodicity, descripcion AS description, activo AS active
@@ -299,14 +305,16 @@ export default async function handler(
         sql`SELECT paso_id AS "stepId", contacto_id AS "contactId" FROM tipo_informe_paso_contacto`,
         sql`SELECT empresa_id AS id, nombre AS name, COALESCE(codigo, '') AS code FROM empresas ORDER BY nombre ASC`,
         sql`SELECT area_id AS id, nombre AS name FROM areas_consolida ORDER BY nombre ASC`,
+        sql`SELECT drive_root_folder_id AS "driveRootFolderId", drive_root_folder_url AS "driveRootFolderUrl" FROM peticiones_config WHERE id = 1`,
       ]);
+      const peticionesConfig = (peticionesConfigRows as any[])[0] ?? { driveRootFolderId: null, driveRootFolderUrl: null };
 
       const reportTypeSteps = (steps as any[]).map((step) => ({
         ...step,
         contactIds: (stepContacts as any[]).filter((sc) => sc.stepId === step.id).map((sc) => String(sc.contactId)),
       }));
 
-      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, isAdmin, empresas, areasConsolida }, meta: {}, errors: [] });
+      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, isAdmin, empresas, areasConsolida, peticionesConfig }, meta: {}, errors: [] });
     }
 
     if (request.method === 'PATCH') {
@@ -402,6 +410,7 @@ export default async function handler(
         const nextAreasIntervienen = has('areasIntervienen') ? String(d.areasIntervienen ?? '').trim() : current[0].areas_intervienen;
         const nextPlazoRespuesta = has('plazoRespuesta') ? (d.plazoRespuesta === null || d.plazoRespuesta === '' ? null : Number(d.plazoRespuesta)) : current[0].plazo_respuesta;
         const nextFechaRadicadoRespuesta = has('fechaRadicadoRespuesta') ? (d.fechaRadicadoRespuesta || null) : current[0].fecha_radicado_respuesta;
+        const nextObservaciones = has('observaciones') ? String(d.observaciones ?? '').trim() : current[0].observaciones;
         const nextFechaPlazo = computeFechaPlazo(nextFechaRadicacion, nextPlazoRespuesta);
         // Si el plazo cambió, los recordatorios ya enviados quedan obsoletos.
         const plazoChanged = nextFechaPlazo !== current[0].fecha_plazo_respuesta;
@@ -412,6 +421,7 @@ export default async function handler(
             asunto = ${nextAsunto}, area_consolida = ${nextAreaConsolida}, correo_persona_asignada = ${nextCorreo},
             areas_intervienen = ${nextAreasIntervienen}, plazo_respuesta = ${nextPlazoRespuesta},
             fecha_plazo_respuesta = ${nextFechaPlazo}, fecha_radicado_respuesta = ${nextFechaRadicadoRespuesta},
+            observaciones = ${nextObservaciones},
             ultimo_recordatorio_nivel = ${plazoChanged ? null : current[0].ultimo_recordatorio_nivel},
             ultimo_recordatorio_en = ${plazoChanged ? null : current[0].ultimo_recordatorio_en},
             updated_at = NOW()
@@ -421,6 +431,9 @@ export default async function handler(
             areas_intervienen AS "areasIntervienen", plazo_respuesta AS "plazoRespuesta",
             TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
             TO_CHAR(fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
+            observaciones, drive_folder_url AS "driveFolderUrl",
+            documento_peticion_nombre AS "documentoPeticionNombre", documento_peticion_drive_url AS "documentoPeticionUrl",
+            documento_respuesta_nombre AS "documentoRespuestaNombre", documento_respuesta_drive_url AS "documentoRespuestaUrl",
             created_at AS "createdAt"
         `) as any[];
 
@@ -582,19 +595,23 @@ export default async function handler(
       const rows = (await sql`
         INSERT INTO peticiones (
           radicado, empresa_id, fecha_radicacion, peticionario, asunto, area_consolida,
-          correo_persona_asignada, areas_intervienen, plazo_respuesta, fecha_plazo_respuesta, fecha_radicado_respuesta
+          correo_persona_asignada, areas_intervienen, plazo_respuesta, fecha_plazo_respuesta, fecha_radicado_respuesta,
+          observaciones
         )
         VALUES (
           ${radicado}, ${empresaId}, ${fechaRadicacion}, ${String(data?.peticionario ?? '').trim()}, ${asunto},
           ${String(data?.areaConsolida ?? '').trim()}, ${String(data?.correoPersonaAsignada ?? '').trim()},
           ${String(data?.areasIntervienen ?? '').trim()}, ${plazoRespuesta}, ${fechaPlazo},
-          ${data?.fechaRadicadoRespuesta || null}
+          ${data?.fechaRadicadoRespuesta || null}, ${String(data?.observaciones ?? '').trim()}
         )
         RETURNING peticion_id AS id, radicado, empresa_id AS "empresaId", TO_CHAR(fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
           peticionario, asunto, area_consolida AS "areaConsolida", correo_persona_asignada AS "correoPersonaAsignada",
           areas_intervienen AS "areasIntervienen", plazo_respuesta AS "plazoRespuesta",
           TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
           TO_CHAR(fecha_radicado_respuesta, 'YYYY-MM-DD') AS "fechaRadicadoRespuesta",
+          observaciones, drive_folder_url AS "driveFolderUrl",
+          documento_peticion_nombre AS "documentoPeticionNombre", documento_peticion_drive_url AS "documentoPeticionUrl",
+          documento_respuesta_nombre AS "documentoRespuestaNombre", documento_respuesta_drive_url AS "documentoRespuestaUrl",
           created_at AS "createdAt"
       `) as any[];
       const peticionId = rows[0].id;
@@ -605,6 +622,89 @@ export default async function handler(
       const responsables = await fetchResponsables(sql, peticionId);
       await notifyNewPeticionResponsables(sql, { ...rows[0], id: peticionId }, responsables, responsables.map((r) => r.id));
       return response.status(201).json({ data: { ...rows[0], responsables }, meta: {}, errors: [] });
+    }
+
+    if (kind === 'peticionesConfig') {
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede configurar la carpeta de Drive de Peticiones.'] });
+      }
+      const rawUrl = String(data?.driveRootFolderUrl ?? '').trim();
+      const folderId = extractDriveFolderId(rawUrl);
+      if (!folderId) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Pega un link válido de carpeta de Drive (o su id).'] });
+      }
+      const rows = await sql`
+        INSERT INTO peticiones_config (id, drive_root_folder_id, drive_root_folder_url)
+        VALUES (1, ${folderId}, ${rawUrl})
+        ON CONFLICT (id) DO UPDATE SET drive_root_folder_id = EXCLUDED.drive_root_folder_id, drive_root_folder_url = EXCLUDED.drive_root_folder_url
+        RETURNING drive_root_folder_id AS "driveRootFolderId", drive_root_folder_url AS "driveRootFolderUrl"
+      `;
+      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (kind === 'peticionDocument') {
+      if (!(await canEditModuleRequest(request, sql, 'peticiones'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Peticiones.'] });
+      }
+      const peticionId = Number(data?.peticionId);
+      const which = data?.which;
+      if (!Number.isInteger(peticionId) || peticionId <= 0 || (which !== 'peticion' && which !== 'respuesta')) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la petición y el tipo de documento (peticion/respuesta) son obligatorios.'] });
+      }
+      const fileName = String(data?.fileName ?? '').trim();
+      const mimeType = String(data?.mimeType ?? '').trim() || 'application/octet-stream';
+      const contentBase64 = String(data?.contentBase64 ?? '');
+      if (!fileName || !contentBase64) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El archivo es obligatorio.'] });
+      }
+      // ~4MB de archivo real en base64 (Vercel limita el body a ~4.5MB).
+      if (contentBase64.length > 5_800_000) {
+        return response.status(413).json({ data: null, meta: {}, errors: ['El archivo es demasiado grande (máx. ~4 MB).'] });
+      }
+
+      const [config] = (await sql`SELECT drive_root_folder_id AS "driveRootFolderId" FROM peticiones_config WHERE id = 1`) as any[];
+      if (!config?.driveRootFolderId) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Un administrador debe configurar primero la carpeta raíz de Drive para Peticiones.'] });
+      }
+      const [peticion] = (await sql`SELECT peticion_id AS id, radicado, drive_folder_id AS "driveFolderId" FROM peticiones WHERE peticion_id = ${peticionId}`) as any[];
+      if (!peticion) return response.status(404).json({ data: null, meta: {}, errors: ['Petición no encontrada.'] });
+
+      const accessToken = await getConnectedAccessToken(sql);
+      if (!accessToken) {
+        return response.status(503).json({ data: null, meta: {}, errors: ['Conecta una cuenta de Google (Fuentes Drive) para poder subir documentos.'] });
+      }
+
+      try {
+        let folderId = peticion.driveFolderId as string | null;
+        let folderUrl: string | null = null;
+        if (!folderId) {
+          const folder = await ensureDriveFolder(accessToken, config.driveRootFolderId, peticion.radicado);
+          folderId = folder.id;
+          folderUrl = `https://drive.google.com/drive/folders/${folder.id}`;
+          await sql`UPDATE peticiones SET drive_folder_id = ${folderId}, drive_folder_url = ${folderUrl} WHERE peticion_id = ${peticionId}`;
+        }
+
+        const uploaded = await uploadDriveFile(accessToken, folderId as string, fileName, mimeType, contentBase64);
+        const fileUrl = uploaded.webViewLink || `https://drive.google.com/file/d/${uploaded.id}/view`;
+
+        const rows =
+          which === 'peticion'
+            ? await sql`
+                UPDATE peticiones SET documento_peticion_nombre = ${fileName}, documento_peticion_drive_url = ${fileUrl}
+                WHERE peticion_id = ${peticionId}
+                RETURNING documento_peticion_nombre AS "documentoPeticionNombre", documento_peticion_drive_url AS "documentoPeticionUrl",
+                  drive_folder_url AS "driveFolderUrl"
+              `
+            : await sql`
+                UPDATE peticiones SET documento_respuesta_nombre = ${fileName}, documento_respuesta_drive_url = ${fileUrl}
+                WHERE peticion_id = ${peticionId}
+                RETURNING documento_respuesta_nombre AS "documentoRespuestaNombre", documento_respuesta_drive_url AS "documentoRespuestaUrl",
+                  drive_folder_url AS "driveFolderUrl"
+              `;
+        return response.status(200).json({ data: (rows as any[])[0], meta: {}, errors: [] });
+      } catch (error) {
+        return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible subir el documento a Drive.'] });
+      }
     }
 
     if (kind === 'areaConsolida') {

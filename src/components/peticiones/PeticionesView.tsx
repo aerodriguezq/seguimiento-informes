@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Inbox, Plus, Pencil, Trash2, X, Search, BellRing } from 'lucide-react';
-import { AreaConsolida, Contact, Empresa, Peticion, SemaforoStatus } from '../../types';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Inbox, Plus, Pencil, Trash2, X, Search, BellRing, FolderOpen, Upload, FileText, CheckCircle2, XCircle, FileSpreadsheet, Settings, Save } from 'lucide-react';
+import { AreaConsolida, Contact, Empresa, Peticion, PeticionesConfig, SemaforoStatus } from '../../types';
 import { SemaforoBadge } from '../common/SemaforoBadge';
 import { useAuth } from '../../auth/AuthContext';
 
@@ -14,6 +14,7 @@ type PeticionFormState = {
   areasIntervienen: string;
   plazoRespuesta: string;
   fechaRadicadoRespuesta: string;
+  observaciones: string;
   responsableIds: string[];
 };
 
@@ -27,6 +28,7 @@ const EMPTY_FORM: PeticionFormState = {
   areasIntervienen: '',
   plazoRespuesta: '',
   fechaRadicadoRespuesta: '',
+  observaciones: '',
   responsableIds: [],
 };
 
@@ -41,6 +43,7 @@ function formToPayload(form: PeticionFormState) {
     areasIntervienen: form.areasIntervienen.trim(),
     plazoRespuesta: form.plazoRespuesta === '' ? null : Number(form.plazoRespuesta),
     fechaRadicadoRespuesta: form.fechaRadicadoRespuesta || null,
+    observaciones: form.observaciones.trim(),
   };
 }
 
@@ -55,9 +58,31 @@ function peticionToForm(p: Peticion): PeticionFormState {
     areasIntervienen: p.areasIntervienen,
     plazoRespuesta: p.plazoRespuesta === null ? '' : String(p.plazoRespuesta),
     fechaRadicadoRespuesta: p.fechaRadicadoRespuesta ?? '',
+    observaciones: p.observaciones ?? '',
     responsableIds: p.responsables.map((r) => r.id),
   };
 }
+
+// Solo tiene sentido una vez que ya se registró la fecha de respuesta: si no
+// hay plazo definido, no se puede estar "fuera de tiempo" de nada.
+function computeResponseOnTime(p: Peticion): boolean {
+  if (!p.fechaRadicadoRespuesta) return true;
+  if (!p.fechaPlazoRespuesta) return true;
+  return p.fechaRadicadoRespuesta <= p.fechaPlazoRespuesta;
+}
+
+const ResponseStatusBadge: React.FC<{ onTime: boolean }> = ({ onTime }) =>
+  onTime ? (
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 whitespace-nowrap">
+      <CheckCircle2 className="w-3.5 h-3.5" />
+      Respondido a tiempo
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 whitespace-nowrap">
+      <XCircle className="w-3.5 h-3.5" />
+      Respondido fuera de tiempo
+    </span>
+  );
 
 // Mismos umbrales que el backend (server/google-gmail.ts /
 // api/alerts/index.ts): 5 días = verde, 3 días = amarillo, 2 días en
@@ -108,6 +133,7 @@ const FIELD_LABEL: Record<string, string> = {
   areasIntervienen: 'Áreas Intervienen',
   plazoRespuesta: 'Plazo Respuesta (días)',
   fechaRadicadoRespuesta: 'Fecha Radicado Respuesta',
+  observaciones: 'Observaciones',
 };
 
 const PeticionForm: React.FC<{
@@ -117,7 +143,7 @@ const PeticionForm: React.FC<{
   empresas: Empresa[];
   areasConsolida: AreaConsolida[];
 }> = ({ form, onChange, contacts, empresas, areasConsolida }) => {
-  const set = (key: keyof PeticionFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+  const set = (key: keyof PeticionFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     onChange({ ...form, [key]: e.target.value });
 
   const toggleResponsable = (contactId: string) => {
@@ -205,13 +231,31 @@ const PeticionForm: React.FC<{
         <label className="block text-[11px] font-semibold text-slate-700 mb-1">{FIELD_LABEL.fechaRadicadoRespuesta}</label>
         <input type="date" value={form.fechaRadicadoRespuesta} onChange={set('fechaRadicadoRespuesta')} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600" />
       </div>
+      <div className="sm:col-span-2">
+        <label className="block text-[11px] font-semibold text-slate-700 mb-1">{FIELD_LABEL.observaciones}</label>
+        <textarea
+          rows={3}
+          value={form.observaciones}
+          onChange={set('observaciones')}
+          placeholder="Notas internas sobre esta petición..."
+          className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600 resize-y"
+        />
+        <p className="mt-1 text-[10.5px] text-slate-400">Se incluyen en los correos de asignación y recordatorio de esta petición.</p>
+      </div>
     </div>
   );
 };
 
-export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]; areasConsolida: AreaConsolida[] }> = ({ contacts, empresas, areasConsolida }) => {
-  const { canEdit } = useAuth();
+export const PeticionesView: React.FC<{
+  contacts: Contact[];
+  empresas: Empresa[];
+  areasConsolida: AreaConsolida[];
+  peticionesConfig: PeticionesConfig;
+  onSavePeticionesConfig: (driveRootFolderUrl: string) => Promise<void>;
+}> = ({ contacts, empresas, areasConsolida, peticionesConfig, onSavePeticionesConfig }) => {
+  const { user, canEdit } = useAuth();
   const editable = canEdit('peticiones');
+  const isAdmin = !!user?.isAdmin;
 
   const [peticiones, setPeticiones] = useState<Peticion[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -226,6 +270,15 @@ export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [reminderState, setReminderState] = useState<Record<string, 'sending' | 'sent' | 'error'>>({});
+  const [uploadingWhich, setUploadingWhich] = useState<'peticion' | 'respuesta' | null>(null);
+  const [uploadError, setUploadError] = useState('');
+  const [driveFolderInput, setDriveFolderInput] = useState('');
+  const [isSavingDriveConfig, setIsSavingDriveConfig] = useState(false);
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [exportFrom, setExportFrom] = useState('');
+  const [exportTo, setExportTo] = useState('');
+  const peticionFileInputRef = useRef<HTMLInputElement>(null);
+  const respuestaFileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchPeticiones = async () => {
     try {
@@ -267,6 +320,7 @@ export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]
     setEditingRadicado(null);
     setForm({ ...EMPTY_FORM, correoPersonaAsignada: lastFromData || getLastCorreoAdicional() });
     setFormError('');
+    setUploadError('');
     setIsFormOpen(true);
   };
 
@@ -275,6 +329,7 @@ export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]
     setEditingRadicado(p.radicado);
     setForm(peticionToForm(p));
     setFormError('');
+    setUploadError('');
     setIsFormOpen(true);
   };
 
@@ -341,6 +396,117 @@ export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]
     }
   };
 
+  const editingPeticion = peticiones?.find((p) => p.id === editingId) ?? null;
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result ?? '');
+        resolve(result.slice(result.indexOf(',') + 1));
+      };
+      reader.onerror = () => reject(new Error('No fue posible leer el archivo.'));
+      reader.readAsDataURL(file);
+    });
+
+  const handleUploadDocument = async (which: 'peticion' | 'respuesta', file: File) => {
+    if (!editingId) return;
+    if (file.size > 4 * 1024 * 1024) {
+      setUploadError('El archivo es demasiado grande (máx. 4 MB).');
+      return;
+    }
+    setUploadingWhich(which);
+    setUploadError('');
+    try {
+      const contentBase64 = await fileToBase64(file);
+      const res = await fetch('/api/catalogs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'peticionDocument',
+          data: { peticionId: Number(editingId), which, fileName: file.name, mimeType: file.type, contentBase64 },
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible subir el documento.');
+      await fetchPeticiones();
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'No fue posible subir el documento.');
+    } finally {
+      setUploadingWhich(null);
+    }
+  };
+
+  const handleSaveDriveConfig = async () => {
+    if (!driveFolderInput.trim()) return;
+    setIsSavingDriveConfig(true);
+    try {
+      await onSavePeticionesConfig(driveFolderInput.trim());
+      setDriveFolderInput('');
+      setIsConfigOpen(false);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'No fue posible guardar la carpeta de Drive.');
+    } finally {
+      setIsSavingDriveConfig(false);
+    }
+  };
+
+  const handleExportExcel = async (range: { from: string; to: string } | null) => {
+    const XLSX = await import('xlsx');
+    const source = peticiones ?? [];
+    const rows = range
+      ? source.filter((p) => {
+          if (!p.fechaRadicacion) return false;
+          if (range.from && p.fechaRadicacion < range.from) return false;
+          if (range.to && p.fechaRadicacion > range.to) return false;
+          return true;
+        })
+      : source;
+
+    const data = rows.map((p) => {
+      const diasRespuesta =
+        p.fechaRadicacion && p.fechaRadicadoRespuesta
+          ? Math.round(
+              (new Date(`${p.fechaRadicadoRespuesta}T00:00:00`).getTime() - new Date(`${p.fechaRadicacion}T00:00:00`).getTime()) /
+                (1000 * 60 * 60 * 24),
+            )
+          : null;
+      const diferenciaPlazo =
+        p.fechaPlazoRespuesta && p.fechaRadicadoRespuesta
+          ? Math.round(
+              (new Date(`${p.fechaRadicadoRespuesta}T00:00:00`).getTime() - new Date(`${p.fechaPlazoRespuesta}T00:00:00`).getTime()) /
+                (1000 * 60 * 60 * 24),
+            )
+          : null;
+      return {
+        Radicado: p.radicado,
+        Empresa: p.empresaName,
+        'Fecha Radicación': p.fechaRadicacion ?? '',
+        Peticionario: p.peticionario,
+        Asunto: p.asunto,
+        'Área Consolida': p.areaConsolida,
+        Responsables: p.responsables.map((r) => r.name).join(', '),
+        'Plazo (días)': p.plazoRespuesta ?? '',
+        'Fecha Plazo Respuesta': p.fechaPlazoRespuesta ?? '',
+        'Fecha Radicado Respuesta': p.fechaRadicadoRespuesta ?? '',
+        'Días hasta la respuesta': diasRespuesta ?? '',
+        'Días de diferencia vs. plazo': diferenciaPlazo ?? '',
+        Estado: !p.fechaRadicadoRespuesta ? 'Pendiente' : computeResponseOnTime(p) ? 'Respondido a tiempo' : 'Respondido fuera de tiempo',
+        Observaciones: p.observaciones ?? '',
+      };
+    });
+
+    const sheet = XLSX.utils.json_to_sheet(data);
+    sheet['!cols'] = [
+      { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 22 }, { wch: 32 }, { wch: 16 }, { wch: 24 },
+      { wch: 10 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 24 }, { wch: 36 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, 'Peticiones');
+    const today = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `peticiones_tiempos_respuesta_${today}.xlsx`);
+  };
+
   return (
     <div className="mx-auto max-w-7xl space-y-4 pb-8">
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -367,6 +533,26 @@ export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]
                 className="w-full pl-7 pr-2 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
               />
             </div>
+            <button
+              type="button"
+              onClick={() => handleExportExcel(null)}
+              disabled={!peticiones || peticiones.length === 0}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg disabled:opacity-50"
+              title="Exportar todas las peticiones a Excel"
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5" />
+              Exportar
+            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setIsConfigOpen((v) => !v)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg"
+                title="Configurar carpeta raíz de Drive"
+              >
+                <Settings className="h-3.5 w-3.5" />
+              </button>
+            )}
             {editable && (
               <button
                 type="button"
@@ -378,6 +564,57 @@ export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]
               </button>
             )}
           </div>
+        </div>
+
+        {isAdmin && isConfigOpen && (
+          <div className="mx-4 mt-3 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
+            <div className="flex-1 min-w-64">
+              <label htmlFor="peticiones-drive-root" className="block text-[11px] font-semibold text-slate-700 mb-1">
+                Carpeta raíz de Drive para documentos de Peticiones
+              </label>
+              <input
+                id="peticiones-drive-root"
+                type="text"
+                value={driveFolderInput}
+                onChange={(e) => setDriveFolderInput(e.target.value)}
+                placeholder="https://drive.google.com/drive/folders/..."
+                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
+              />
+              <p className="mt-1 text-[10.5px] text-slate-500 font-mono">
+                Actual: {peticionesConfig.driveRootFolderUrl ?? '(sin configurar)'}
+              </p>
+              <p className="mt-1 text-[10.5px] text-slate-400">Por cada petición se crea una subcarpeta con su radicado, donde se guardan sus documentos.</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveDriveConfig}
+              disabled={isSavingDriveConfig || !driveFolderInput.trim()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
+            >
+              <Save className="h-3.5 w-3.5" />
+              {isSavingDriveConfig ? 'Guardando...' : 'Guardar'}
+            </button>
+          </div>
+        )}
+
+        <div className="mx-4 mt-3 flex flex-wrap items-end gap-2">
+          <div>
+            <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Exportar rango (Fecha Radicación)</label>
+            <input type="date" value={exportFrom} onChange={(e) => setExportFrom(e.target.value)} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600" />
+          </div>
+          <span className="pb-1.5 text-xs text-slate-400">a</span>
+          <div>
+            <input type="date" value={exportTo} onChange={(e) => setExportTo(e.target.value)} className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600" />
+          </div>
+          <button
+            type="button"
+            onClick={() => handleExportExcel({ from: exportFrom, to: exportTo })}
+            disabled={!peticiones || peticiones.length === 0 || (!exportFrom && !exportTo)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5" />
+            Exportar rango
+          </button>
         </div>
 
         {loadError && (
@@ -404,7 +641,7 @@ export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]
                   <th className="px-3 py-3">Plazo</th>
                   <th className="px-3 py-3">Fecha Plazo Respuesta</th>
                   <th className="px-3 py-3">Fecha Radicado Respuesta</th>
-                  <th className="px-3 py-3">Alerta Vencimiento</th>
+                  <th className="px-3 py-3">Estado</th>
                   <th className="px-4 py-3 text-right">Acciones</th>
                 </tr>
               </thead>
@@ -425,10 +662,19 @@ export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]
                       <td className="px-3 py-3 whitespace-nowrap text-slate-600">{fmtDate(p.fechaPlazoRespuesta)}</td>
                       <td className="px-3 py-3 whitespace-nowrap text-slate-600">{fmtDate(p.fechaRadicadoRespuesta)}</td>
                       <td className="px-3 py-3">
-                        <SemaforoBadge status={alert.status} daysRemaining={alert.daysRemaining} />
+                        {p.fechaRadicadoRespuesta ? (
+                          <ResponseStatusBadge onTime={computeResponseOnTime(p)} />
+                        ) : (
+                          <SemaforoBadge status={alert.status} daysRemaining={alert.daysRemaining} />
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {p.driveFolderUrl && (
+                            <a href={p.driveFolderUrl} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-teal-700" title="Abrir carpeta de Drive">
+                              <FolderOpen className="h-3.5 w-3.5" />
+                            </a>
+                          )}
                           {!p.fechaRadicadoRespuesta && (
                             <button
                               type="button"
@@ -482,6 +728,73 @@ export const PeticionesView: React.FC<{ contacts: Contact[]; empresas: Empresa[]
             <div className="p-5 space-y-3">
               <PeticionForm form={form} onChange={setForm} contacts={contacts} empresas={empresas} areasConsolida={areasConsolida} />
               {formError && <p className="text-xs text-rose-600">{formError}</p>}
+
+              {editingId && (
+                <div className="border-t border-slate-100 pt-3 space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Documentos</p>
+                  {!peticionesConfig.driveRootFolderId ? (
+                    <p className="text-[11px] italic text-slate-400">
+                      {isAdmin ? 'Configura primero la carpeta raíz de Drive (ícono de engranaje arriba).' : 'Un administrador debe configurar primero la carpeta de Drive.'}
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5">
+                        <p className="text-[11px] font-semibold text-slate-700">Documento de petición</p>
+                        {editingPeticion?.documentoPeticionUrl ? (
+                          <a href={editingPeticion.documentoPeticionUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[11px] text-teal-700 hover:underline truncate">
+                            <FileText className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{editingPeticion.documentoPeticionNombre}</span>
+                          </a>
+                        ) : (
+                          <p className="text-[11px] italic text-slate-400">Sin documento cargado.</p>
+                        )}
+                        <input
+                          ref={peticionFileInputRef}
+                          type="file"
+                          className="hidden"
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadDocument('peticion', f); e.target.value = ''; }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => peticionFileInputRef.current?.click()}
+                          disabled={uploadingWhich === 'peticion'}
+                          className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 hover:text-teal-700 disabled:opacity-50"
+                        >
+                          <Upload className="h-3.5 w-3.5" />
+                          {uploadingWhich === 'peticion' ? 'Subiendo...' : editingPeticion?.documentoPeticionUrl ? 'Reemplazar' : 'Subir documento'}
+                        </button>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5">
+                        <p className="text-[11px] font-semibold text-slate-700">Documento de respuesta</p>
+                        {editingPeticion?.documentoRespuestaUrl ? (
+                          <a href={editingPeticion.documentoRespuestaUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[11px] text-teal-700 hover:underline truncate">
+                            <FileText className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{editingPeticion.documentoRespuestaNombre}</span>
+                          </a>
+                        ) : (
+                          <p className="text-[11px] italic text-slate-400">Sin documento cargado.</p>
+                        )}
+                        <input
+                          ref={respuestaFileInputRef}
+                          type="file"
+                          className="hidden"
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadDocument('respuesta', f); e.target.value = ''; }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => respuestaFileInputRef.current?.click()}
+                          disabled={uploadingWhich === 'respuesta'}
+                          className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 hover:text-teal-700 disabled:opacity-50"
+                        >
+                          <Upload className="h-3.5 w-3.5" />
+                          {uploadingWhich === 'respuesta' ? 'Subiendo...' : editingPeticion?.documentoRespuestaUrl ? 'Reemplazar' : 'Subir documento'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {uploadError && <p className="text-xs text-rose-600">{uploadError}</p>}
+                </div>
+              )}
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100">
               <button type="button" onClick={() => setIsFormOpen(false)} className="px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700">

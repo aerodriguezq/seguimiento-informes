@@ -156,6 +156,7 @@ export function buildPeticionReminderEmailHtml(options: {
   areaConsolida: string;
   daysRemaining: number | null;
   fechaPlazoRespuesta: string | null;
+  observaciones?: string | null;
   actionUrl: string;
 }): string {
   const isBreach = options.daysRemaining !== null && options.daysRemaining < 0;
@@ -194,10 +195,14 @@ export function buildPeticionReminderEmailHtml(options: {
         <td style="padding: 10px 0; font-weight: bold;">🏢 Área consolida:</td>
         <td style="padding: 10px 0;">${escape(options.areaConsolida)}</td>
       </tr>
-      <tr>
+      <tr${options.observaciones ? ' style="border-bottom: 1px solid #e2e8f0;"' : ''}>
         <td style="padding: 10px 0; font-weight: bold;">📅 Fecha plazo respuesta:</td>
         <td style="padding: 10px 0;">${escape(options.fechaPlazoRespuesta || 'Sin definir')}</td>
       </tr>
+      ${options.observaciones ? `<tr>
+        <td style="padding: 10px 0; font-weight: bold; vertical-align: top;">📝 Observaciones:</td>
+        <td style="padding: 10px 0; white-space: pre-wrap;">${escape(options.observaciones)}</td>
+      </tr>` : ''}
     </table>
   </div>
 
@@ -218,6 +223,7 @@ export function buildPeticionAssignedEmailHtml(options: {
   areaConsolida: string;
   plazoRespuesta: number | null;
   fechaPlazoRespuesta: string | null;
+  observaciones?: string | null;
   responsables: string[];
   actionUrl: string;
 }): string {
@@ -256,10 +262,14 @@ export function buildPeticionAssignedEmailHtml(options: {
         <td style="padding: 10px 0; font-weight: bold;">📅 Fecha plazo respuesta:</td>
         <td style="padding: 10px 0;">${escape(options.fechaPlazoRespuesta || 'Sin definir')}</td>
       </tr>
-      <tr>
+      <tr${options.observaciones ? ' style="border-bottom: 1px solid #e2e8f0;"' : ''}>
         <td style="padding: 10px 0; font-weight: bold;">👥 Responsables:</td>
         <td style="padding: 10px 0;">${escape(options.responsables.join(', ') || 'Sin asignar')}</td>
       </tr>
+      ${options.observaciones ? `<tr>
+        <td style="padding: 10px 0; font-weight: bold; vertical-align: top;">📝 Observaciones:</td>
+        <td style="padding: 10px 0; white-space: pre-wrap;">${escape(options.observaciones)}</td>
+      </tr>` : ''}
     </table>
   </div>
 

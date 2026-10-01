@@ -1,6 +1,15 @@
 import { getGoogleOAuthClient } from './google-oauth.js';
 
-type DriveFile = { id: string; name: string; mimeType: string };
+export type DriveFile = { id: string; name: string; mimeType: string };
+
+// Acepta tanto un link completo de carpeta de Drive como un id pelado.
+export function extractDriveFolderId(input: string): string | null {
+  const trimmed = input.trim();
+  const urlMatch = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (urlMatch) return urlMatch[1];
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
+  return null;
+}
 
 export class DriveCopyCancelledError extends Error {
   constructor() {
@@ -60,6 +69,49 @@ export async function listDriveChildren(accessToken: string, folderId: string) {
     pageToken = page.nextPageToken ?? '';
   } while (pageToken);
   return files;
+}
+
+// Busca una subcarpeta por nombre dentro de parentId; la crea si no existe
+// todavía (idempotente, para no duplicar la carpeta de un radicado si se
+// vuelve a subir un documento después).
+export async function ensureDriveFolder(accessToken: string, parentId: string, name: string): Promise<DriveFile> {
+  const children = await listDriveChildren(accessToken, parentId);
+  const existing = children.find((f) => f.name === name && f.mimeType === 'application/vnd.google-apps.folder');
+  if (existing) return existing;
+  return driveRequest<DriveFile>(accessToken, '/files?supportsAllDrives=true', {
+    method: 'POST',
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] }),
+  });
+}
+
+// Sube un archivo (contenido en base64) a una carpeta de Drive vía upload
+// multipart — la API de Drive no tiene un endpoint JSON simple para esto.
+export async function uploadDriveFile(
+  accessToken: string,
+  folderId: string,
+  fileName: string,
+  mimeType: string,
+  contentBase64: string,
+): Promise<{ id: string; webViewLink: string | null }> {
+  const boundary = `drvbndry${Math.random().toString(16).slice(2)}`;
+  const metadata = JSON.stringify({ name: fileName, parents: [folderId] });
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n` +
+    `--${boundary}\r\nContent-Type: ${mimeType}\r\nContent-Transfer-Encoding: base64\r\n\r\n${contentBase64}\r\n` +
+    `--${boundary}--`;
+  const response = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink',
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body,
+    },
+  );
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `Google Drive respondió ${response.status} al subir el archivo.`);
+  }
+  return payload as { id: string; webViewLink: string | null };
 }
 
 export type DriveCopyLogEntry = {

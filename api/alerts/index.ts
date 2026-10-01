@@ -174,6 +174,7 @@ async function sendPeticionReminder(
     areaConsolida: string;
     fechaPlazoRespuesta: string | null;
     correoPersonaAsignada: string | null;
+    observaciones?: string | null;
   },
   level: PeticionNivel,
   daysRemaining: number | null,
@@ -207,6 +208,7 @@ async function sendPeticionReminder(
     areaConsolida: peticion.areaConsolida,
     daysRemaining,
     fechaPlazoRespuesta: peticion.fechaPlazoRespuesta,
+    observaciones: peticion.observaciones,
     actionUrl,
   });
   await sendEmail(accessToken, {
@@ -223,7 +225,7 @@ async function handlePeticionesReminders(sql: SqlClient, accessToken: string): P
   const todayIso = new Date().toISOString().slice(0, 10);
   const rows = (await sql`
     SELECT peticion_id AS id, radicado, asunto, peticionario, area_consolida AS "areaConsolida",
-      correo_persona_asignada AS "correoPersonaAsignada",
+      correo_persona_asignada AS "correoPersonaAsignada", observaciones,
       TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta",
       ultimo_recordatorio_nivel AS "ultimoNivel", TO_CHAR(ultimo_recordatorio_en, 'YYYY-MM-DD') AS "ultimoEn"
     FROM peticiones
@@ -492,7 +494,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       }
       const [p] = (await sql`
         SELECT peticion_id AS id, radicado, asunto, peticionario, area_consolida AS "areaConsolida",
-          correo_persona_asignada AS "correoPersonaAsignada",
+          correo_persona_asignada AS "correoPersonaAsignada", observaciones,
           TO_CHAR(fecha_plazo_respuesta, 'YYYY-MM-DD') AS "fechaPlazoRespuesta"
         FROM peticiones WHERE peticion_id = ${peticionId}
       `) as any[];
