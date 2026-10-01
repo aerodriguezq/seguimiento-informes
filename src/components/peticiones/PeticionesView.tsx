@@ -669,19 +669,13 @@ export const PeticionesView: React.FC<{
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1150px] text-left">
+            <table className="w-full min-w-[980px] text-left">
               <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-widest text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Radicado</th>
-                  <th className="px-3 py-3">Fecha Radicación</th>
-                  <th className="px-3 py-3">Peticionario</th>
-                  <th className="px-3 py-3">Asunto</th>
+                  <th className="px-4 py-3">Petición</th>
                   <th className="px-3 py-3">Proyectos</th>
-                  <th className="px-3 py-3">Área Consolida</th>
-                  <th className="px-3 py-3">Responsables</th>
+                  <th className="px-3 py-3">Área / Responsables</th>
                   <th className="px-3 py-3">Plazo</th>
-                  <th className="px-3 py-3">Fecha Plazo Respuesta</th>
-                  <th className="px-3 py-3">Fecha Radicado Respuesta</th>
                   <th className="px-3 py-3">Estado</th>
                   <th className="px-4 py-3 text-right">Acciones</th>
                 </tr>
@@ -693,17 +687,23 @@ export const PeticionesView: React.FC<{
                   const proyectosText = p.proyectos.map((pr) => pr.name).join(', ') || '—';
                   const reminder = reminderState[p.id];
                   return (
-                    <tr key={p.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 font-bold text-slate-900 whitespace-nowrap">{p.radicado}</td>
-                      <td className="px-3 py-3 whitespace-nowrap text-slate-600">{fmtDate(p.fechaRadicacion)}</td>
-                      <td className="px-3 py-3 max-w-40 truncate text-slate-700" title={p.peticionario}>{p.peticionario || '—'}</td>
-                      <td className="px-3 py-3 max-w-56 truncate text-slate-700" title={p.asunto}>{p.asunto}</td>
-                      <td className="px-3 py-3 max-w-44 truncate text-slate-600" title={proyectosText}>{proyectosText}</td>
-                      <td className="px-3 py-3 whitespace-nowrap text-slate-600">{p.areaConsolida || '—'}</td>
-                      <td className="px-3 py-3 max-w-44 truncate text-slate-600" title={responsablesText}>{responsablesText}</td>
-                      <td className="px-3 py-3 whitespace-nowrap text-slate-600">{p.plazoRespuesta ?? '—'} d</td>
-                      <td className="px-3 py-3 whitespace-nowrap text-slate-600">{fmtDate(p.fechaPlazoRespuesta)}</td>
-                      <td className="px-3 py-3 whitespace-nowrap text-slate-600">{fmtDate(p.fechaRadicadoRespuesta)}</td>
+                    <tr key={p.id} className="hover:bg-slate-50 align-top">
+                      <td className="px-4 py-3 max-w-64">
+                        <p className="font-bold text-slate-900 whitespace-nowrap">{p.radicado}</p>
+                        <p className="mt-0.5 text-slate-700 truncate" title={p.asunto}>{p.asunto}</p>
+                        <p className="mt-0.5 text-[10.5px] text-slate-400 truncate">
+                          {p.peticionario || '—'} · {fmtDate(p.fechaRadicacion)}
+                        </p>
+                      </td>
+                      <td className="px-3 py-3 max-w-40 truncate text-slate-600" title={proyectosText}>{proyectosText}</td>
+                      <td className="px-3 py-3 max-w-44">
+                        <p className="text-slate-600 whitespace-nowrap">{p.areaConsolida || '—'}</p>
+                        <p className="mt-0.5 text-[10.5px] text-slate-400 truncate" title={responsablesText}>{responsablesText}</p>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap text-slate-600">
+                        <p>{p.plazoRespuesta ?? '—'} d · {fmtDate(p.fechaPlazoRespuesta)}</p>
+                        {p.fechaRadicadoRespuesta && <p className="mt-0.5 text-[10.5px] text-slate-400">Respondido: {fmtDate(p.fechaRadicadoRespuesta)}</p>}
+                      </td>
                       <td className="px-3 py-3">
                         {p.fechaRadicadoRespuesta ? (
                           <ResponseStatusBadge onTime={computeResponseOnTime(p)} />
