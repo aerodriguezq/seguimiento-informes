@@ -651,7 +651,7 @@ export default function App() {
     showToast(`Contacto "${newContact.name}" registrado en la lista maestra.`, 'success');
   };
 
-  const handleAddReportTypeStep = async (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => {
+  const handleAddReportTypeStep = async (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => {
     const response = await fetch('/api/catalogs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -716,7 +716,8 @@ export default function App() {
       const updatedSteps: ReportTypeStep[] = payload.data;
       setReportTypeSteps((prev) => {
         const typeId = updatedSteps[0]?.typeId;
-        const others = prev.filter((s) => s.typeId !== typeId);
+        const projectId = updatedSteps[0]?.projectId ?? null;
+        const others = prev.filter((s) => !(s.typeId === typeId && (s.projectId ?? null) === projectId));
         return [...others, ...updatedSteps];
       });
     } catch (error) {
@@ -964,6 +965,7 @@ export default function App() {
               reportTypes={reportTypes}
               contacts={contacts}
               reportTypeSteps={reportTypeSteps}
+              projects={projects}
               onAddReportType={handleAddReportType}
               onAddContact={handleAddContact}
               onAddReportTypeStep={handleAddReportTypeStep}

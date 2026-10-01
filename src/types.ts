@@ -18,6 +18,9 @@ export interface ReportType {
 export interface ReportTypeStep {
   id: string;
   typeId: string;
+  // null = plantilla general (aplica a todos los proyectos de este tipo de
+  // informe); un id = flujo propio de ese proyecto únicamente.
+  projectId: string | null;
   order: number;
   name: string;
   emailSubject: string;

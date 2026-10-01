@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ReportType, Contact, ReportStatus, ReportTypeStep, AreaConsolida } from '../../types';
+import { ReportType, Contact, ReportStatus, ReportTypeStep, AreaConsolida, Project } from '../../types';
 import { STATUS_SEQUENCE, MONTHS_LIST, YEARS_LIST } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import {
@@ -30,9 +30,10 @@ interface MasterListsViewProps {
   reportTypes: ReportType[];
   contacts: Contact[];
   reportTypeSteps: ReportTypeStep[];
+  projects: Project[];
   onAddReportType: (type: ReportType) => Promise<void>;
   onAddContact: (contact: Contact) => Promise<void>;
-  onAddReportTypeStep: (step: { typeId: string; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => Promise<void>;
+  onAddReportTypeStep: (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => Promise<void>;
   onDeleteReportTypeStep: (stepId: string) => Promise<void>;
   onMoveReportTypeStep: (stepId: string, direction: 'up' | 'down') => Promise<void>;
   areasConsolida: AreaConsolida[];
@@ -44,6 +45,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   reportTypes,
   contacts,
   reportTypeSteps,
+  projects,
   onAddReportType,
   onAddContact,
   onAddReportTypeStep,
@@ -57,6 +59,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const canEditLists = canEdit('lists');
 
   const [stepsModalTypeId, setStepsModalTypeId] = useState<string | null>(null);
+  const [stepsScopeProjectId, setStepsScopeProjectId] = useState<string | null>(null);
   const [newStepName, setNewStepName] = useState('');
   const [newStepSubject, setNewStepSubject] = useState('');
   const [newStepIsFinal, setNewStepIsFinal] = useState(false);
@@ -187,6 +190,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
     try {
       await onAddReportTypeStep({
         typeId: stepsModalTypeId,
+        projectId: stepsScopeProjectId,
         name: newStepName.trim(),
         emailSubject: newStepSubject.trim(),
         isFinal: newStepIsFinal,
@@ -210,9 +214,12 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   };
 
   const stepsForModalType = reportTypeSteps
-    .filter((s) => s.typeId === stepsModalTypeId)
+    .filter((s) => s.typeId === stepsModalTypeId && (s.projectId ?? null) === stepsScopeProjectId)
     .sort((a, b) => a.order - b.order);
   const typeForStepsModal = reportTypes.find((t) => t.id === stepsModalTypeId);
+  const projectsForStepsModal = projects.filter(
+    (p) => stepsModalTypeId && (p.applicableTypeIds.length === 0 || p.applicableTypeIds.includes(stepsModalTypeId)),
+  );
 
   return (
     <div id="view-master-lists" className="space-y-5 max-w-7xl mx-auto">
@@ -426,7 +433,10 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                       <td className="py-3 px-4 whitespace-nowrap">
                         <button
                           type="button"
-                          onClick={() => setStepsModalTypeId(type.id)}
+                          onClick={() => {
+                            setStepsModalTypeId(type.id);
+                            setStepsScopeProjectId(null);
+                          }}
                           className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100"
                         >
                           <GitBranch className="h-3.5 w-3.5" />
@@ -808,6 +818,28 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                   <b>Mensual:</b> cada proyecto genera un informe nuevo cada mes (repite este flujo desde el paso 1) hasta que termine el proyecto. El asunto de cada paso aplica a todos esos informes — el sistema le agrega el número de secuencia (01, 02...) al final.
                 </div>
               )}
+
+              {/* Selector de alcance: plantilla general o proyecto específico */}
+              <div className="rounded-lg border border-slate-200 p-3 space-y-1.5">
+                <label className="block text-[10.5px] font-semibold text-slate-500">Aplicar a</label>
+                <select
+                  value={stepsScopeProjectId ?? ''}
+                  onChange={(e) => setStepsScopeProjectId(e.target.value || null)}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white"
+                >
+                  <option value="">Plantilla general (todos los proyectos)</option>
+                  {projectsForStepsModal.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10.5px] text-slate-400 leading-relaxed">
+                  {stepsScopeProjectId
+                    ? 'Este proyecto usa su propio flujo (distinto de la plantilla general) para este tipo de informe.'
+                    : 'Flujo por defecto para todos los proyectos de este tipo, salvo que un proyecto tenga su propio flujo configurado.'}
+                </p>
+              </div>
 
               {/* Lista de pasos existentes */}
               <div>

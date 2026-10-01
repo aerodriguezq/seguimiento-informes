@@ -291,10 +291,10 @@ export default async function handler(
           ORDER BY c.nombre ASC
         `,
         sql`
-          SELECT paso_id AS id, tipo_informe_id AS "typeId", orden AS "order", nombre AS name,
+          SELECT paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
             asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
             palabras_clave AS "palabrasClave"
-          FROM tipo_informe_pasos ORDER BY tipo_informe_id ASC, orden ASC
+          FROM tipo_informe_pasos ORDER BY tipo_informe_id ASC, proyecto_id ASC NULLS FIRST, orden ASC
         `,
         sql`SELECT paso_id AS "stepId", contacto_id AS "contactId" FROM tipo_informe_paso_contacto`,
         sql`SELECT empresa_id AS id, nombre AS name, COALESCE(codigo, '') AS code FROM empresas ORDER BY nombre ASC`,
@@ -319,33 +319,55 @@ export default async function handler(
           return response.status(400).json({ data: null, meta: {}, errors: ['El paso y la dirección (up/down) son obligatorios.'] });
         }
 
-        const [current] = (await sql`SELECT paso_id AS id, tipo_informe_id AS "typeId", orden FROM tipo_informe_pasos WHERE paso_id = ${stepId}`) as any[];
+        const [current] = (await sql`SELECT paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden FROM tipo_informe_pasos WHERE paso_id = ${stepId}`) as any[];
         if (!current) return response.status(404).json({ data: null, meta: {}, errors: ['Paso no encontrado.'] });
 
-        const neighborRows = (
-          direction === 'up'
-            ? await sql`SELECT paso_id AS id, orden FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND orden < ${current.orden} ORDER BY orden DESC LIMIT 1`
-            : await sql`SELECT paso_id AS id, orden FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND orden > ${current.orden} ORDER BY orden ASC LIMIT 1`
-        ) as any[];
+        // El vecino se busca dentro del MISMO alcance (plantilla general o
+        // flujo propio de un proyecto) -- nunca se cruza un paso de la
+        // plantilla con uno de un flujo específico de proyecto.
+        const projectScope = current.projectId;
+        let neighborRows: any[];
+        if (projectScope === null) {
+          neighborRows = (
+            direction === 'up'
+              ? await sql`SELECT paso_id AS id, orden FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND proyecto_id IS NULL AND orden < ${current.orden} ORDER BY orden DESC LIMIT 1`
+              : await sql`SELECT paso_id AS id, orden FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND proyecto_id IS NULL AND orden > ${current.orden} ORDER BY orden ASC LIMIT 1`
+          ) as any[];
+        } else {
+          neighborRows = (
+            direction === 'up'
+              ? await sql`SELECT paso_id AS id, orden FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND proyecto_id = ${projectScope} AND orden < ${current.orden} ORDER BY orden DESC LIMIT 1`
+              : await sql`SELECT paso_id AS id, orden FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND proyecto_id = ${projectScope} AND orden > ${current.orden} ORDER BY orden ASC LIMIT 1`
+          ) as any[];
+        }
         const neighbor = neighborRows[0];
 
         if (neighbor) {
           // Se intercambia el "orden" con el vecino inmediato pasando por un
-          // valor temporal negativo -- la tabla tiene UNIQUE (tipo_informe_id,
-          // orden), así que no se puede pisar directamente el valor del otro
-          // en ningún paso intermedio (orden empieza en 1, así que un
-          // negativo nunca choca con nada existente).
+          // valor temporal negativo -- la tabla tiene UNIQUE (proyecto_id,
+          // tipo_informe_id, orden), así que no se puede pisar directamente
+          // el valor del otro en ningún paso intermedio (orden empieza en 1,
+          // así que un negativo nunca choca con nada existente).
           await sql`UPDATE tipo_informe_pasos SET orden = -1 * orden WHERE paso_id = ${current.id}`;
           await sql`UPDATE tipo_informe_pasos SET orden = ${current.orden} WHERE paso_id = ${neighbor.id}`;
           await sql`UPDATE tipo_informe_pasos SET orden = ${neighbor.orden} WHERE paso_id = ${current.id}`;
         }
 
-        const stepRows = (await sql`
-          SELECT paso_id AS id, tipo_informe_id AS "typeId", orden AS "order", nombre AS name,
-            asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
-            palabras_clave AS "palabrasClave"
-          FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} ORDER BY orden ASC
-        `) as any[];
+        const stepRows = (
+          projectScope === null
+            ? await sql`
+                SELECT paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
+                  asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
+                  palabras_clave AS "palabrasClave"
+                FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND proyecto_id IS NULL ORDER BY orden ASC
+              `
+            : await sql`
+                SELECT paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
+                  asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
+                  palabras_clave AS "palabrasClave"
+                FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND proyecto_id = ${projectScope} ORDER BY orden ASC
+              `
+        ) as any[];
         const stepIds = stepRows.map((s: any) => s.id);
         const contactRows = stepIds.length === 0 ? [] : ((await sql`
           SELECT paso_id AS "stepId", contacto_id AS "contactId" FROM tipo_informe_paso_contacto WHERE paso_id = ANY(${stepIds})
@@ -663,26 +685,44 @@ export default async function handler(
     }
 
     if (kind === 'reportTypeStep') {
-      const { typeId, name, emailSubject, isFinal, contactIds, diaInicio, diaLimite, palabrasClave } = data ?? {};
+      const { typeId, projectId, name, emailSubject, isFinal, contactIds, diaInicio, diaLimite, palabrasClave } = data ?? {};
       if (!typeId || !name || !emailSubject || !Array.isArray(contactIds) || contactIds.length === 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Tipo de informe, nombre, asunto de correo y al menos un contacto son obligatorios.'] });
       }
       const parsedDiaInicio = diaInicio === null || diaInicio === undefined || diaInicio === '' ? null : Number(diaInicio);
       const parsedDiaLimite = diaLimite === null || diaLimite === undefined || diaLimite === '' ? null : Number(diaLimite);
       const parsedPalabrasClave = palabrasClave ? String(palabrasClave).trim() || null : null;
+      // NULL = plantilla general (aplica a todos los proyectos de este
+      // tipo); un id = flujo propio de ese proyecto únicamente.
+      const parsedProjectId = projectId === null || projectId === undefined || projectId === '' ? null : Number(projectId);
 
-      const stepRows = await sql`
-        INSERT INTO tipo_informe_pasos (paso_id, tipo_informe_id, orden, nombre, asunto_correo, es_final, dia_inicio, dia_limite, palabras_clave)
-        VALUES (
-          COALESCE((SELECT MAX(paso_id) FROM tipo_informe_pasos), 0) + 1,
-          ${typeId},
-          COALESCE((SELECT MAX(orden) FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId}), 0) + 1,
-          ${String(name).trim()}, ${String(emailSubject).trim()}, ${Boolean(isFinal)}, ${parsedDiaInicio}, ${parsedDiaLimite}, ${parsedPalabrasClave}
-        )
-        RETURNING paso_id AS id, tipo_informe_id AS "typeId", orden AS "order", nombre AS name,
-          asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
-          palabras_clave AS "palabrasClave"
-      `;
+      const stepRows = (
+        parsedProjectId === null
+          ? await sql`
+              INSERT INTO tipo_informe_pasos (paso_id, tipo_informe_id, proyecto_id, orden, nombre, asunto_correo, es_final, dia_inicio, dia_limite, palabras_clave)
+              VALUES (
+                COALESCE((SELECT MAX(paso_id) FROM tipo_informe_pasos), 0) + 1,
+                ${typeId}, NULL,
+                COALESCE((SELECT MAX(orden) FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id IS NULL), 0) + 1,
+                ${String(name).trim()}, ${String(emailSubject).trim()}, ${Boolean(isFinal)}, ${parsedDiaInicio}, ${parsedDiaLimite}, ${parsedPalabrasClave}
+              )
+              RETURNING paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
+                asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
+                palabras_clave AS "palabrasClave"
+            `
+          : await sql`
+              INSERT INTO tipo_informe_pasos (paso_id, tipo_informe_id, proyecto_id, orden, nombre, asunto_correo, es_final, dia_inicio, dia_limite, palabras_clave)
+              VALUES (
+                COALESCE((SELECT MAX(paso_id) FROM tipo_informe_pasos), 0) + 1,
+                ${typeId}, ${parsedProjectId},
+                COALESCE((SELECT MAX(orden) FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id = ${parsedProjectId}), 0) + 1,
+                ${String(name).trim()}, ${String(emailSubject).trim()}, ${Boolean(isFinal)}, ${parsedDiaInicio}, ${parsedDiaLimite}, ${parsedPalabrasClave}
+              )
+              RETURNING paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
+                asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
+                palabras_clave AS "palabrasClave"
+            `
+      ) as any[];
       const stepId = stepRows[0].id;
 
       for (const contactId of contactIds) {

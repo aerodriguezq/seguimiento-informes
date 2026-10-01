@@ -219,16 +219,26 @@ async function createStepAlert(
   }
 }
 
+// Un proyecto puede tener su propio flujo completo para un tipo de informe
+// (proyecto_id específico) en vez de usar la plantilla general
+// (proyecto_id = NULL). Devuelve cuál de los dos aplica para ese proyecto.
+async function resolveStepsScope(sql: SqlClient, typeId: number, projectId: number): Promise<number | null> {
+  const [row] = (await sql`
+    SELECT 1 AS found FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id = ${projectId} LIMIT 1
+  `) as any[];
+  return row ? projectId : null;
+}
+
 // Crea la alerta del primer paso configurado para el tipo de informe (si existe)
 // y deja el informe apuntando a ese paso. Sin pasos configurados, no hace nada.
 async function seedFirstWorkflowStep(sql: SqlClient, reportId: number, typeId: number, projectId: number, year: number, monthName: string) {
-  const [firstStep] = (await sql`
-    SELECT paso_id AS id, nombre AS name
-    FROM tipo_informe_pasos
-    WHERE tipo_informe_id = ${typeId}
-    ORDER BY orden ASC
-    LIMIT 1
-  `) as any[];
+  const scope = await resolveStepsScope(sql, typeId, projectId);
+  const firstStepRows = (
+    scope === null
+      ? await sql`SELECT paso_id AS id, nombre AS name FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id IS NULL ORDER BY orden ASC LIMIT 1`
+      : await sql`SELECT paso_id AS id, nombre AS name FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id = ${scope} ORDER BY orden ASC LIMIT 1`
+  ) as any[];
+  const [firstStep] = firstStepRows;
   if (!firstStep) return;
 
   await sql`UPDATE informes SET paso_actual_id = ${firstStep.id} WHERE informe_id = ${reportId}`;
@@ -345,7 +355,7 @@ async function advanceReportStep(
   const [current] = (await sql`
     SELECT i.proyecto_id AS "projectId", i.tipo_informe_id AS "typeId", i.paso_actual_id AS "currentStepId",
            i.mes_nombre AS "monthName", i.anio AS "year",
-           p.orden AS "currentOrder", p.es_final AS "isFinal"
+           p.orden AS "currentOrder", p.es_final AS "isFinal", p.proyecto_id AS "stepScope"
     FROM informes i
     LEFT JOIN tipo_informe_pasos p ON p.paso_id = i.paso_actual_id
     WHERE i.informe_id = ${reportId}
@@ -366,13 +376,16 @@ async function advanceReportStep(
     return;
   }
 
-  const [nextStep] = (await sql`
-    SELECT paso_id AS id, nombre AS name
-    FROM tipo_informe_pasos
-    WHERE tipo_informe_id = ${current.typeId} AND orden > ${current.currentOrder}
-    ORDER BY orden ASC
-    LIMIT 1
-  `) as any[];
+  // El siguiente paso se busca dentro del MISMO alcance (plantilla general o
+  // flujo propio del proyecto) en el que ya está el paso actual -- no se
+  // vuelve a resolver, para no mezclar pasos de la plantilla con pasos
+  // propios del proyecto a mitad de flujo.
+  const nextStepRows = (
+    current.stepScope === null
+      ? await sql`SELECT paso_id AS id, nombre AS name FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND proyecto_id IS NULL AND orden > ${current.currentOrder} ORDER BY orden ASC LIMIT 1`
+      : await sql`SELECT paso_id AS id, nombre AS name FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND proyecto_id = ${current.stepScope} AND orden > ${current.currentOrder} ORDER BY orden ASC LIMIT 1`
+  ) as any[];
+  const [nextStep] = nextStepRows;
 
   if (nextStep) {
     await sql`UPDATE informes SET paso_actual_id = ${nextStep.id}, updated_at = NOW() WHERE informe_id = ${reportId}`;
