@@ -164,6 +164,16 @@ const PeticionForm: React.FC<{
     onChange({ ...form, proyectoIds: next });
   };
 
+  const selectedAreasIntervienen = form.areasIntervienen
+    ? form.areasIntervienen.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+  const toggleAreaInterviene = (name: string) => {
+    const next = selectedAreasIntervienen.includes(name)
+      ? selectedAreasIntervienen.filter((n) => n !== name)
+      : [...selectedAreasIntervienen, name];
+    onChange({ ...form, areasIntervienen: next.join(', ') });
+  };
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
@@ -202,7 +212,32 @@ const PeticionForm: React.FC<{
       </div>
       <div className="sm:col-span-2">
         <label className="block text-[11px] font-semibold text-slate-700 mb-1">{FIELD_LABEL.areasIntervienen}</label>
-        <input value={form.areasIntervienen} onChange={set('areasIntervienen')} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600" />
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border border-slate-200 p-2">
+          {areasConsolida.length === 0 ? (
+            <p className="text-[11px] italic text-slate-400">No hay áreas registradas en Listas Maestras.</p>
+          ) : (
+            areasConsolida.map((a) => (
+              <label key={a.id} className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedAreasIntervienen.includes(a.name)}
+                  onChange={() => toggleAreaInterviene(a.name)}
+                  className="rounded"
+                  style={{ accentColor: '#0f766e' }}
+                />
+                {a.name}
+              </label>
+            ))
+          )}
+          {selectedAreasIntervienen
+            .filter((name) => !areasConsolida.some((a) => a.name === name))
+            .map((name) => (
+              <label key={name} className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer">
+                <input type="checkbox" checked onChange={() => toggleAreaInterviene(name)} className="rounded" style={{ accentColor: '#0f766e' }} />
+                {name} <span className="text-slate-400">(no está en la lista)</span>
+              </label>
+            ))}
+        </div>
       </div>
 
       <div className="sm:col-span-2">
