@@ -170,6 +170,11 @@ export interface PeticionResponsable {
   email: string;
 }
 
+export interface PeticionProyecto {
+  id: string;
+  name: string;
+}
+
 export interface Empresa {
   id: string;
   name: string;
@@ -202,6 +207,7 @@ export interface Peticion {
   documentoRespuestaNombre: string | null;
   documentoRespuestaUrl: string | null;
   responsables: PeticionResponsable[];
+  proyectos: PeticionProyecto[];
   createdAt: string;
 }
 

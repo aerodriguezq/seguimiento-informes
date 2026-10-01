@@ -47,6 +47,25 @@ async function setResponsables(sql: any, peticionId: number, responsableIds: unk
   }
 }
 
+async function fetchPeticionProyectos(sql: any, peticionId: number) {
+  const rows = (await sql`
+    SELECT p.proyecto_id AS id, p.nombre AS name
+    FROM peticion_proyectos pp JOIN proyectos p ON p.proyecto_id = pp.proyecto_id
+    WHERE pp.peticion_id = ${peticionId}
+  `) as any[];
+  return rows.map((r) => ({ id: String(r.id), name: r.name }));
+}
+
+async function setPeticionProyectos(sql: any, peticionId: number, proyectoIds: unknown[]) {
+  await sql`DELETE FROM peticion_proyectos WHERE peticion_id = ${peticionId}`;
+  for (const projectId of proyectoIds) {
+    const id = Number(projectId);
+    if (Number.isInteger(id) && id > 0) {
+      await sql`INSERT INTO peticion_proyectos (peticion_id, proyecto_id) VALUES (${peticionId}, ${id}) ON CONFLICT DO NOTHING`;
+    }
+  }
+}
+
 // Correo de "te asignaron esta petición" — se envía una sola vez a cada
 // responsable nuevo (al crear la petición, o al agregarlo después), nunca
 // se repite en cada edición posterior (eso ya lo cubren los recordatorios
@@ -268,9 +287,14 @@ export default async function handler(
         SELECT pr.peticion_id AS "peticionId", c.contacto_id AS id, c.nombre AS name, COALESCE(c.email, '') AS email
         FROM peticion_responsables pr JOIN contactos c ON c.contacto_id = pr.contacto_id
       `) as any[];
+      const proyectoRows = (await sql`
+        SELECT pp.peticion_id AS "peticionId", pr.proyecto_id AS id, pr.nombre AS name
+        FROM peticion_proyectos pp JOIN proyectos pr ON pr.proyecto_id = pp.proyecto_id
+      `) as any[];
       const data = rows.map((row) => ({
         ...row,
         responsables: responsableRows.filter((r) => r.peticionId === row.id).map((r) => ({ id: String(r.id), name: r.name, email: r.email })),
+        proyectos: proyectoRows.filter((r) => r.peticionId === row.id).map((r) => ({ id: String(r.id), name: r.name })),
       }));
       return response.status(200).json({ data, meta: {}, errors: [] });
     }
@@ -448,7 +472,15 @@ export default async function handler(
             await notifyNewPeticionResponsables(sql, { ...rows[0], id: peticionId }, responsables, newlyAssignedIds);
           }
         }
-        return response.status(200).json({ data: { ...rows[0], responsables }, meta: {}, errors: [] });
+        let proyectos = await fetchPeticionProyectos(sql, peticionId);
+        if (Array.isArray(body.proyectoIds)) {
+          if (body.proyectoIds.length === 0) {
+            return response.status(400).json({ data: null, meta: {}, errors: ['Debes asignar al menos un proyecto a la petición.'] });
+          }
+          await setPeticionProyectos(sql, peticionId, body.proyectoIds.map(String));
+          proyectos = await fetchPeticionProyectos(sql, peticionId);
+        }
+        return response.status(200).json({ data: { ...rows[0], responsables, proyectos }, meta: {}, errors: [] });
       }
 
       if (body.kind === 'sweepConfig') {
@@ -582,8 +614,12 @@ export default async function handler(
       }
       const asunto = String(data?.asunto ?? '').trim();
       const empresaId = Number(data?.empresaId);
+      const proyectoIds = Array.isArray(request.body?.proyectoIds) ? request.body.proyectoIds.map(String) : [];
       if (!asunto || !Number.isInteger(empresaId) || empresaId <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El asunto y la empresa son obligatorios.'] });
+      }
+      if (proyectoIds.length === 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Debes asignar al menos un proyecto a la petición.'] });
       }
       const fechaRadicacion = data?.fechaRadicacion || null;
       const plazoRespuesta = data?.plazoRespuesta === null || data?.plazoRespuesta === undefined || data?.plazoRespuesta === '' ? null : Number(data.plazoRespuesta);
@@ -619,9 +655,11 @@ export default async function handler(
       if (initialResponsableIds.length > 0) {
         await setResponsables(sql, peticionId, initialResponsableIds);
       }
+      await setPeticionProyectos(sql, peticionId, proyectoIds);
       const responsables = await fetchResponsables(sql, peticionId);
+      const proyectos = await fetchPeticionProyectos(sql, peticionId);
       await notifyNewPeticionResponsables(sql, { ...rows[0], id: peticionId }, responsables, responsables.map((r) => r.id));
-      return response.status(201).json({ data: { ...rows[0], responsables }, meta: {}, errors: [] });
+      return response.status(201).json({ data: { ...rows[0], responsables, proyectos }, meta: {}, errors: [] });
     }
 
     if (kind === 'peticionesConfig') {

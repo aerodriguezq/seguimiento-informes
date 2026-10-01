@@ -1003,6 +1003,7 @@ export default function App() {
               contacts={contacts}
               empresas={empresas}
               areasConsolida={areasConsolida}
+              projects={projects}
               peticionesConfig={peticionesConfig}
               onSavePeticionesConfig={handleSavePeticionesConfig}
             />

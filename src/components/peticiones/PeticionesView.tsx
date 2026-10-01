@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Inbox, Plus, Pencil, Trash2, X, Search, BellRing, FolderOpen, Upload, FileText, CheckCircle2, XCircle, FileSpreadsheet, Settings, Save } from 'lucide-react';
-import { AreaConsolida, Contact, Empresa, Peticion, PeticionesConfig, SemaforoStatus } from '../../types';
+import { AreaConsolida, Contact, Empresa, Peticion, PeticionesConfig, Project, SemaforoStatus } from '../../types';
 import { SemaforoBadge } from '../common/SemaforoBadge';
 import { useAuth } from '../../auth/AuthContext';
 
@@ -16,6 +16,7 @@ type PeticionFormState = {
   fechaRadicadoRespuesta: string;
   observaciones: string;
   responsableIds: string[];
+  proyectoIds: string[];
 };
 
 const EMPTY_FORM: PeticionFormState = {
@@ -30,6 +31,7 @@ const EMPTY_FORM: PeticionFormState = {
   fechaRadicadoRespuesta: '',
   observaciones: '',
   responsableIds: [],
+  proyectoIds: [],
 };
 
 function formToPayload(form: PeticionFormState) {
@@ -60,6 +62,7 @@ function peticionToForm(p: Peticion): PeticionFormState {
     fechaRadicadoRespuesta: p.fechaRadicadoRespuesta ?? '',
     observaciones: p.observaciones ?? '',
     responsableIds: p.responsables.map((r) => r.id),
+    proyectoIds: p.proyectos.map((pr) => pr.id),
   };
 }
 
@@ -142,7 +145,8 @@ const PeticionForm: React.FC<{
   contacts: Contact[];
   empresas: Empresa[];
   areasConsolida: AreaConsolida[];
-}> = ({ form, onChange, contacts, empresas, areasConsolida }) => {
+  projects: Project[];
+}> = ({ form, onChange, contacts, empresas, areasConsolida, projects }) => {
   const set = (key: keyof PeticionFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     onChange({ ...form, [key]: e.target.value });
 
@@ -151,6 +155,13 @@ const PeticionForm: React.FC<{
       ? form.responsableIds.filter((id) => id !== contactId)
       : [...form.responsableIds, contactId];
     onChange({ ...form, responsableIds: next });
+  };
+
+  const toggleProyecto = (projectId: string) => {
+    const next = form.proyectoIds.includes(projectId)
+      ? form.proyectoIds.filter((id) => id !== projectId)
+      : [...form.proyectoIds, projectId];
+    onChange({ ...form, proyectoIds: next });
   };
 
   return (
@@ -192,6 +203,29 @@ const PeticionForm: React.FC<{
       <div className="sm:col-span-2">
         <label className="block text-[11px] font-semibold text-slate-700 mb-1">{FIELD_LABEL.areasIntervienen}</label>
         <input value={form.areasIntervienen} onChange={set('areasIntervienen')} className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600" />
+      </div>
+
+      <div className="sm:col-span-2">
+        <label className="block text-[11px] font-semibold text-slate-700 mb-1">Proyectos *</label>
+        <div className="max-h-36 overflow-y-auto rounded-lg border border-slate-200 p-2 space-y-1">
+          {projects.length === 0 ? (
+            <p className="text-[11px] italic text-slate-400">No hay proyectos registrados.</p>
+          ) : (
+            projects.map((pr) => (
+              <label key={pr.id} className="flex items-center gap-2 text-[11px] text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.proyectoIds.includes(pr.id)}
+                  onChange={() => toggleProyecto(pr.id)}
+                  className="rounded"
+                  style={{ accentColor: '#0f766e' }}
+                />
+                <span className="font-medium">{pr.name}</span>
+              </label>
+            ))
+          )}
+        </div>
+        <p className="mt-1 text-[10.5px] text-slate-400">Puedes asignar uno o varios proyectos a esta petición.</p>
       </div>
 
       <div className="sm:col-span-2">
@@ -250,9 +284,10 @@ export const PeticionesView: React.FC<{
   contacts: Contact[];
   empresas: Empresa[];
   areasConsolida: AreaConsolida[];
+  projects: Project[];
   peticionesConfig: PeticionesConfig;
   onSavePeticionesConfig: (driveRootFolderUrl: string) => Promise<void>;
-}> = ({ contacts, empresas, areasConsolida, peticionesConfig, onSavePeticionesConfig }) => {
+}> = ({ contacts, empresas, areasConsolida, projects, peticionesConfig, onSavePeticionesConfig }) => {
   const { user, canEdit } = useAuth();
   const editable = canEdit('peticiones');
   const isAdmin = !!user?.isAdmin;
@@ -338,6 +373,10 @@ export const PeticionesView: React.FC<{
       setFormError('La empresa y el asunto son obligatorios.');
       return;
     }
+    if (form.proyectoIds.length === 0) {
+      setFormError('Debes asignar al menos un proyecto.');
+      return;
+    }
     setIsSaving(true);
     setFormError('');
     try {
@@ -347,8 +386,8 @@ export const PeticionesView: React.FC<{
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           editingId
-            ? { kind: 'peticion', id: Number(editingId), data: payload, responsableIds: form.responsableIds }
-            : { kind: 'peticion', data: payload, responsableIds: form.responsableIds },
+            ? { kind: 'peticion', id: Number(editingId), data: payload, responsableIds: form.responsableIds, proyectoIds: form.proyectoIds }
+            : { kind: 'peticion', data: payload, responsableIds: form.responsableIds, proyectoIds: form.proyectoIds },
         ),
       });
       const responsePayload = await res.json();
@@ -484,6 +523,7 @@ export const PeticionesView: React.FC<{
         'Fecha Radicación': p.fechaRadicacion ?? '',
         Peticionario: p.peticionario,
         Asunto: p.asunto,
+        Proyectos: p.proyectos.map((pr) => pr.name).join(', '),
         'Área Consolida': p.areaConsolida,
         Responsables: p.responsables.map((r) => r.name).join(', '),
         'Plazo (días)': p.plazoRespuesta ?? '',
@@ -498,7 +538,7 @@ export const PeticionesView: React.FC<{
 
     const sheet = XLSX.utils.json_to_sheet(data);
     sheet['!cols'] = [
-      { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 22 }, { wch: 32 }, { wch: 16 }, { wch: 24 },
+      { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 22 }, { wch: 32 }, { wch: 28 }, { wch: 16 }, { wch: 24 },
       { wch: 10 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 24 }, { wch: 36 },
     ];
     const workbook = XLSX.utils.book_new();
@@ -636,6 +676,7 @@ export const PeticionesView: React.FC<{
                   <th className="px-3 py-3">Fecha Radicación</th>
                   <th className="px-3 py-3">Peticionario</th>
                   <th className="px-3 py-3">Asunto</th>
+                  <th className="px-3 py-3">Proyectos</th>
                   <th className="px-3 py-3">Área Consolida</th>
                   <th className="px-3 py-3">Responsables</th>
                   <th className="px-3 py-3">Plazo</th>
@@ -649,6 +690,7 @@ export const PeticionesView: React.FC<{
                 {filtered.map((p) => {
                   const alert = computeAlertStatus(p);
                   const responsablesText = p.responsables.map((r) => r.name).join(', ') || p.correoPersonaAsignada || '—';
+                  const proyectosText = p.proyectos.map((pr) => pr.name).join(', ') || '—';
                   const reminder = reminderState[p.id];
                   return (
                     <tr key={p.id} className="hover:bg-slate-50">
@@ -656,6 +698,7 @@ export const PeticionesView: React.FC<{
                       <td className="px-3 py-3 whitespace-nowrap text-slate-600">{fmtDate(p.fechaRadicacion)}</td>
                       <td className="px-3 py-3 max-w-40 truncate text-slate-700" title={p.peticionario}>{p.peticionario || '—'}</td>
                       <td className="px-3 py-3 max-w-56 truncate text-slate-700" title={p.asunto}>{p.asunto}</td>
+                      <td className="px-3 py-3 max-w-44 truncate text-slate-600" title={proyectosText}>{proyectosText}</td>
                       <td className="px-3 py-3 whitespace-nowrap text-slate-600">{p.areaConsolida || '—'}</td>
                       <td className="px-3 py-3 max-w-44 truncate text-slate-600" title={responsablesText}>{responsablesText}</td>
                       <td className="px-3 py-3 whitespace-nowrap text-slate-600">{p.plazoRespuesta ?? '—'} d</td>
@@ -726,7 +769,7 @@ export const PeticionesView: React.FC<{
               </button>
             </div>
             <div className="p-5 space-y-3">
-              <PeticionForm form={form} onChange={setForm} contacts={contacts} empresas={empresas} areasConsolida={areasConsolida} />
+              <PeticionForm form={form} onChange={setForm} contacts={contacts} empresas={empresas} areasConsolida={areasConsolida} projects={projects} />
               {formError && <p className="text-xs text-rose-600">{formError}</p>}
 
               {editingId && (
