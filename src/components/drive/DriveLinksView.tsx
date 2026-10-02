@@ -17,6 +17,24 @@ const STATUS_LABELS: Record<DriveCopyLogEntry['status'], string> = {
   reused_folder: 'Carpeta reutilizada',
 };
 
+// Si Vercel mata la función por exceder el tiempo máximo (60s en el plan
+// actual), la respuesta no es JSON sino una página de error — sin esto,
+// response.json() revienta con un "Unexpected token" críptico en vez de
+// explicar lo que realmente pasó.
+async function parseJsonResponse(response: Response): Promise<any> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (!response.ok) {
+      throw new Error(
+        'La copia tardó demasiado y el servidor la interrumpió (límite de 60s). Prueba copiar una carpeta más pequeña, o copia sus subcarpetas por separado.',
+      );
+    }
+    throw new Error('El servidor devolvió una respuesta inesperada.');
+  }
+}
+
 const csvCell = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
 const downloadCopyReportCsv = (log: DriveCopyLogEntry[]) => {
@@ -117,7 +135,7 @@ export const DriveLinksView: React.FC = () => {
           body: JSON.stringify(links),
           signal: controller.signal,
         });
-        const payload = await response.json();
+        const payload = await parseJsonResponse(response);
         if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible copiar desde Google Drive.');
         const result = payload.data;
         setCopyProgress({ percent: 100, processed: result.copiedFiles + result.skippedFiles, total: result.copiedFiles + result.skippedFiles, phase: 'Copia completada' });
@@ -158,7 +176,7 @@ export const DriveLinksView: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jobId }),
       });
-      const payload = await response.json();
+      const payload = await parseJsonResponse(response);
       if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible iniciar la copia.');
       const startedJobId = payload.data.jobId || jobId;
       activeJobIdRef.current = startedJobId;
@@ -166,7 +184,7 @@ export const DriveLinksView: React.FC = () => {
       while (!completed && pollingRef.current) {
         await new Promise((resolve) => setTimeout(resolve, 1200));
         const progressResponse = await fetch(`/api/drive-progress?jobId=${encodeURIComponent(startedJobId)}`);
-        const progressPayload = await progressResponse.json();
+        const progressPayload = await parseJsonResponse(progressResponse);
         if (!progressResponse.ok) throw new Error(progressPayload.errors?.[0] || 'No fue posible consultar el progreso.');
         const result = progressPayload.data;
         setCopyProgress(result);
