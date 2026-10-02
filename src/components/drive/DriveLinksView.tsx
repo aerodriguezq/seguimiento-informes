@@ -66,6 +66,8 @@ export const DriveLinksView: React.FC = () => {
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
   const pollingRef = useRef(false);
+  const directJobIdRef = useRef<string | null>(null);
+  const directCancelRequestedRef = useRef(false);
 
   useEffect(() => {
     const loadLinks = async () => {
@@ -126,21 +128,54 @@ export const DriveLinksView: React.FC = () => {
     setMessage(null);
     setCopyLog(null);
     if (driveSession.connected) {
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
+      // La copia se corta en trozos del lado del servidor (cada invocación
+      // tiene como mucho ~60s en el plan actual) -- aquí se vuelve a llamar
+      // al mismo endpoint pasando el jobId hasta que "done" sea true, para
+      // poder copiar carpetas grandes sin toparse con ese límite.
+      directCancelRequestedRef.current = false;
+      directJobIdRef.current = null;
+      let jobId: string | null = null;
+      let done = false;
       try {
-        const response = await fetch('/api/drive-copy-direct', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(links),
-          signal: controller.signal,
-        });
-        const payload = await parseJsonResponse(response);
-        if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible copiar desde Google Drive.');
-        const result = payload.data;
-        setCopyProgress({ percent: 100, processed: result.copiedFiles + result.skippedFiles, total: result.copiedFiles + result.skippedFiles, phase: 'Copia completada' });
-        setCopyLog(result.log || []);
-        setMessage({ type: 'success', text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} omitidos.` });
+        while (!done) {
+          if (directCancelRequestedRef.current) {
+            setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
+            break;
+          }
+          const controller = new AbortController();
+          abortControllerRef.current = controller;
+          const response = await fetch('/api/drive-copy-direct', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(jobId ? { jobId } : links),
+            signal: controller.signal,
+          });
+          abortControllerRef.current = null;
+          const payload = await parseJsonResponse(response);
+          if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible copiar desde Google Drive.');
+          const result = payload.data;
+          jobId = result.jobId;
+          directJobIdRef.current = jobId;
+
+          const processed = result.copiedFiles + result.skippedFiles;
+          const total = processed + (result.remaining ?? 0);
+          setCopyProgress({
+            percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
+            processed,
+            total,
+            phase: result.done ? 'Copia completada' : `Copiando... ${processed} procesado(s), ${result.remaining ?? 0} en cola`,
+          });
+
+          if (result.cancelled) {
+            setCopyLog(result.log || []);
+            setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
+            done = true;
+          } else if (result.done) {
+            setCopyLog(result.log || []);
+            setMessage({ type: 'success', text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} omitidos.` });
+            done = true;
+          }
+        }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
@@ -149,6 +184,7 @@ export const DriveLinksView: React.FC = () => {
         }
       } finally {
         abortControllerRef.current = null;
+        directJobIdRef.current = null;
         setIsCopying(false);
       }
       return;
@@ -210,8 +246,20 @@ export const DriveLinksView: React.FC = () => {
   };
 
   const stopCopy = async () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
+    if (abortControllerRef.current || directJobIdRef.current) {
+      directCancelRequestedRef.current = true;
+      abortControllerRef.current?.abort();
+      if (directJobIdRef.current) {
+        try {
+          await fetch('/api/drive-copy-direct', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'cancel', jobId: directJobIdRef.current }),
+          });
+        } catch {
+          // El loop local ya se detiene con directCancelRequestedRef.
+        }
+      }
       return;
     }
     const jobId = activeJobIdRef.current;

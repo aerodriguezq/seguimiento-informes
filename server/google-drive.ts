@@ -11,13 +11,6 @@ export function extractDriveFolderId(input: string): string | null {
   return null;
 }
 
-export class DriveCopyCancelledError extends Error {
-  constructor() {
-    super('Copia cancelada por el usuario.');
-    this.name = 'DriveCopyCancelledError';
-  }
-}
-
 export async function getDriveAccessToken(tokenJson: string) {
   const client = await getGoogleOAuthClient();
   client.setCredentials(JSON.parse(tokenJson));
@@ -122,58 +115,85 @@ export type DriveCopyLogEntry = {
   status: 'copied' | 'skipped' | 'created_folder' | 'reused_folder';
 };
 
-export async function copyDriveTree(
+export type DriveCopySummary = { copiedFiles: number; skippedFiles: number; createdFolders: number; reusedFolders: number };
+
+// Una carpeta se procesa primero (lista sus hijos y crea/reutiliza la
+// carpeta destino); cada hijo (subcarpeta o archivo) se encola como su
+// propio item -- así cada vuelta del while de copyDriveTreeChunk hace un
+// único trabajo (una llamada a Drive como mucho), lo que permite cortar la
+// copia en cualquier punto, incluso a mitad de una carpeta con miles de
+// archivos, y retomarla exactamente donde quedó en la siguiente invocación.
+export type DriveCopyQueueItem =
+  | { kind: 'folder'; sourceId: string; destinationParentId: string; parentPath: string }
+  | { kind: 'file'; sourceFileId: string; name: string; mimeType: string; destinationFolderId: string; folderPath: string; alreadyExists: boolean };
+
+export function initialDriveCopyQueue(sourceId: string, destinationParentId: string): DriveCopyQueueItem[] {
+  return [{ kind: 'folder', sourceId, destinationParentId, parentPath: '' }];
+}
+
+export function emptyDriveCopySummary(): DriveCopySummary {
+  return { copiedFiles: 0, skippedFiles: 0, createdFolders: 0, reusedFolders: 0 };
+}
+
+// Procesa items de la cola hasta vaciarla, hasta `deadline` (ms epoch) o
+// hasta que isCancelled() devuelva true -- lo que ocurra primero. El
+// llamador persiste `queue`/`summary`/`log` entre llamadas (una fila en
+// drive_copy_jobs) para poder reanudar en una invocación posterior cuando
+// la copia no cabe en el límite de tiempo de una función serverless.
+export async function copyDriveTreeChunk(
   accessToken: string,
-  sourceId: string,
-  destinationParentId: string,
+  queue: DriveCopyQueueItem[],
+  summary: DriveCopySummary,
+  log: DriveCopyLogEntry[],
+  deadline: number,
   isCancelled: () => boolean = () => false,
-) {
-  const queue: Array<{ sourceId: string; destinationParentId: string; parentPath: string }> = [
-    { sourceId, destinationParentId, parentPath: '' },
-  ];
-  const summary = { copiedFiles: 0, skippedFiles: 0, createdFolders: 0, reusedFolders: 0 };
-  const log: DriveCopyLogEntry[] = [];
-
+): Promise<{ queue: DriveCopyQueueItem[]; summary: DriveCopySummary; log: DriveCopyLogEntry[]; done: boolean; cancelled: boolean }> {
   while (queue.length) {
-    if (isCancelled()) throw new DriveCopyCancelledError();
+    if (isCancelled()) return { queue, summary, log, done: false, cancelled: true };
+    if (Date.now() > deadline) return { queue, summary, log, done: false, cancelled: false };
     const item = queue.shift()!;
-    const source = await driveRequest<DriveFile>(accessToken, `/files/${item.sourceId}?fields=id,name,mimeType&supportsAllDrives=true`);
-    const folderPath = item.parentPath ? `${item.parentPath}/${source.name}` : source.name;
-    const destinationItems = await listDriveChildren(accessToken, item.destinationParentId);
-    const existingFolder = destinationItems.find((file) => file.name === source.name && file.mimeType === 'application/vnd.google-apps.folder');
-    const destinationFolderId = existingFolder?.id ?? (await driveRequest<DriveFile>(accessToken, '/files?supportsAllDrives=true', {
-      method: 'POST',
-      body: JSON.stringify({ name: source.name, mimeType: 'application/vnd.google-apps.folder', parents: [item.destinationParentId] }),
-    })).id;
 
-    if (existingFolder) summary.reusedFolders++;
-    else summary.createdFolders++;
-    log.push({
-      path: folderPath,
-      name: source.name,
-      type: 'folder',
-      mimeType: source.mimeType,
-      status: existingFolder ? 'reused_folder' : 'created_folder',
-    });
+    if (item.kind === 'folder') {
+      const source = await driveRequest<DriveFile>(accessToken, `/files/${item.sourceId}?fields=id,name,mimeType&supportsAllDrives=true`);
+      const folderPath = item.parentPath ? `${item.parentPath}/${source.name}` : source.name;
+      const destinationItems = await listDriveChildren(accessToken, item.destinationParentId);
+      const existingFolder = destinationItems.find((file) => file.name === source.name && file.mimeType === 'application/vnd.google-apps.folder');
+      const destinationFolderId = existingFolder?.id ?? (await driveRequest<DriveFile>(accessToken, '/files?supportsAllDrives=true', {
+        method: 'POST',
+        body: JSON.stringify({ name: source.name, mimeType: 'application/vnd.google-apps.folder', parents: [item.destinationParentId] }),
+      })).id;
 
-    const sourceItems = await listDriveChildren(accessToken, item.sourceId);
-    for (const file of sourceItems) {
-      if (isCancelled()) throw new DriveCopyCancelledError();
-      if (file.mimeType === 'application/vnd.google-apps.folder') {
-        queue.push({ sourceId: file.id, destinationParentId: destinationFolderId, parentPath: folderPath });
-      } else if (destinationItems.some((existing) => existing.name === file.name && existing.mimeType === file.mimeType)) {
-        summary.skippedFiles++;
-        log.push({ path: `${folderPath}/${file.name}`, name: file.name, type: 'file', mimeType: file.mimeType, status: 'skipped' });
-      } else {
-        await driveRequest<DriveFile>(accessToken, `/files/${file.id}/copy?supportsAllDrives=true`, {
-          method: 'POST',
-          body: JSON.stringify({ name: file.name, parents: [destinationFolderId] }),
-        });
-        summary.copiedFiles++;
-        log.push({ path: `${folderPath}/${file.name}`, name: file.name, type: 'file', mimeType: file.mimeType, status: 'copied' });
+      if (existingFolder) summary.reusedFolders++;
+      else summary.createdFolders++;
+      log.push({
+        path: folderPath,
+        name: source.name,
+        type: 'folder',
+        mimeType: source.mimeType,
+        status: existingFolder ? 'reused_folder' : 'created_folder',
+      });
+
+      const sourceItems = await listDriveChildren(accessToken, item.sourceId);
+      for (const file of sourceItems) {
+        if (file.mimeType === 'application/vnd.google-apps.folder') {
+          queue.push({ kind: 'folder', sourceId: file.id, destinationParentId: destinationFolderId, parentPath: folderPath });
+        } else {
+          const alreadyExists = destinationItems.some((existing) => existing.name === file.name && existing.mimeType === file.mimeType);
+          queue.push({ kind: 'file', sourceFileId: file.id, name: file.name, mimeType: file.mimeType, destinationFolderId, folderPath, alreadyExists });
+        }
       }
+    } else if (item.alreadyExists) {
+      summary.skippedFiles++;
+      log.push({ path: `${item.folderPath}/${item.name}`, name: item.name, type: 'file', mimeType: item.mimeType, status: 'skipped' });
+    } else {
+      await driveRequest<DriveFile>(accessToken, `/files/${item.sourceFileId}/copy?supportsAllDrives=true`, {
+        method: 'POST',
+        body: JSON.stringify({ name: item.name, parents: [item.destinationFolderId] }),
+      });
+      summary.copiedFiles++;
+      log.push({ path: `${item.folderPath}/${item.name}`, name: item.name, type: 'file', mimeType: item.mimeType, status: 'copied' });
     }
   }
 
-  return { ...summary, log };
+  return { queue, summary, log, done: true, cancelled: false };
 }
