@@ -33,8 +33,8 @@ interface MasterListsViewProps {
   projects: Project[];
   onAddReportType: (type: ReportType) => Promise<void>;
   onAddContact: (contact: Contact) => Promise<void>;
-  onAddReportTypeStep: (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => Promise<void>;
-  onEditReportTypeStep: (stepId: string, step: { name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number | null; diaLimite?: number | null; palabrasClave?: string | null }) => Promise<void>;
+  onAddReportTypeStep: (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => Promise<void>;
+  onEditReportTypeStep: (stepId: string, step: { name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number | null; diaLimite?: number | null; palabrasClave?: string | null }) => Promise<void>;
   onDeleteReportTypeStep: (stepId: string) => Promise<void>;
   onMoveReportTypeStep: (stepId: string, direction: 'up' | 'down') => Promise<void>;
   areasConsolida: AreaConsolida[];
@@ -66,6 +66,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [newStepSubject, setNewStepSubject] = useState('');
   const [newStepIsFinal, setNewStepIsFinal] = useState(false);
   const [newStepContactIds, setNewStepContactIds] = useState<string[]>([]);
+  const [newStepPrincipalContactId, setNewStepPrincipalContactId] = useState<string | null>(null);
   const [newStepDiaInicio, setNewStepDiaInicio] = useState('');
   const [newStepDiaLimite, setNewStepDiaLimite] = useState('');
   const [newStepKeywords, setNewStepKeywords] = useState('');
@@ -77,6 +78,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [editStepSubject, setEditStepSubject] = useState('');
   const [editStepIsFinal, setEditStepIsFinal] = useState(false);
   const [editStepContactIds, setEditStepContactIds] = useState<string[]>([]);
+  const [editStepPrincipalContactId, setEditStepPrincipalContactId] = useState<string | null>(null);
   const [editStepDiaInicio, setEditStepDiaInicio] = useState('');
   const [editStepDiaLimite, setEditStepDiaLimite] = useState('');
   const [editStepKeywords, setEditStepKeywords] = useState('');
@@ -208,6 +210,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
         emailSubject: newStepSubject.trim(),
         isFinal: newStepIsFinal,
         contactIds: newStepContactIds,
+        principalContactId: newStepPrincipalContactId,
         diaInicio: stepsForModalType.length === 0 && newStepDiaInicio !== '' ? Number(newStepDiaInicio) : undefined,
         diaLimite: newStepDiaLimite === '' ? undefined : Number(newStepDiaLimite),
         palabrasClave: newStepKeywords.trim() || undefined,
@@ -216,6 +219,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       setNewStepSubject('');
       setNewStepIsFinal(false);
       setNewStepContactIds([]);
+      setNewStepPrincipalContactId(null);
       setNewStepDiaInicio('');
       setNewStepDiaLimite('');
       setNewStepKeywords('');
@@ -233,6 +237,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
     setEditStepSubject(step.emailSubject);
     setEditStepIsFinal(step.isFinal);
     setEditStepContactIds(step.contactIds);
+    setEditStepPrincipalContactId(step.principalContactId ?? null);
     setEditStepDiaInicio(step.diaInicio ? String(step.diaInicio) : '');
     setEditStepDiaLimite(step.diaLimite ? String(step.diaLimite) : '');
     setEditStepKeywords(step.palabrasClave ?? '');
@@ -240,7 +245,9 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   };
 
   const toggleEditStepContact = (contactId: string) => {
-    setEditStepContactIds((prev) => (prev.includes(contactId) ? prev.filter((id) => id !== contactId) : [...prev, contactId]));
+    const wasChecked = editStepContactIds.includes(contactId);
+    setEditStepContactIds((prev) => (wasChecked ? prev.filter((id) => id !== contactId) : [...prev, contactId]));
+    if (wasChecked && editStepPrincipalContactId === contactId) setEditStepPrincipalContactId(null);
   };
 
   const handleSaveStepEdit = async (e: React.FormEvent) => {
@@ -255,6 +262,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
         emailSubject: editStepSubject.trim(),
         isFinal: editStepIsFinal,
         contactIds: editStepContactIds,
+        principalContactId: editStepPrincipalContactId,
         diaInicio: editStepDiaInicio === '' ? null : Number(editStepDiaInicio),
         diaLimite: editStepDiaLimite === '' ? null : Number(editStepDiaLimite),
         palabrasClave: editStepKeywords.trim() || null,
@@ -980,18 +988,35 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                             <div>
                               <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Responsables</label>
                               <div className="max-h-24 overflow-y-auto rounded-md border border-slate-200 p-1.5 space-y-1">
-                                {contacts.map((c) => (
-                                  <label key={c.id} className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={editStepContactIds.includes(c.id)}
-                                      onChange={() => toggleEditStepContact(c.id)}
-                                      className="rounded"
-                                      style={{ accentColor: '#4f46e5' }}
-                                    />
-                                    {c.name}
-                                  </label>
-                                ))}
+                                {contacts.map((c) => {
+                                  const checked = editStepContactIds.includes(c.id);
+                                  const isPrincipal = editStepPrincipalContactId === c.id;
+                                  return (
+                                    <div key={c.id} className="flex items-center justify-between gap-2">
+                                      <label className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer min-w-0">
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() => toggleEditStepContact(c.id)}
+                                          className="rounded"
+                                          style={{ accentColor: '#4f46e5' }}
+                                        />
+                                        <span className="truncate">{c.name}</span>
+                                      </label>
+                                      {checked && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditStepPrincipalContactId(c.id)}
+                                          className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                                            isPrincipal ? 'bg-indigo-600 text-white' : 'text-indigo-600 hover:bg-indigo-50'
+                                          }`}
+                                        >
+                                          {isPrincipal ? 'Principal' : 'Hacer principal'}
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                             {editStepError && <p className="text-[11px] text-rose-600">{editStepError}</p>}
@@ -1194,18 +1219,33 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                     <div className="max-h-28 overflow-y-auto rounded-lg border border-slate-200 p-2 space-y-1.5">
                       {contacts.map((c) => {
                         const checked = newStepContactIds.includes(c.id);
+                        const isPrincipal = newStepPrincipalContactId === c.id;
                         return (
-                          <label key={c.id} className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                setNewStepContactIds((prev) => (checked ? prev.filter((id) => id !== c.id) : [...prev, c.id]));
-                              }}
-                              className="rounded text-indigo-600"
-                            />
-                            <span className="text-slate-800">{c.name} ({c.role})</span>
-                          </label>
+                          <div key={c.id} className="flex items-center justify-between gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  setNewStepContactIds((prev) => (checked ? prev.filter((id) => id !== c.id) : [...prev, c.id]));
+                                  if (checked && isPrincipal) setNewStepPrincipalContactId(null);
+                                }}
+                                className="rounded text-indigo-600"
+                              />
+                              <span className="text-slate-800 truncate">{c.name} ({c.role})</span>
+                            </label>
+                            {checked && (
+                              <button
+                                type="button"
+                                onClick={() => setNewStepPrincipalContactId(c.id)}
+                                className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                                  isPrincipal ? 'bg-indigo-600 text-white' : 'text-indigo-600 hover:bg-indigo-50'
+                                }`}
+                              >
+                                {isPrincipal ? 'Principal' : 'Hacer principal'}
+                              </button>
+                            )}
+                          </div>
                         );
                       })}
                     </div>

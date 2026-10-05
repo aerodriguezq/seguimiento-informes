@@ -257,17 +257,36 @@ async function computeReportDueDate(sql: SqlClient, typeId: number, projectId: n
 // los pasos del flujo de ese tipo de informe (mismo alcance que
 // computeReportDueDate: flujo propio del proyecto si existe, si no la
 // plantilla general) -- ya no se eligen a mano al crear el informe.
-async function computeReportResponsables(sql: SqlClient, typeId: number, projectId: number): Promise<string[]> {
+async function computeReportResponsables(
+  sql: SqlClient,
+  typeId: number,
+  projectId: number,
+): Promise<{ contactIds: string[]; primaryContactId: string | null }> {
   const scope = await resolveStepsScope(sql, typeId, projectId);
   const stepRows = (
     scope === null
-      ? await sql`SELECT paso_id AS id FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id IS NULL`
-      : await sql`SELECT paso_id AS id FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id = ${scope}`
+      ? await sql`SELECT paso_id AS id, orden FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id IS NULL ORDER BY orden ASC`
+      : await sql`SELECT paso_id AS id, orden FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id = ${scope} ORDER BY orden ASC`
   ) as any[];
   const stepIds = stepRows.map((s: any) => s.id);
-  if (stepIds.length === 0) return [];
-  const contactRows = (await sql`SELECT DISTINCT contacto_id AS id FROM tipo_informe_paso_contacto WHERE paso_id = ANY(${stepIds})`) as any[];
-  return contactRows.map((c: any) => String(c.id));
+  if (stepIds.length === 0) return { contactIds: [], primaryContactId: null };
+
+  const contactRows = (await sql`
+    SELECT paso_id AS "stepId", contacto_id AS id, es_principal AS "esPrincipal"
+    FROM tipo_informe_paso_contacto WHERE paso_id = ANY(${stepIds})
+  `) as any[];
+  const contactIds = Array.from(new Set(contactRows.map((c: any) => String(c.id))));
+
+  // El principal es el contacto marcado como tal en el paso de menor orden
+  // que tenga uno marcado (normalmente el paso 1) -- así siempre hay un
+  // único principal aunque varios pasos marquen contactos distintos.
+  const orderByStepId = new Map(stepRows.map((s: any) => [s.id, s.orden]));
+  const principalRows = contactRows
+    .filter((c: any) => c.esPrincipal)
+    .sort((a: any, b: any) => (orderByStepId.get(a.stepId) ?? 0) - (orderByStepId.get(b.stepId) ?? 0));
+  const primaryContactId = principalRows[0] ? String(principalRows[0].id) : null;
+
+  return { contactIds, primaryContactId };
 }
 
 // Crea la alerta del primer paso configurado para el tipo de informe (si existe)
@@ -312,10 +331,17 @@ async function createReportRow(sql: SqlClient, input: CreateReportInput): Promis
 
   // Los responsables ya no se eligen a mano: se toman de los contactos
   // configurados en los pasos del flujo (mismo alcance que usa el motor de
-  // etapas) -- lo que venga del cliente solo se usa de respaldo.
-  const contactIds = input.contactIds?.length
-    ? input.contactIds
-    : await computeReportResponsables(sql, Number(input.typeId), Number(input.projectId));
+  // etapas) -- lo que venga del cliente solo se usa de respaldo. El
+  // principal es el que se marcó como tal en el paso (normalmente el 1).
+  let contactIds: (string | number)[];
+  let computedPrimaryContactId: string | null = null;
+  if (input.contactIds?.length) {
+    contactIds = input.contactIds;
+  } else {
+    const computed = await computeReportResponsables(sql, Number(input.typeId), Number(input.projectId));
+    contactIds = computed.contactIds;
+    computedPrimaryContactId = computed.primaryContactId;
+  }
 
   const insertedReports = await sql`
     INSERT INTO informes (informe_id, proyecto_id, tipo_informe_id, estado, mes_nombre, anio, fecha, observaciones, created_at, updated_at)
@@ -342,7 +368,7 @@ async function createReportRow(sql: SqlClient, input: CreateReportInput): Promis
 
   await sql`UPDATE informes SET consecutivo = ${consecutive}, numero_secuencia = ${Number(seqCount)} WHERE informe_id = ${reportId}`;
 
-  const primaryContactId = input.primaryContactId || contactIds[0];
+  const primaryContactId = input.primaryContactId || computedPrimaryContactId || contactIds[0];
   for (const contactId of contactIds) {
     await sql`
       INSERT INTO informe_contacto (informe_id, contacto_id, es_principal)
@@ -994,6 +1020,19 @@ export default async function handler(request: VercelRequest, response: VercelRe
         UPDATE informe_pasos_instancia SET fecha_inicio = ${nextStart}, fecha_limite = ${nextDue}, updated_at = NOW()
         WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
       `;
+    } else if (action === 'setPrimaryContact') {
+      const { contactId } = request.body ?? {};
+      const contactIdNum = Number(contactId);
+      if (!Number.isInteger(contactIdNum) || contactIdNum <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Falta el id del contacto.'] });
+      }
+      const assigned = (await sql`
+        SELECT contacto_id FROM informe_contacto WHERE informe_id = ${reportId} AND contacto_id = ${contactIdNum}
+      `) as any[];
+      if (!assigned[0]) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Ese contacto no está entre los responsables de este informe.'] });
+      }
+      await sql`UPDATE informe_contacto SET es_principal = (contacto_id = ${contactIdNum}) WHERE informe_id = ${reportId}`;
     } else if (action === 'attachment') {
       const { attachment, userName } = request.body ?? {};
       if (!attachment?.name || !attachment?.driveUrl) {

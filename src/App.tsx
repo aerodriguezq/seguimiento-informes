@@ -453,6 +453,18 @@ export default function App() {
     showToast('Fechas de la etapa actualizadas.', 'success');
   };
 
+  const handleSetPrimaryContact = async (reportId: string, contactId: string) => {
+    const response = await fetch('/api/reports', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'setPrimaryContact', reportId, contactId: Number(contactId) }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible cambiar el responsable principal.');
+    setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+    showToast('Responsable principal actualizado.', 'success');
+  };
+
   const handleDeleteReport = async (reportId: string) => {
     const response = await fetch(`/api/reports?reportId=${encodeURIComponent(reportId)}`, { method: 'DELETE' });
     const payload = await response.json();
@@ -713,7 +725,7 @@ export default function App() {
     showToast(`Contacto "${newContact.name}" registrado en la lista maestra.`, 'success');
   };
 
-  const handleAddReportTypeStep = async (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => {
+  const handleAddReportTypeStep = async (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => {
     const response = await fetch('/api/catalogs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -725,11 +737,11 @@ export default function App() {
     showToast(`Paso "${step.name}" agregado al flujo.`, 'success');
   };
 
-  const handleEditReportTypeStep = async (stepId: string, step: { name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number | null; diaLimite?: number | null; palabrasClave?: string | null }) => {
+  const handleEditReportTypeStep = async (stepId: string, step: { name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number | null; diaLimite?: number | null; palabrasClave?: string | null }) => {
     const response = await fetch('/api/catalogs', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind: 'reportTypeStep', stepId: Number(stepId), data: step, contactIds: step.contactIds }),
+      body: JSON.stringify({ kind: 'reportTypeStep', stepId: Number(stepId), data: step, contactIds: step.contactIds, principalContactId: step.principalContactId ?? null }),
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible editar el paso.');
@@ -1113,6 +1125,7 @@ export default function App() {
           onEditReportStage={handleEditReportStage}
           onDeleteReport={handleDeleteReport}
           onToggleContactAlarm={handleToggleContactAlarm}
+          onSetPrimaryContact={handleSetPrimaryContact}
           onSimulateTrigger={handleSimulateAlertTrigger}
         />
       )}

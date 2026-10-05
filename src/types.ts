@@ -26,6 +26,10 @@ export interface ReportTypeStep {
   emailSubject: string;
   isFinal: boolean;
   contactIds: string[];
+  // Cuál de los contactIds es el responsable principal de este paso -- se
+  // vuelve el principal del informe cuando los responsables se calculan
+  // solos, y recibe copia (CC) de los correos de recordatorio.
+  principalContactId?: string | null;
   // Día del mes en que inicia esta etapa (solo aplica al primer paso; los
   // siguientes inician con la fecha real de la entrega anterior) y día del
   // mes límite para completarla. Ambos opcionales.

@@ -53,6 +53,7 @@ interface ReportDetailModalProps {
   onDeleteReport: (reportId: string) => Promise<void>;
   onToggleContactAlarm: (contactId: string, enabled: boolean) => Promise<void>;
   onSimulateTrigger: (alert: ScheduledAlert) => Promise<void>;
+  onSetPrimaryContact: (reportId: string, contactId: string) => Promise<void>;
 }
 
 export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
@@ -69,6 +70,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   onDeleteReport,
   onToggleContactAlarm,
   onSimulateTrigger,
+  onSetPrimaryContact,
 }) => {
   const { user, canEdit } = useAuth();
   const [isAdvancingStep, setIsAdvancingStep] = useState(false);
@@ -77,6 +79,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [stageDueInput, setStageDueInput] = useState('');
   const [isSavingStage, setIsSavingStage] = useState(false);
   const [togglingAlarmId, setTogglingAlarmId] = useState<string | null>(null);
+  const [settingPrimaryId, setSettingPrimaryId] = useState<string | null>(null);
   const [sendingAlertId, setSendingAlertId] = useState<string | null>(null);
   const [sentAlertId, setSentAlertId] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -179,6 +182,15 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
       await onToggleContactAlarm(contactId, enabled);
     } finally {
       setTogglingAlarmId(null);
+    }
+  };
+
+  const handleMakePrimary = async (contactId: string) => {
+    setSettingPrimaryId(contactId);
+    try {
+      await onSetPrimaryContact(report.id, contactId);
+    } finally {
+      setSettingPrimaryId(null);
     }
   };
 
@@ -690,7 +702,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
                   Contactos y Notificaciones Asignadas
                 </h4>
-                <p className="text-[10.5px] text-slate-400 mt-0.5">Haz clic en la alarma de un contacto para activarle o quitarle los recordatorios automáticos.</p>
+                <p className="text-[10.5px] text-slate-400 mt-0.5">Haz clic en la alarma de un contacto para activarle o quitarle los recordatorios automáticos. El principal recibe copia (CC) de todos los correos del informe.</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {assignedContacts.map((contact) => {
@@ -730,8 +742,20 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                           {isToggling ? '...' : contact.hasNotificationAlarm ? 'Alarma Activa' : 'Sin Alarma'}
                         </button>
                       </div>
-                      <div className="pt-2 border-t border-slate-100 text-slate-500 text-[11px] font-mono truncate">
-                        {contact.email} • {contact.phone}
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <span className="text-slate-500 text-[11px] font-mono truncate">
+                          {contact.email} • {contact.phone}
+                        </span>
+                        {!isPrimary && (
+                          <button
+                            type="button"
+                            onClick={() => handleMakePrimary(contact.id)}
+                            disabled={settingPrimaryId === contact.id}
+                            className="shrink-0 text-[10.5px] font-semibold text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                          >
+                            {settingPrimaryId === contact.id ? '...' : 'Hacer principal'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   );

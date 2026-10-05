@@ -326,17 +326,22 @@ export default async function handler(
             palabras_clave AS "palabrasClave"
           FROM tipo_informe_pasos ORDER BY tipo_informe_id ASC, proyecto_id ASC NULLS FIRST, orden ASC
         `,
-        sql`SELECT paso_id AS "stepId", contacto_id AS "contactId" FROM tipo_informe_paso_contacto`,
+        sql`SELECT paso_id AS "stepId", contacto_id AS "contactId", es_principal AS "isPrincipal" FROM tipo_informe_paso_contacto`,
         sql`SELECT empresa_id AS id, nombre AS name, COALESCE(codigo, '') AS code FROM empresas ORDER BY nombre ASC`,
         sql`SELECT area_id AS id, nombre AS name FROM areas_consolida ORDER BY nombre ASC`,
         sql`SELECT drive_root_folder_id AS "driveRootFolderId", drive_root_folder_url AS "driveRootFolderUrl" FROM peticiones_config WHERE id = 1`,
       ]);
       const peticionesConfig = (peticionesConfigRows as any[])[0] ?? { driveRootFolderId: null, driveRootFolderUrl: null };
 
-      const reportTypeSteps = (steps as any[]).map((step) => ({
-        ...step,
-        contactIds: (stepContacts as any[]).filter((sc) => sc.stepId === step.id).map((sc) => String(sc.contactId)),
-      }));
+      const reportTypeSteps = (steps as any[]).map((step) => {
+        const ownContacts = (stepContacts as any[]).filter((sc) => sc.stepId === step.id);
+        const principal = ownContacts.find((sc) => sc.isPrincipal);
+        return {
+          ...step,
+          contactIds: ownContacts.map((sc) => String(sc.contactId)),
+          principalContactId: principal ? String(principal.contactId) : null,
+        };
+      });
 
       return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, isAdmin, empresas, areasConsolida, peticionesConfig }, meta: {}, errors: [] });
     }
@@ -561,19 +566,34 @@ export default async function handler(
             palabras_clave AS "palabrasClave"
         `;
 
+        const hasPrincipal = Object.prototype.hasOwnProperty.call(body, 'principalContactId');
+        let principalContactId: string | null;
+        if (hasPrincipal) {
+          principalContactId = body.principalContactId ? String(body.principalContactId) : null;
+        } else {
+          const [existingPrincipal] = (await sql`
+            SELECT contacto_id AS id FROM tipo_informe_paso_contacto WHERE paso_id = ${stepId} AND es_principal = TRUE
+          `) as any[];
+          principalContactId = existingPrincipal ? String(existingPrincipal.id) : null;
+        }
+
         let contactIds: string[];
         if (Array.isArray(body.contactIds)) {
           await sql`DELETE FROM tipo_informe_paso_contacto WHERE paso_id = ${stepId}`;
           for (const contactId of body.contactIds) {
-            await sql`INSERT INTO tipo_informe_paso_contacto (paso_id, contacto_id) VALUES (${stepId}, ${contactId})`;
+            const isPrincipal = String(contactId) === principalContactId;
+            await sql`INSERT INTO tipo_informe_paso_contacto (paso_id, contacto_id, es_principal) VALUES (${stepId}, ${contactId}, ${isPrincipal})`;
           }
           contactIds = body.contactIds.map(String);
         } else {
+          if (hasPrincipal) {
+            await sql`UPDATE tipo_informe_paso_contacto SET es_principal = (contacto_id = ${principalContactId}) WHERE paso_id = ${stepId}`;
+          }
           const existingContacts = await sql`SELECT contacto_id AS id FROM tipo_informe_paso_contacto WHERE paso_id = ${stepId}`;
           contactIds = existingContacts.map((c: any) => String(c.id));
         }
 
-        return response.status(200).json({ data: { ...rows[0], contactIds }, meta: {}, errors: [] });
+        return response.status(200).json({ data: { ...rows[0], contactIds, principalContactId }, meta: {}, errors: [] });
       }
 
       if (body.kind !== 'authorizedUser') {
@@ -891,7 +911,7 @@ export default async function handler(
     }
 
     if (kind === 'reportTypeStep') {
-      const { typeId, projectId, name, emailSubject, isFinal, contactIds, diaInicio, diaLimite, palabrasClave } = data ?? {};
+      const { typeId, projectId, name, emailSubject, isFinal, contactIds, diaInicio, diaLimite, palabrasClave, principalContactId } = data ?? {};
       if (!typeId || !name || !emailSubject || !Array.isArray(contactIds) || contactIds.length === 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Tipo de informe, nombre, asunto de correo y al menos un contacto son obligatorios.'] });
       }
@@ -931,12 +951,14 @@ export default async function handler(
       ) as any[];
       const stepId = stepRows[0].id;
 
+      const parsedPrincipalContactId = principalContactId ? String(principalContactId) : null;
       for (const contactId of contactIds) {
-        await sql`INSERT INTO tipo_informe_paso_contacto (paso_id, contacto_id) VALUES (${stepId}, ${contactId})`;
+        const isPrincipal = String(contactId) === parsedPrincipalContactId;
+        await sql`INSERT INTO tipo_informe_paso_contacto (paso_id, contacto_id, es_principal) VALUES (${stepId}, ${contactId}, ${isPrincipal})`;
       }
 
       return response.status(201).json({
-        data: { ...stepRows[0], contactIds: contactIds.map(String) },
+        data: { ...stepRows[0], contactIds: contactIds.map(String), principalContactId: parsedPrincipalContactId },
         meta: {}, errors: [],
       });
     }

@@ -109,6 +109,20 @@ async function fetchAlertsByIds(sql: SqlClient, ids: number[]) {
   }));
 }
 
+// El responsable principal del informe (marcado en el paso del flujo, o
+// cambiado a mano desde "Responsables") va siempre en copia -- así se
+// entera aunque no esté entre los destinatarios directos del paso actual.
+async function getPrimaryContactEmail(sql: SqlClient, reportId: unknown): Promise<string | null> {
+  const id = Number(reportId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const [row] = (await sql`
+    SELECT c.email FROM informe_contacto ic
+    JOIN contactos c ON c.contacto_id = ic.contacto_id
+    WHERE ic.informe_id = ${id} AND ic.es_principal = TRUE AND c.email IS NOT NULL AND c.email <> ''
+  `) as any[];
+  return row?.email ?? null;
+}
+
 async function handleSend(request: VercelRequest, response: VercelResponse, sql: SqlClient) {
   const { alert, recipients } = request.body ?? {};
   const validRecipients = (Array.isArray(recipients) ? recipients : []).filter(
@@ -125,9 +139,14 @@ async function handleSend(request: VercelRequest, response: VercelResponse, sql:
   }
 
   try {
+    const toEmails = validRecipients.map((r: any) => r.email);
+    const primaryEmail = alert.reportId ? await getPrimaryContactEmail(sql, alert.reportId) : null;
+    const cc = primaryEmail && !toEmails.includes(primaryEmail) ? [primaryEmail] : undefined;
+
     const html = await buildAlertEmail(sql, alert);
     await sendEmail(accessToken, {
-      to: validRecipients.map((r: any) => r.email),
+      to: toEmails,
+      cc,
       subject: `[Seguimiento] ${alert.name}`,
       body: html,
       html: true,
@@ -314,9 +333,14 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
     if (recipientRows.length === 0) continue;
 
     try {
+      const toEmails = recipientRows.map((r: any) => r.email);
+      const primaryEmail = await getPrimaryContactEmail(sql, alert.reportId);
+      const cc = primaryEmail && !toEmails.includes(primaryEmail) ? [primaryEmail] : undefined;
+
       const html = await buildAlertEmail(sql, alert);
       await sendEmail(accessToken, {
-        to: recipientRows.map((r: any) => r.email),
+        to: toEmails,
+        cc,
         subject: `[Seguimiento] ${alert.name}`,
         body: html,
         html: true,
