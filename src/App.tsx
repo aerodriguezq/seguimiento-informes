@@ -984,6 +984,7 @@ export default function App() {
               projects={projects}
               reportTypes={reportTypes}
               contacts={contacts}
+              reportTypeSteps={reportTypeSteps}
               alerts={alerts}
               onSelectReport={handleNavigateToReport}
               onOpenNewReport={() => handleOpenNewReport(currentProjectId)}

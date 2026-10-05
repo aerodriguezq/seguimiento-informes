@@ -6,6 +6,7 @@ import {
   Contact,
   ReportStatus,
   ScheduledAlert,
+  ReportTypeStep,
 } from '../../types';
 import {
   calculateDaysRemaining,
@@ -38,6 +39,7 @@ interface ReportsListViewProps {
   projects: Project[];
   reportTypes: ReportType[];
   contacts: Contact[];
+  reportTypeSteps: ReportTypeStep[];
   alerts: ScheduledAlert[];
   onSelectReport: (reportId: string) => void;
   onOpenNewReport: () => void;
@@ -51,6 +53,7 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
   projects,
   reportTypes,
   contacts,
+  reportTypeSteps,
   alerts,
   onSelectReport,
   onOpenNewReport,
@@ -160,6 +163,19 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
     return contactIds
       .map((id) => contacts.find((c) => c.id === id)?.name)
       .filter(Boolean);
+  };
+
+  // Responsables = los asignados directamente al informe + los
+  // responsables de cada paso del flujo de ese tipo de informe (mismo
+  // alcance/unión que usa el detalle del informe) -- un informe cargado
+  // masivamente sin "Responsables" en el Excel igual muestra a quien esté
+  // configurado en el paso, en vez de "Sin asignar".
+  const getAssignedContactIds = (report: Report) => {
+    const flowStepsForType = reportTypeSteps.filter((s) => s.typeId === report.typeId);
+    const hasProjectScope = flowStepsForType.some((s) => s.projectId === report.projectId);
+    const scopedFlowSteps = flowStepsForType.filter((s) => (hasProjectScope ? s.projectId === report.projectId : s.projectId === null));
+    const stepContactIds = scopedFlowSteps.flatMap((s) => s.contactIds);
+    return Array.from(new Set([...report.contactIds, ...stepContactIds]));
   };
 
   return (
@@ -447,7 +463,7 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
                 filteredReports.map((report) => {
                   const daysRemaining = calculateDaysRemaining(report.dueDate, report.status);
                   const semaforo = getSemaforoStatus(report.dueDate, report.status);
-                  const assignedContactNames = getContactNames(report.contactIds);
+                  const assignedContactNames = getContactNames(getAssignedContactIds(report));
 
                   return (
                     <tr
