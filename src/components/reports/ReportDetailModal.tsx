@@ -39,6 +39,23 @@ import {
   Save,
 } from 'lucide-react';
 
+const STAGE_LABEL: Record<string, string> = {
+  PENDIENTE: 'Pendiente',
+  ALERTA_GENERADA: 'Alerta generada',
+  RECIBIDA_A_TIEMPO: 'Recibida a tiempo',
+  RECIBIDA_TARDE: 'Recibida tarde',
+  NO_RECIBIDA: 'No recibida',
+  EN_REVISION: 'En revisión',
+};
+const STAGE_COLOR: Record<string, string> = {
+  PENDIENTE: 'bg-slate-100 text-slate-600',
+  ALERTA_GENERADA: 'bg-amber-50 text-amber-800 border border-amber-200',
+  RECIBIDA_A_TIEMPO: 'bg-emerald-50 text-emerald-800 border border-emerald-200',
+  RECIBIDA_TARDE: 'bg-orange-50 text-orange-800 border border-orange-200',
+  NO_RECIBIDA: 'bg-rose-50 text-rose-700 border border-rose-200',
+  EN_REVISION: 'bg-indigo-50 text-indigo-700 border border-indigo-200',
+};
+
 interface ReportDetailModalProps {
   report: Report;
   contacts: Contact[];
@@ -156,9 +173,6 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   // Alertas ligadas específicamente al flujo de este informe (más las generales del proyecto)
   const reportStepAlerts = alerts.filter((a) => a.reportId === report.id);
   const projectAlerts = reportStepAlerts.length > 0 ? reportStepAlerts : alerts.filter((a) => a.projectId === report.projectId);
-
-  // Current state index in cycle
-  const currentStepIndex = STATUS_SEQUENCE.indexOf(report.status);
 
   const openEditStage = (stepId: string, startDate: string | null, dueDate: string | null) => {
     setEditingStageId(stepId);
@@ -365,76 +379,71 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
 
         {/* Modal Body with Scroll */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1">
-          {/* Section 10: Horizontal Progress Lifecycle */}
+          {/* Línea de progreso del flujo real configurado (pasos del tipo de
+              informe, no el estado administrativo genérico) -- nombres y
+              responsables tal como quedaron en Listas Maestras. */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Línea de Progreso del Ciclo de Vida del Informe
+                Línea de Progreso del Flujo de Entrega
               </span>
-              {currentStepIndex < STATUS_SEQUENCE.length - 1 && (
-                <button
-                  type="button"
-                  onClick={() => handleOpenTransition(STATUS_SEQUENCE[currentStepIndex + 1])}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-                >
-                  <span>Avanzar a {STATUS_SEQUENCE[currentStepIndex + 1]}</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              )}
             </div>
 
-            {/* Horizontal timeline steps */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 relative">
-              {STATUS_SEQUENCE.map((seqStatus, idx) => {
-                const isPassed = idx < currentStepIndex;
-                const isCurrent = idx === currentStepIndex;
-                const isPending = idx > currentStepIndex;
+            {report.stageInstances && report.stageInstances.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {report.stageInstances.map((stage) => {
+                  const isCurrent = stage.stepId === report.currentStepId;
+                  const isDone = stage.status === 'RECIBIDA_A_TIEMPO' || stage.status === 'RECIBIDA_TARDE';
+                  const step = reportTypeSteps.find((s) => s.id === stage.stepId);
+                  const responsables = (step?.contactIds ?? [])
+                    .map((id) => contacts.find((c) => c.id === id)?.name)
+                    .filter((name): name is string => Boolean(name));
 
-                // Find history transition info for this step if exists
-                const transitionItem = report.history.find((h) => h.status === seqStatus);
+                  return (
+                    <div
+                      key={stage.stepId}
+                      className={`p-3 rounded-lg border text-xs flex flex-col justify-between transition-all ${
+                        isCurrent
+                          ? 'border-indigo-500 bg-white ring-2 ring-indigo-100 shadow-xs'
+                          : isDone
+                          ? 'border-emerald-200 bg-emerald-50/50'
+                          : 'border-slate-200 bg-slate-100/60 opacity-80'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] font-bold text-slate-400">PASO {stage.order}</span>
+                          {isDone && <CheckCircle className="w-4 h-4 text-emerald-600" />}
+                          {isCurrent && (
+                            <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse" />
+                          )}
+                        </div>
+                        <div
+                          className={`font-bold leading-tight ${
+                            isCurrent ? 'text-indigo-950' : isDone ? 'text-emerald-950' : 'text-slate-600'
+                          }`}
+                        >
+                          {stage.stepName}
+                        </div>
+                        <span className={`inline-block mt-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${STAGE_COLOR[stage.status] || 'bg-slate-100 text-slate-600'}`}>
+                          {STAGE_LABEL[stage.status] || stage.status}
+                        </span>
+                      </div>
 
-                return (
-                  <div
-                    key={seqStatus}
-                    className={`p-3 rounded-lg border text-xs flex flex-col justify-between transition-all ${
-                      isCurrent
-                        ? 'border-indigo-500 bg-white ring-2 ring-indigo-100 shadow-xs'
-                        : isPassed
-                        ? 'border-emerald-200 bg-emerald-50/50'
-                        : 'border-slate-200 bg-slate-100/60 opacity-65'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[10px] font-bold text-slate-400">PASO {idx + 1}</span>
-                        {isPassed && <CheckCircle className="w-4 h-4 text-emerald-600" />}
-                        {isCurrent && (
-                          <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse" />
+                      <div className="mt-3 pt-2 border-t border-slate-200/60 text-[11px] text-slate-500">
+                        {responsables.length > 0 ? (
+                          <div className="truncate" title={responsables.join(', ')}>{responsables.join(', ')}</div>
+                        ) : (
+                          <span className="text-slate-400 italic">Sin responsables</span>
                         )}
                       </div>
-                      <div
-                        className={`font-bold leading-tight ${
-                          isCurrent ? 'text-indigo-950' : isPassed ? 'text-emerald-950' : 'text-slate-600'
-                        }`}
-                      >
-                        {seqStatus}
-                      </div>
                     </div>
-
-                    <div className="mt-3 pt-2 border-t border-slate-200/60 text-[11px] text-slate-500">
-                      {transitionItem ? (
-                        <>
-                          <div className="font-semibold text-slate-700">{transitionItem.userName}</div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">{transitionItem.date}</div>
-                        </>
-                      ) : (
-                        <span className="text-slate-400 italic">Pendiente por registrar</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 py-4 text-center">Este informe todavía no tiene un flujo de pasos configurado.</p>
+            )}
           </div>
 
           {/* Flujo de entrega por correo (pasos configurados en el tipo de informe) */}
@@ -493,22 +502,6 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {report.stageInstances.map((stage) => {
-                      const STAGE_LABEL: Record<string, string> = {
-                        PENDIENTE: 'Pendiente',
-                        ALERTA_GENERADA: 'Alerta generada',
-                        RECIBIDA_A_TIEMPO: 'Recibida a tiempo',
-                        RECIBIDA_TARDE: 'Recibida tarde',
-                        NO_RECIBIDA: 'No recibida',
-                        EN_REVISION: 'En revisión',
-                      };
-                      const STAGE_COLOR: Record<string, string> = {
-                        PENDIENTE: 'bg-slate-100 text-slate-600',
-                        ALERTA_GENERADA: 'bg-amber-50 text-amber-800 border border-amber-200',
-                        RECIBIDA_A_TIEMPO: 'bg-emerald-50 text-emerald-800 border border-emerald-200',
-                        RECIBIDA_TARDE: 'bg-orange-50 text-orange-800 border border-orange-200',
-                        NO_RECIBIDA: 'bg-rose-50 text-rose-700 border border-rose-200',
-                        EN_REVISION: 'bg-indigo-50 text-indigo-700 border border-indigo-200',
-                      };
                       const isEditingStage = editingStageId === stage.stepId;
                       return (
                         <tr key={stage.stepId}>
