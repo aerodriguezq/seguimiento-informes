@@ -152,8 +152,13 @@ async function upsertStepInstance(
   `) as any[];
   if (!step) return;
 
-  const fechaLimite = step.diaLimite ? dateFromDayOfMonth(year, monthName, step.diaLimite) : null;
-  const fechaInicio = dynamicStartDate ?? (step.orden === 1 && step.diaInicio ? dateFromDayOfMonth(year, monthName, step.diaInicio) : null);
+  // El informe de un período (ej. Septiembre) se entrega el mes SIGUIENTE
+  // (Octubre) -- todos los días configurados por paso (día de inicio, día
+  // límite) son días de ese mes siguiente, no del mes del período, igual
+  // que la fecha límite general del informe (computeReportDueDate).
+  const { month: targetMonth, year: targetYear } = nextMonthYear(monthName, year);
+  const fechaLimite = step.diaLimite ? dateFromDayOfMonth(targetYear, targetMonth, step.diaLimite) : null;
+  const fechaInicio = dynamicStartDate ?? (step.orden === 1 && step.diaInicio ? dateFromDayOfMonth(targetYear, targetMonth, step.diaInicio) : null);
 
   await sql`
     INSERT INTO informe_pasos_instancia (informe_id, paso_id, fecha_inicio, fecha_limite, estado_etapa)
