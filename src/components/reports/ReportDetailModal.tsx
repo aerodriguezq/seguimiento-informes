@@ -5,6 +5,7 @@ import {
   Contact,
   ScheduledAlert,
   ReportAttachment,
+  ReportTypeStep,
 } from '../../types';
 import {
   calculateDaysRemaining,
@@ -42,6 +43,7 @@ interface ReportDetailModalProps {
   report: Report;
   contacts: Contact[];
   alerts: ScheduledAlert[];
+  reportTypeSteps: ReportTypeStep[];
   onClose: () => void;
   onUpdateStatus: (reportId: string, newStatus: ReportStatus, comment: string) => void;
   onAddAttachment: (reportId: string, attachment: ReportAttachment) => void;
@@ -55,6 +57,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   report,
   contacts,
   alerts,
+  reportTypeSteps,
   onClose,
   onUpdateStatus,
   onAddAttachment,
@@ -139,8 +142,18 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const daysRemaining = calculateDaysRemaining(report.dueDate, report.status);
   const semaforo = getSemaforoStatus(report.dueDate, report.status);
 
-  // Find assigned contacts
-  const assignedContacts = contacts.filter((c) => report.contactIds.includes(c.id));
+  // Responsables = los asignados directamente al informe + los
+  // responsables de cada paso del flujo de este tipo de informe (el mismo
+  // alcance que usa el motor de etapas: flujo propio del proyecto si
+  // existe, si no la plantilla general) -- así se ve de una vez a todo el
+  // que puede recibir una alerta en algún punto del proceso, no solo a
+  // quien quedó asignado al crear el informe.
+  const flowStepsForType = reportTypeSteps.filter((s) => s.typeId === report.typeId);
+  const hasProjectScope = flowStepsForType.some((s) => s.projectId === report.projectId);
+  const scopedFlowSteps = flowStepsForType.filter((s) => (hasProjectScope ? s.projectId === report.projectId : s.projectId === null));
+  const stepContactIds = Array.from(new Set(scopedFlowSteps.flatMap((s) => s.contactIds)));
+  const allResponsibleIds = Array.from(new Set([...report.contactIds, ...stepContactIds]));
+  const assignedContacts = contacts.filter((c) => allResponsibleIds.includes(c.id));
   const primaryContact = contacts.find((c) => c.id === report.primaryContactId);
 
   // Alertas ligadas específicamente al flujo de este informe (más las generales del proyecto)

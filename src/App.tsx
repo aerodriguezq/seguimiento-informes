@@ -1057,6 +1057,7 @@ export default function App() {
           report={activeReportForModal}
           contacts={contacts}
           alerts={alerts}
+          reportTypeSteps={reportTypeSteps}
           onClose={() => setSelectedReportId(null)}
           onUpdateStatus={handleUpdateReportStatus}
           onAddAttachment={handleAddReportAttachment}
