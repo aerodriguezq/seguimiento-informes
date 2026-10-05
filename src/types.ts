@@ -135,6 +135,12 @@ export interface Report {
   currentStepIsFinal?: boolean;
   currentStepEmailSubject?: string;
   isWorkflowCompleted?: boolean;
+  // Seguimiento histórico adicional (principalmente para informes
+  // cargados masivamente): quién revisó y las fechas REALES de entrega y
+  // revisión, distintas de la fecha límite contractual.
+  revisorNombre?: string | null;
+  fechaEntregaReal?: string | null;
+  fechaRevision?: string | null;
   stageInstances?: ReportStageInstance[];
 }
 

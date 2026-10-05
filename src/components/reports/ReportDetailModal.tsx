@@ -685,6 +685,23 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                   </select>
                 </div>
               </div>
+
+              {(report.revisorNombre || report.fechaEntregaReal || report.fechaRevision) && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
+                    <span className="text-slate-500 block">Responsable de Revisión:</span>
+                    <span className="font-bold text-slate-900 mt-1 block">{report.revisorNombre || '—'}</span>
+                  </div>
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
+                    <span className="text-slate-500 block">Fecha de Entrega Real:</span>
+                    <span className="font-bold text-slate-900 mt-1 block">{report.fechaEntregaReal || '—'}</span>
+                  </div>
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
+                    <span className="text-slate-500 block">Fecha de Revisión:</span>
+                    <span className="font-bold text-slate-900 mt-1 block">{report.fechaRevision || '—'}</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

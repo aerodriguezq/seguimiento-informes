@@ -539,6 +539,7 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
         <BulkImportReportsModal
           projects={projects}
           reportTypes={reportTypes}
+          contacts={contacts}
           onClose={() => setIsBulkImportOpen(false)}
           onImported={onReportsImported}
         />

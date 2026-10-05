@@ -62,6 +62,9 @@ async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
       i.created_at AS "createdAt",
       i.flujo_completado AS "isWorkflowCompleted",
       i.numero_secuencia AS "sequenceNumber",
+      i.revisor_nombre AS "revisorNombre",
+      TO_CHAR(i.fecha_entrega_real, 'YYYY-MM-DD') AS "fechaEntregaReal",
+      TO_CHAR(i.fecha_revision, 'YYYY-MM-DD') AS "fechaRevision",
       wp.paso_id AS "currentStepId",
       wp.nombre AS "currentStepName",
       wp.es_final AS "currentStepIsFinal",
@@ -423,6 +426,17 @@ async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ cre
       // continuidad con la numeración histórica; si no, se calcula solo
       // como con "Nuevo Informe".
       const consecutivoOverride = String(r.consecutivo ?? r.Consecutivo ?? '').trim();
+      // Seguimiento histórico adicional: quién revisó y las fechas REALES
+      // (no la fecha límite contractual) de entrega y revisión.
+      const revisorNombre = String(r.revisor ?? r.Revisor ?? r['Responsable Revisión'] ?? '').trim();
+      const fechaEntregaReal = String(r.fechaEntregaReal ?? r['Fecha Entrega'] ?? '').trim();
+      const fechaRevision = String(r.fechaRevision ?? r['Fecha Revisión'] ?? '').trim();
+      // Periodo Inicio/Fin no tienen columna propia en la base -- se
+      // anexan al texto de observaciones para no perder el dato.
+      const periodoInicio = String(r.periodoInicio ?? r['Periodo Inicio'] ?? '').trim();
+      const periodoFin = String(r.periodoFin ?? r['Periodo Fin'] ?? '').trim();
+      const enlaceInforme = String(r.enlaceInforme ?? r['Enlace Informe'] ?? '').trim();
+      const enlaceEvidencias = String(r.enlaceEvidencias ?? r['Enlace Evidencias'] ?? '').trim();
 
       if ((!bpin && !projectName) || !typeCode || !month || !year || !dueDate) {
         throw new Error('Faltan campos obligatorios (BPIN o Proyecto, código de tipo, mes, año o fecha límite).');
@@ -433,6 +447,15 @@ async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ cre
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
         throw new Error('La fecha límite debe tener formato AAAA-MM-DD.');
       }
+      if (fechaEntregaReal && !/^\d{4}-\d{2}-\d{2}$/.test(fechaEntregaReal)) {
+        throw new Error('La fecha de entrega debe tener formato AAAA-MM-DD.');
+      }
+      if (fechaRevision && !/^\d{4}-\d{2}-\d{2}$/.test(fechaRevision)) {
+        throw new Error('La fecha de revisión debe tener formato AAAA-MM-DD.');
+      }
+
+      const periodoNote = periodoInicio || periodoFin ? `Periodo: ${periodoInicio || '—'} a ${periodoFin || '—'}.` : '';
+      const fullObservations = [periodoNote, observations].filter(Boolean).join(' ');
 
       let project: { id: number } | undefined;
       if (bpin) {
@@ -447,16 +470,37 @@ async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ cre
       if (!type) throw new Error(`No existe un tipo de informe con código "${typeCode}".`);
 
       const insertedReports = await sql`
-        INSERT INTO informes (informe_id, proyecto_id, tipo_informe_id, estado, mes_nombre, anio, fecha, observaciones, flujo_completado, created_at, updated_at)
+        INSERT INTO informes (
+          informe_id, proyecto_id, tipo_informe_id, estado, mes_nombre, anio, fecha, observaciones, flujo_completado,
+          revisor_nombre, fecha_entrega_real, fecha_revision, created_at, updated_at
+        )
         VALUES (
           COALESCE((SELECT MAX(informe_id) FROM informes), 0) + 1,
           ${project.id}, ${type.id}, ${status}, ${month}, ${year}, ${dueDate},
-          ${observations || 'Informe histórico cargado masivamente.'}, ${status === 'Enviado'},
+          ${fullObservations || 'Informe histórico cargado masivamente.'}, ${status === 'Enviado'},
+          ${revisorNombre || null}, ${fechaEntregaReal || null}, ${fechaRevision || null},
           NOW(), NOW()
         )
         RETURNING informe_id AS id
       `;
       const reportId = insertedReports[0].id;
+
+      // Enlaces de documentos -- se guardan como adjuntos del informe
+      // (misma tabla que usa la pestaña "Evidencias"), solo si son un
+      // link real de Drive/Docs; si no, se ignoran en vez de tumbar la fila.
+      const isDriveLink = (url: string) => /^https:\/\/(drive|docs)\.google\.com\//.test(url);
+      if (enlaceInforme && isDriveLink(enlaceInforme)) {
+        await sql`
+          INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
+          VALUES (COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1, ${reportId}, 'Informe', ${enlaceInforme}, 'Carga masiva', NOW())
+        `;
+      }
+      if (enlaceEvidencias && isDriveLink(enlaceEvidencias)) {
+        await sql`
+          INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
+          VALUES (COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1, ${reportId}, 'Evidencias', ${enlaceEvidencias}, 'Carga masiva', NOW())
+        `;
+      }
 
       const typeCodeForConsecutive = type.codigo || 'INF';
       const [{ count }] = (await sql`SELECT COUNT(*) AS count FROM informes WHERE tipo_informe_id = ${type.id} AND anio = ${year}`) as any[];

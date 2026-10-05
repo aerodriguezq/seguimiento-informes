@@ -216,6 +216,9 @@ export default function App() {
           currentStepIsFinal: report.currentStepIsFinal ?? undefined,
           currentStepEmailSubject: report.currentStepEmailSubject || undefined,
           isWorkflowCompleted: report.isWorkflowCompleted ?? undefined,
+          revisorNombre: report.revisorNombre ?? undefined,
+          fechaEntregaReal: report.fechaEntregaReal ?? undefined,
+          fechaRevision: report.fechaRevision ?? undefined,
           stageInstances: report.stageInstances,
         }));
 
@@ -342,6 +345,9 @@ export default function App() {
       currentStepIsFinal: report.currentStepIsFinal ?? undefined,
       currentStepEmailSubject: report.currentStepEmailSubject || undefined,
       isWorkflowCompleted: report.isWorkflowCompleted ?? undefined,
+      revisorNombre: report.revisorNombre ?? undefined,
+      fechaEntregaReal: report.fechaEntregaReal ?? undefined,
+      fechaRevision: report.fechaRevision ?? undefined,
       stageInstances: report.stageInstances,
     }));
     setReports(loadedReports);
