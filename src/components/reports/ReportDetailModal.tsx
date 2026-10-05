@@ -75,8 +75,6 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editMonth, setEditMonth] = useState(report.month);
   const [editObservations, setEditObservations] = useState(report.observations);
-  const [editContactIds, setEditContactIds] = useState<string[]>(report.contactIds);
-  const [editPrimaryContactId, setEditPrimaryContactId] = useState(report.primaryContactId);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [editError, setEditError] = useState('');
@@ -84,25 +82,17 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const startEditing = () => {
     setEditMonth(report.month);
     setEditObservations(report.observations);
-    setEditContactIds(report.contactIds);
-    setEditPrimaryContactId(report.primaryContactId);
     setEditError('');
     setIsEditing(true);
   };
 
   const handleSaveEdit = async () => {
-    if (editContactIds.length === 0) {
-      setEditError('Selecciona al menos un responsable.');
-      return;
-    }
     setIsSavingEdit(true);
     setEditError('');
     try {
       await onEditReport(report.id, {
         month: editMonth,
         observations: editObservations,
-        contactIds: editContactIds,
-        primaryContactId: editContactIds.includes(editPrimaryContactId) ? editPrimaryContactId : editContactIds[0],
       });
       setIsEditing(false);
     } catch (err) {
@@ -309,44 +299,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                 className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white resize-none"
               />
             </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">
-                Responsables ({editContactIds.length} seleccionado{editContactIds.length === 1 ? '' : 's'})
-              </label>
-              <div className="max-h-32 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 p-2 bg-white border border-slate-200 rounded-lg">
-                {contacts.map((c) => (
-                  <label key={c.id} className="flex items-center gap-2 text-xs cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editContactIds.includes(c.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setEditContactIds((prev) => [...prev, c.id]);
-                        } else {
-                          setEditContactIds((prev) => prev.filter((id) => id !== c.id));
-                        }
-                      }}
-                      className="rounded text-indigo-600"
-                    />
-                    <span className="text-slate-800">{c.name} <span className="text-slate-400">({c.role})</span></span>
-                  </label>
-                ))}
-              </div>
-              {editContactIds.length > 0 && (
-                <div className="mt-1.5">
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Responsable principal</label>
-                  <select
-                    value={editContactIds.includes(editPrimaryContactId) ? editPrimaryContactId : editContactIds[0]}
-                    onChange={(e) => setEditPrimaryContactId(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white"
-                  >
-                    {contacts.filter((c) => editContactIds.includes(c.id)).map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
+            <p className="text-[10.5px] text-slate-500">Los responsables se toman solos de los contactos configurados en cada paso del flujo (Listas Maestras) -- para cambiarlos, edita el paso correspondiente ahí.</p>
 
             {editError && <p className="text-xs font-semibold text-rose-600">{editError}</p>}
 

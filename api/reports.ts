@@ -248,6 +248,23 @@ async function computeReportDueDate(sql: SqlClient, typeId: number, projectId: n
   return dateFromDayOfMonth(nextYear, nextMonth, diaLimite);
 }
 
+// Responsables del informe = unión de los contactos configurados en TODOS
+// los pasos del flujo de ese tipo de informe (mismo alcance que
+// computeReportDueDate: flujo propio del proyecto si existe, si no la
+// plantilla general) -- ya no se eligen a mano al crear el informe.
+async function computeReportResponsables(sql: SqlClient, typeId: number, projectId: number): Promise<string[]> {
+  const scope = await resolveStepsScope(sql, typeId, projectId);
+  const stepRows = (
+    scope === null
+      ? await sql`SELECT paso_id AS id FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id IS NULL`
+      : await sql`SELECT paso_id AS id FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id = ${scope}`
+  ) as any[];
+  const stepIds = stepRows.map((s: any) => s.id);
+  if (stepIds.length === 0) return [];
+  const contactRows = (await sql`SELECT DISTINCT contacto_id AS id FROM tipo_informe_paso_contacto WHERE paso_id = ANY(${stepIds})`) as any[];
+  return contactRows.map((c: any) => String(c.id));
+}
+
 // Crea la alerta del primer paso configurado para el tipo de informe (si existe)
 // y deja el informe apuntando a ese paso. Sin pasos configurados, no hace nada.
 async function seedFirstWorkflowStep(sql: SqlClient, reportId: number, typeId: number, projectId: number, year: number, monthName: string) {
@@ -269,9 +286,9 @@ type CreateReportInput = {
   typeId: number;
   month: string;
   year: number;
-  dueDate: string;
+  dueDate?: string;
   status: string;
-  contactIds: (string | number)[];
+  contactIds?: (string | number)[];
   primaryContactId?: string | number;
   observations?: string;
   userName?: string;
@@ -284,6 +301,16 @@ async function createReportRow(sql: SqlClient, input: CreateReportInput): Promis
   // con día límite configurado.
   const computedDueDate = await computeReportDueDate(sql, Number(input.typeId), Number(input.projectId), input.month, input.year);
   const dueDate = computedDueDate ?? input.dueDate;
+  if (!dueDate) {
+    throw new Error('Configura el día límite del paso final del flujo para este tipo de informe en Listas Maestras antes de crear el informe.');
+  }
+
+  // Los responsables ya no se eligen a mano: se toman de los contactos
+  // configurados en los pasos del flujo (mismo alcance que usa el motor de
+  // etapas) -- lo que venga del cliente solo se usa de respaldo.
+  const contactIds = input.contactIds?.length
+    ? input.contactIds
+    : await computeReportResponsables(sql, Number(input.typeId), Number(input.projectId));
 
   const insertedReports = await sql`
     INSERT INTO informes (informe_id, proyecto_id, tipo_informe_id, estado, mes_nombre, anio, fecha, observaciones, created_at, updated_at)
@@ -310,8 +337,8 @@ async function createReportRow(sql: SqlClient, input: CreateReportInput): Promis
 
   await sql`UPDATE informes SET consecutivo = ${consecutive}, numero_secuencia = ${Number(seqCount)} WHERE informe_id = ${reportId}`;
 
-  const primaryContactId = input.primaryContactId || input.contactIds[0];
-  for (const contactId of input.contactIds) {
+  const primaryContactId = input.primaryContactId || contactIds[0];
+  for (const contactId of contactIds) {
     await sql`
       INSERT INTO informe_contacto (informe_id, contacto_id, es_principal)
       VALUES (${reportId}, ${contactId}, ${contactId === primaryContactId})
@@ -350,20 +377,16 @@ async function maybeScheduleNextMonth(sql: SqlClient, reportId: number) {
   const nextDueDate = (await computeReportDueDate(sql, report.typeId, report.projectId, nextMonth, nextYear)) ?? addOneMonth(report.dueDate);
   if (report.projectEndDate && nextDueDate > report.projectEndDate) return;
 
-  const contactRows = (await sql`
-    SELECT contacto_id AS "contactId", es_principal AS "isPrimary" FROM informe_contacto WHERE informe_id = ${reportId}
-  `) as any[];
-  if (contactRows.length === 0) return;
-
+  // Los responsables ya no se copian del informe anterior -- se toman
+  // frescos de los pasos del flujo configurados HOY (createReportRow los
+  // calcula solos), para que un cambio de responsables en Listas Maestras
+  // se refleje en el siguiente informe generado automáticamente.
   await createReportRow(sql, {
     projectId: report.projectId,
     typeId: report.typeId,
     month: nextMonth,
     year: nextYear,
-    dueDate: nextDueDate,
     status: 'Pendientes Evidencias',
-    contactIds: contactRows.map((c: any) => c.contactId),
-    primaryContactId: contactRows.find((c: any) => c.isPrimary)?.contactId,
     observations: `Continuación automática de ${report.month} ${report.year}.`,
     userName: 'Sistema (generación automática)',
   });
@@ -711,18 +734,18 @@ export default async function handler(request: VercelRequest, response: VercelRe
     }
 
     if (request.method === 'POST') {
-      const { projectId, typeId, month, year, dueDate, status, contactIds, primaryContactId, observations, userName } = request.body ?? {};
+      const { projectId, typeId, month, year, status, observations, userName } = request.body ?? {};
 
-      if (
-        !projectId || !typeId || !month || !year || !dueDate || !status ||
-        !Array.isArray(contactIds) || contactIds.length === 0
-      ) {
+      if (!projectId || !typeId || !month || !year || !status) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Faltan campos obligatorios para crear el informe.'] });
       }
 
-      const reportId = await createReportRow(sql, {
-        projectId, typeId, month, year, dueDate, status, contactIds, primaryContactId, observations, userName,
-      });
+      let reportId: number;
+      try {
+        reportId = await createReportRow(sql, { projectId, typeId, month, year, status, observations, userName });
+      } catch (error) {
+        return response.status(400).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible crear el informe.'] });
+      }
 
       const [report] = await fetchReportsByIds(sql, [reportId]);
       return response.status(201).json({ data: report, meta: {}, errors: [] });

@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   Project,
   ReportType,
-  Contact,
   ReportStatus,
   ReportAttachment,
 } from '../../types';
@@ -12,7 +11,6 @@ import {
   FileText,
   Calendar,
   Clock,
-  Users,
   Paperclip,
   Check,
   ChevronRight,
@@ -20,15 +18,12 @@ import {
   AlertCircle,
   UploadCloud,
   X,
-  Bell,
-  BellOff,
   Info,
 } from 'lucide-react';
 
 interface NewReportWizardProps {
   projects: Project[];
   reportTypes: ReportType[];
-  contacts: Contact[];
   preselectedProjectId?: string;
   onCancel: () => void;
   onSubmitReport: (input: {
@@ -36,10 +31,7 @@ interface NewReportWizardProps {
     typeId: string;
     month: string;
     year: number;
-    dueDate: string;
     status: ReportStatus;
-    contactIds: string[];
-    primaryContactId: string;
     observations: string;
     attachments: ReportAttachment[];
   }) => Promise<void>;
@@ -48,7 +40,6 @@ interface NewReportWizardProps {
 export const NewReportWizard: React.FC<NewReportWizardProps> = ({
   projects,
   reportTypes,
-  contacts,
   preselectedProjectId,
   onCancel,
   onSubmitReport,
@@ -62,11 +53,7 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
   const [selectedTypeId, setSelectedTypeId] = useState('');
   const [selectedMonth, setSelectedMonth] = useState('Septiembre');
   const [selectedYear, setSelectedYear] = useState(2026);
-  const [dueDate, setDueDate] = useState('2026-09-30');
   const [status, setStatus] = useState<ReportStatus>('Pendientes Evidencias');
-  const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
-  const [primaryContactId, setPrimaryContactId] = useState('');
-  const [alarmPreferences, setAlarmPreferences] = useState<Record<string, boolean>>({});
   const [observations, setObservations] = useState('');
   const [attachments, setAttachments] = useState<ReportAttachment[]>([]);
   const [errorMsg, setErrorMsg] = useState('');
@@ -92,32 +79,6 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
       setSelectedTypeId(applicableTypes[0].id);
     }
   }, [applicableTypes, selectedTypeId]);
-
-  const toggleContact = (contactId: string) => {
-    if (selectedContactIds.includes(contactId)) {
-      setSelectedContactIds(selectedContactIds.filter((id) => id !== contactId));
-      if (primaryContactId === contactId) {
-        setPrimaryContactId('');
-      }
-    } else {
-      setSelectedContactIds([...selectedContactIds, contactId]);
-      if (!primaryContactId) {
-        setPrimaryContactId(contactId);
-      }
-      setAlarmPreferences((prev) => ({
-        ...prev,
-        [contactId]: true, // Default with alarm
-      }));
-    }
-  };
-
-  const toggleContactAlarm = (contactId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setAlarmPreferences((prev) => ({
-      ...prev,
-      [contactId]: !prev[contactId],
-    }));
-  };
 
   const [linkName, setLinkName] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
@@ -151,10 +112,8 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
     { num: 1, title: 'Proyecto' },
     { num: 2, title: 'Tipo' },
     { num: 3, title: 'Período' },
-    { num: 4, title: 'Vencimiento' },
-    { num: 5, title: 'Estado' },
-    { num: 6, title: 'Responsables' },
-    { num: 7, title: 'Evidencias' },
+    { num: 4, title: 'Estado' },
+    { num: 5, title: 'Evidencias' },
   ];
 
   const handleNext = () => {
@@ -167,15 +126,7 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
       setErrorMsg('Debe seleccionar un tipo de informe aplicable.');
       return;
     }
-    if (currentStep === 4 && !dueDate) {
-      setErrorMsg('Debe indicar una fecha de entrega / vencimiento.');
-      return;
-    }
-    if (currentStep === 6 && selectedContactIds.length === 0) {
-      setErrorMsg('Debe seleccionar al menos un contacto o responsable.');
-      return;
-    }
-    setCurrentStep((prev) => Math.min(prev + 1, 7));
+    setCurrentStep((prev) => Math.min(prev + 1, 5));
   };
 
   const handlePrev = () => {
@@ -195,10 +146,7 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
         typeId: selectedTypeId,
         month: selectedMonth,
         year: selectedYear,
-        dueDate: dueDate,
         status: status,
-        contactIds: selectedContactIds,
-        primaryContactId: primaryContactId || selectedContactIds[0] || '',
         observations: observations.trim() || 'Apertura de informe para seguimiento del cronograma contractual.',
         attachments: attachments,
       });
@@ -218,7 +166,7 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
             Crear Nuevo Informe de Seguimiento
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Formulario guiado con validación de tipos aplicables, cronograma y asignación de responsables.
+            Formulario guiado con validación de tipos aplicables; la fecha límite y los responsables se toman solos del flujo configurado en Listas Maestras.
           </p>
         </div>
         <button
@@ -468,45 +416,13 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
             </div>
           )}
 
-          {/* STEP 4: Fecha de vencimiento / límite */}
+          {/* STEP 4: Estado Inicial */}
           {currentStep === 4 && (
             <div className="space-y-4">
               <div className="border-b border-slate-100 pb-3">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                   <Clock className="w-4 h-4 text-indigo-600" />
-                  Paso 4: Fecha Límite de Entrega
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Fecha máxima contractual para radicar este informe ante la oficina de proyectos o ente supervisor.
-                </p>
-              </div>
-
-              <div className="max-w-md space-y-3">
-                <label className="block text-xs font-semibold text-slate-700">
-                  Fecha de compromiso (YYYY-MM-DD)
-                </label>
-                <input
-                  id="wizard-due-date"
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"
-                />
-
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-                  <strong>Impacto de alerta:</strong> A partir de esta fecha, el sistema evaluará automáticamente las reglas programadas de aviso preventivo (5 días antes) y alerta crítica de vencimiento.
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 5: Estado Inicial */}
-          {currentStep === 5 && (
-            <div className="space-y-4">
-              <div className="border-b border-slate-100 pb-3">
-                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-indigo-600" />
-                  Paso 5: Estado Inicial del Informe
+                  Paso 4: Estado Inicial del Informe
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
                   Indique en qué etapa del ciclo de vida se crea este registro (por defecto: Pendientes Evidencias).
@@ -544,112 +460,13 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
             </div>
           )}
 
-          {/* STEP 6: Responsables y alarmas */}
-          {currentStep === 6 && (
-            <div className="space-y-4">
-              <div className="border-b border-slate-100 pb-3">
-                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-indigo-600" />
-                  Paso 6: Contactos y Responsables Asignados
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Seleccione los responsables directos y configure si deben recibir alarmas de notificación automáticas por correo.
-                </p>
-              </div>
-
-              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                {contacts.map((contact) => {
-                  const isSelected = selectedContactIds.includes(contact.id);
-                  const hasAlarm = alarmPreferences[contact.id] ?? true;
-                  const isPrimary = primaryContactId === contact.id;
-
-                  return (
-                    <div
-                      key={contact.id}
-                      id={`wizard-contact-${contact.id}`}
-                      onClick={() => toggleContact(contact.id)}
-                      className={`p-3 rounded-lg border flex items-center justify-between gap-3 cursor-pointer transition-colors ${
-                        isSelected
-                          ? 'border-indigo-300 bg-indigo-50/40'
-                          : 'border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => {}} // Handled by container
-                          className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4"
-                        />
-                        <div>
-                          <div className="text-xs font-semibold text-slate-900 flex items-center gap-2">
-                            <span>{contact.name}</span>
-                            {isPrimary && (
-                              <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-600 text-white">
-                                Principal
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[11px] text-slate-500">
-                            {contact.role} • {contact.company} ({contact.email})
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Right: Alarm toggle and primary button */}
-                      {isSelected && (
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={(e) => toggleContactAlarm(contact.id, e)}
-                            className={`p-1.5 rounded-md text-xs font-medium flex items-center gap-1 transition-colors ${
-                              hasAlarm
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-slate-200 text-slate-600'
-                            }`}
-                            title={hasAlarm ? 'Alarma activa: Recibirá avisos automáticos' : 'Sin alarma'}
-                          >
-                            {hasAlarm ? (
-                              <>
-                                <Bell className="w-3.5 h-3.5 text-emerald-700" />
-                                <span className="text-[10px]">Con alarma</span>
-                              </>
-                            ) : (
-                              <>
-                                <BellOff className="w-3.5 h-3.5 text-slate-500" />
-                                <span className="text-[10px]">Sin alarma</span>
-                              </>
-                            )}
-                          </button>
-
-                          {!isPrimary && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setPrimaryContactId(contact.id);
-                              }}
-                              className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold p-1 hover:bg-indigo-100/60 rounded"
-                            >
-                              Hacer principal
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* STEP 7: Observaciones y Evidencias */}
-          {currentStep === 7 && (
+          {/* STEP 5: Observaciones y Evidencias */}
+          {currentStep === 5 && (
             <div className="space-y-4">
               <div className="border-b border-slate-100 pb-3">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                   <Paperclip className="w-4 h-4 text-indigo-600" />
-                  Paso 7: Observaciones y Archivos de Evidencia
+                  Paso 5: Observaciones y Archivos de Evidencia
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
                   Ingrese anotaciones iniciales y adjunte documentos preliminares (actas, memorandos o borradores).
@@ -745,7 +562,7 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
             <span>{currentStep === 1 ? 'Cancelar' : 'Anterior'}</span>
           </button>
 
-          {currentStep < 7 ? (
+          {currentStep < 5 ? (
             <button
               id="wizard-next-step-btn"
               type="button"

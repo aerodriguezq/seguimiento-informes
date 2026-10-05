@@ -319,10 +319,7 @@ export default function App() {
     typeId: string;
     month: string;
     year: number;
-    dueDate: string;
     status: ReportStatus;
-    contactIds: string[];
-    primaryContactId: string;
     observations: string;
     attachments: ReportAttachment[];
   }) => {
@@ -931,7 +928,6 @@ export default function App() {
             <NewReportWizard
               projects={projects}
               reportTypes={reportTypes}
-              contacts={contacts}
               preselectedProjectId={currentProjectId}
               onCancel={() => goToModule('reports')}
               onSubmitReport={handleSubmitNewReport}
