@@ -46,74 +46,148 @@ export const BulkImportReportsModal: React.FC<{
   const [result, setResult] = useState<ImportResult | null>(null);
 
   const handleDownloadTemplate = async () => {
-    const XLSX = await import('xlsx');
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Seguimiento de Informes';
 
-    // --- Hoja "Informes": encabezado + 3 filas de ejemplo bien variadas +
-    // columnas de BPIN / Código que se calculan solas con VLOOKUP contra
-    // las hojas de referencia, a partir de lo que se escriba en
-    // "Proyecto" / "Tipo de Informe".
+    // Hoja de apoyo oculta: aquí viven las listas que alimentan los
+    // desplegables y las fórmulas de la hoja "Informes" -- el usuario solo
+    // ve y llena una hoja ("mostrar todo en una hoja").
+    const data = workbook.addWorksheet('Datos', { state: 'veryHidden' });
+    projects.forEach((p, i) => {
+      data.getCell(i + 1, 1).value = p.name; // A: Proyecto
+      data.getCell(i + 1, 2).value = p.bpin; // B: BPIN
+    });
+    reportTypes.forEach((t, i) => {
+      data.getCell(i + 1, 4).value = t.name; // D: Tipo de Informe
+      data.getCell(i + 1, 5).value = t.code; // E: Código
+    });
+    MONTHS_LIST.forEach((m, i) => { data.getCell(i + 1, 7).value = m; }); // G
+    VALID_STATUSES.forEach((s, i) => { data.getCell(i + 1, 8).value = s; }); // H
+    const projectsRange = `Datos!$A$1:$A$${Math.max(projects.length, 1)}`;
+    const typesRange = `Datos!$D$1:$D$${Math.max(reportTypes.length, 1)}`;
+    const monthsRange = `Datos!$G$1:$G$${MONTHS_LIST.length}`;
+    const statusRange = `Datos!$H$1:$H$${VALID_STATUSES.length}`;
+
+    const sheet = workbook.addWorksheet('Informes', {
+      views: [{ state: 'frozen', ySplit: 1 }],
+    });
+
+    const ACCENT = 'FF0F766E'; // teal-700, el color del módulo de Informes
+    const EXAMPLE_FILL = 'FFFEF3C7'; // amber-100
+    const AUTO_FILL_COL = 'FFF1F5F9'; // slate-100
+
+    sheet.columns = [
+      { header: EXAMPLE_MARKER_HEADER, key: 'ejemplo', width: 40 },
+      { header: 'Proyecto', key: 'proyecto', width: 28 },
+      { header: 'BPIN (se llena solo)', key: 'bpin', width: 16 },
+      { header: 'Tipo de Informe', key: 'tipo', width: 24 },
+      { header: 'Código (se llena solo)', key: 'codigo', width: 16 },
+      { header: 'Mes', key: 'mes', width: 13 },
+      { header: 'Año', key: 'anio', width: 8 },
+      { header: 'Fecha Límite (AAAA-MM-DD)', key: 'fecha', width: 16 },
+      { header: 'Estado', key: 'estado', width: 24 },
+      { header: 'Consecutivo (opcional)', key: 'consecutivo', width: 16 },
+      { header: 'Responsables (correos, separados por coma)', key: 'responsables', width: 38 },
+      { header: 'Observaciones', key: 'observaciones', width: 32 },
+    ];
+
+    const headerRow = sheet.getRow(1);
+    headerRow.eachCell((cell) => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ACCENT } };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.alignment = { vertical: 'middle', wrapText: true };
+      cell.border = { bottom: { style: 'thin', color: { argb: 'FFFFFFFF' } } };
+    });
+    headerRow.height = 32;
+    const headerNotes: Record<string, string> = {
+      proyecto: 'Elígelo del desplegable (nombre exacto del proyecto).',
+      bpin: 'No lo toques: se calcula solo a partir del Proyecto.',
+      tipo: 'Elígelo del desplegable.',
+      codigo: 'No lo toques: se calcula solo a partir del Tipo de Informe.',
+      mes: 'Elígelo del desplegable.',
+      anio: 'Número de 4 dígitos, ej. 2026.',
+      fecha: 'Fecha real de entrega o vencimiento, formato AAAA-MM-DD.',
+      estado: 'Elígelo del desplegable. Vacío = se usa "Enviado".',
+      consecutivo: 'Opcional: el número ya usado antes del sistema, para darle continuidad. Vacío = se calcula solo.',
+      responsables: 'Opcional: correos que ya existan en Listas Maestras > Contactos.',
+      observaciones: 'Opcional, texto libre.',
+    };
+    Object.entries(headerNotes).forEach(([key, note]) => {
+      const col = sheet.getColumn(key);
+      const cell = sheet.getCell(1, col.number as number);
+      cell.note = note;
+    });
+
     const exampleProject = projects[0]?.name ?? 'Montes de Maria';
-    const otherProject = projects[1]?.name ?? projects[0]?.name ?? 'Montes de Maria';
+    const otherProject = projects[1]?.name ?? exampleProject;
     const exampleType = reportTypes[0]?.name ?? 'Informe Técnico';
-    const otherType = reportTypes[1]?.name ?? reportTypes[0]?.name ?? 'Informe Técnico';
+    const otherType = reportTypes[1]?.name ?? exampleType;
 
-    const exampleRows: (string | number)[][] = [
+    const exampleRows = [
       [EXAMPLE_MARKER_VALUE, exampleProject, '', exampleType, '', 'Septiembre', 2026, '2026-10-10', 'Enviado', '', 'responsable1@correo.com, responsable2@correo.com', 'Informe entregado a tiempo, radicado en físico.'],
       [EXAMPLE_MARKER_VALUE, otherProject, '', otherType, '', 'Agosto', 2026, '2026-09-08', 'Entregado a Of. Proyectos', 'INF-2026-004', 'responsable1@correo.com', ''],
       [EXAMPLE_MARKER_VALUE, exampleProject, '', exampleType, '', 'Julio', 2026, '2026-08-10', 'Enviado', '', '', 'Sin responsables asignados todavía.'],
     ];
-    // 7 filas vacías listas para escribir debajo de los ejemplos.
-    const blankRows: (string | number)[][] = Array.from({ length: 7 }, () => Array(INFORMES_HEADERS.length).fill(''));
+    const BLANK_ROWS = 12;
+    const totalDataRows = exampleRows.length + BLANK_ROWS;
 
-    const informesSheet = XLSX.utils.aoa_to_sheet([INFORMES_HEADERS, ...exampleRows, ...blankRows]);
-    informesSheet['!cols'] = [
-      { wch: 42 }, { wch: 26 }, { wch: 16 }, { wch: 22 }, { wch: 16 },
-      { wch: 12 }, { wch: 8 }, { wch: 16 }, { wch: 24 }, { wch: 16 }, { wch: 36 }, { wch: 32 },
-    ];
-    informesSheet['!freeze'] = { xSplit: 0, ySplit: 1 };
-    // Primera fila de datos real (después de encabezado + 3 ejemplos).
-    const firstDataRow = 1 + exampleRows.length + 1; // 1-based: fila 5
-    const lastRow = firstDataRow + blankRows.length - 1;
-    for (let r = 2; r <= lastRow; r++) {
-      // BPIN se calcula a partir de la columna "Proyecto" (B) buscando en
-      // la hoja de referencia; Código se calcula a partir de "Tipo de
-      // Informe" (D). Si "Proyecto" o "Tipo" están vacíos, queda en blanco
-      // en vez de mostrar un error de fórmula.
-      informesSheet[`C${r}`] = { t: 'str', f: `IF(B${r}="","",IFERROR(VLOOKUP(B${r},'Proyectos (BPIN)'!A:B,2,0),"¿Proyecto no existe?"))` };
-      informesSheet[`E${r}`] = { t: 'str', f: `IF(D${r}="","",IFERROR(VLOOKUP(D${r},'Tipos de Informe (Código)'!A:B,2,0),"¿Tipo no existe?"))` };
+    exampleRows.forEach((values) => sheet.addRow(values));
+    for (let i = 0; i < BLANK_ROWS; i++) sheet.addRow(new Array(INFORMES_HEADERS.length).fill(''));
+
+    for (let r = 2; r <= 1 + totalDataRows; r++) {
+      const row = sheet.getRow(r);
+      const isExample = r <= 1 + exampleRows.length;
+
+      // BPIN y Código se calculan solos (VLOOKUP) y quedan protegidos
+      // (locked) para que no se puedan editar a mano por accidente.
+      const bpinCell = row.getCell(3);
+      bpinCell.value = { formula: `IF(B${r}="","",IFERROR(VLOOKUP(B${r},Datos!$A:$B,2,0),"¿Proyecto no existe?"))`, result: '' } as any;
+      bpinCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: AUTO_FILL_COL } };
+      bpinCell.font = { italic: true, color: { argb: 'FF64748B' } };
+      bpinCell.protection = { locked: true };
+
+      const codigoCell = row.getCell(5);
+      codigoCell.value = { formula: `IF(D${r}="","",IFERROR(VLOOKUP(D${r},Datos!$D:$E,2,0),"¿Tipo no existe?"))`, result: '' } as any;
+      codigoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: AUTO_FILL_COL } };
+      codigoCell.font = { italic: true, color: { argb: 'FF64748B' } };
+      codigoCell.protection = { locked: true };
+
+      // Desplegables reales: Proyecto, Tipo de Informe, Mes, Estado.
+      row.getCell(2).dataValidation = { type: 'list', allowBlank: true, formulae: [projectsRange] };
+      row.getCell(4).dataValidation = { type: 'list', allowBlank: true, formulae: [typesRange] };
+      row.getCell(6).dataValidation = { type: 'list', allowBlank: true, formulae: [monthsRange] };
+      row.getCell(9).dataValidation = { type: 'list', allowBlank: true, formulae: [statusRange] };
+
+      // El resto de columnas queda desbloqueado -- la hoja se protege más
+      // abajo, así que solo BPIN/Código quedan de solo lectura.
+      [1, 2, 4, 6, 7, 8, 9, 10, 11, 12].forEach((col) => {
+        row.getCell(col).protection = { locked: false };
+      });
+
+      if (isExample) {
+        for (let c = 1; c <= INFORMES_HEADERS.length; c++) {
+          const cell = row.getCell(c);
+          if (c !== 3 && c !== 5) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EXAMPLE_FILL } };
+        }
+      }
+      row.commit();
     }
 
-    // --- Hojas de referencia (columna 1 = lo que se escribe en "Informes",
-    // para que el VLOOKUP de arriba funcione).
-    const projectsSheet = XLSX.utils.json_to_sheet(
-      projects.map((p) => ({ Proyecto: p.name, BPIN: p.bpin, Empresa: p.company })),
-    );
-    projectsSheet['!cols'] = [{ wch: 30 }, { wch: 18 }, { wch: 20 }];
+    // Protección sin contraseña: solo evita ediciones accidentales en
+    // BPIN/Código, cualquiera puede quitarla desde "Revisar > Desproteger".
+    await sheet.protect('', { selectLockedCells: true, selectUnlockedCells: true });
 
-    const typesSheet = XLSX.utils.json_to_sheet(
-      reportTypes.map((t) => ({ 'Tipo de Informe': t.name, Código: t.code, Periodicidad: t.periodicity })),
-    );
-    typesSheet['!cols'] = [{ wch: 30 }, { wch: 12 }, { wch: 14 }];
-
-    const referenceSheet = XLSX.utils.json_to_sheet([
-      { Campo: '1. Proyecto', Instrucción: 'Escribe el nombre EXACTO de un proyecto de la hoja "Proyectos (BPIN)" (cópialo de ahí). El BPIN se llena solo.' },
-      { Campo: '2. Tipo de Informe', Instrucción: 'Escribe el nombre EXACTO de un tipo de la hoja "Tipos de Informe (Código)". El código se llena solo.' },
-      { Campo: '3. Mes', Instrucción: `Uno de: ${MONTHS_LIST.join(', ')}` },
-      { Campo: '4. Año', Instrucción: 'Número de 4 dígitos, ej. 2026.' },
-      { Campo: '5. Fecha Límite', Instrucción: 'Formato AAAA-MM-DD, ej. 2026-10-10. Es la fecha real en que se entregó o venció.' },
-      { Campo: '6. Estado', Instrucción: `Uno de: ${VALID_STATUSES.join(', ')}. Si lo dejas vacío, se usa "Enviado".` },
-      { Campo: '7. Consecutivo', Instrucción: 'Opcional. El número real ya usado antes del sistema (ej. en el documento entregado), para continuar la numeración. Vacío = se calcula solo.' },
-      { Campo: '8. Responsables', Instrucción: 'Opcional. Correos separados por coma, deben existir en Listas Maestras > Contactos.' },
-      { Campo: '9. Observaciones', Instrucción: 'Opcional, texto libre.' },
-    ]);
-    referenceSheet['!cols'] = [{ wch: 20 }, { wch: 95 }];
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, informesSheet, 'Informes');
-    XLSX.utils.book_append_sheet(workbook, projectsSheet, 'Proyectos (BPIN)');
-    XLSX.utils.book_append_sheet(workbook, typesSheet, 'Tipos de Informe (Código)');
-    XLSX.utils.book_append_sheet(workbook, referenceSheet, 'Cómo llenar cada columna');
-    XLSX.writeFile(workbook, 'plantilla_informes_anteriores.xlsx');
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'plantilla_informes_anteriores.xlsx';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -216,12 +290,12 @@ export const BulkImportReportsModal: React.FC<{
           <div className="rounded-lg border border-slate-200 p-3 space-y-2">
             <p className="font-semibold text-slate-700">1. Descarga la plantilla</p>
             <p className="text-[11px] text-slate-500">
-              Trae 3 filas de ejemplo ya llenas (se ignoran solas al importar), filas vacías listas para escribir, una hoja por cada columna que explica qué poner, y las hojas de Proyectos / Tipos de Informe para copiar los nombres exactos.
+              Todo en una sola hoja: 3 filas de ejemplo ya llenas (se ignoran solas al importar), filas vacías listas para escribir, desplegables para Proyecto / Tipo de Informe / Mes / Estado, y una notita de ayuda en cada encabezado (pasa el mouse por encima).
             </p>
             <div className="rounded-lg bg-indigo-50 border border-indigo-100 px-2.5 py-2 text-[11px] text-indigo-800 flex items-start gap-1.5">
               <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               <span>
-                Las columnas <strong>BPIN</strong> y <strong>Código Tipo Informe</strong> se calculan solas en Excel (fórmula) a partir de lo que escribas en "Proyecto" y "Tipo de Informe" -- no las toques a mano.
+                Las columnas <strong>BPIN</strong> y <strong>Código</strong> (en gris) se calculan solas y quedan bloqueadas al elegir el Proyecto/Tipo del desplegable -- no hace falta tocarlas. Debes abrir el archivo en Excel real y guardarlo para que esas fórmulas se calculen antes de subirlo.
               </span>
             </div>
             <button
