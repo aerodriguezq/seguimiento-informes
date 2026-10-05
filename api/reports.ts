@@ -381,6 +381,7 @@ async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ cre
     const rowNum = i + 2; // fila 1 del Excel es el encabezado
     try {
       const bpin = String(r.bpin ?? r.BPIN ?? '').trim();
+      const projectName = String(r.projectName ?? r.Proyecto ?? '').trim();
       const typeCode = String(r.typeCode ?? r['Código Tipo Informe'] ?? r.codigoTipo ?? '').trim().toUpperCase();
       const month = String(r.month ?? r.Mes ?? '').trim();
       const yearRaw = r.year ?? r['Año'] ?? r.Ano;
@@ -391,9 +392,14 @@ async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ cre
       const observations = String(r.observations ?? r.Observaciones ?? '').trim();
       const responsableEmails = String(r.responsables ?? r.Responsables ?? '')
         .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+      // Consecutivo real ya usado antes de tener el sistema (ej. en los
+      // documentos entregados) -- si se da, se respeta tal cual para dar
+      // continuidad con la numeración histórica; si no, se calcula solo
+      // como con "Nuevo Informe".
+      const consecutivoOverride = String(r.consecutivo ?? r.Consecutivo ?? '').trim();
 
-      if (!bpin || !typeCode || !month || !year || !dueDate) {
-        throw new Error('Faltan campos obligatorios (BPIN, código de tipo, mes, año o fecha límite).');
+      if ((!bpin && !projectName) || !typeCode || !month || !year || !dueDate) {
+        throw new Error('Faltan campos obligatorios (BPIN o Proyecto, código de tipo, mes, año o fecha límite).');
       }
       if (!MONTHS_ES.includes(month)) {
         throw new Error(`"${month}" no es un mes válido (ej. Septiembre).`);
@@ -402,8 +408,14 @@ async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ cre
         throw new Error('La fecha límite debe tener formato AAAA-MM-DD.');
       }
 
-      const [project] = (await sql`SELECT proyecto_id AS id FROM proyectos WHERE bpin = ${bpin}`) as any[];
-      if (!project) throw new Error(`No existe un proyecto con BPIN "${bpin}".`);
+      let project: { id: number } | undefined;
+      if (bpin) {
+        [project] = (await sql`SELECT proyecto_id AS id FROM proyectos WHERE bpin = ${bpin}`) as any[];
+      }
+      if (!project && projectName) {
+        [project] = (await sql`SELECT proyecto_id AS id FROM proyectos WHERE LOWER(nombre) = LOWER(${projectName})`) as any[];
+      }
+      if (!project) throw new Error(`No se encontró el proyecto (BPIN "${bpin || '—'}" / nombre "${projectName || '—'}").`);
 
       const [type] = (await sql`SELECT tipo_informe_id AS id, codigo FROM tipos_informe WHERE UPPER(codigo) = ${typeCode}`) as any[];
       if (!type) throw new Error(`No existe un tipo de informe con código "${typeCode}".`);
@@ -422,9 +434,16 @@ async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ cre
 
       const typeCodeForConsecutive = type.codigo || 'INF';
       const [{ count }] = (await sql`SELECT COUNT(*) AS count FROM informes WHERE tipo_informe_id = ${type.id} AND anio = ${year}`) as any[];
-      const consecutive = `${typeCodeForConsecutive}-${year}-${String(count).padStart(3, '0')}`;
+      const consecutive = consecutivoOverride || `${typeCodeForConsecutive}-${year}-${String(count).padStart(3, '0')}`;
       const [{ seqCount }] = (await sql`SELECT COUNT(*) AS "seqCount" FROM informes WHERE tipo_informe_id = ${type.id} AND proyecto_id = ${project.id}`) as any[];
-      await sql`UPDATE informes SET consecutivo = ${consecutive}, numero_secuencia = ${Number(seqCount)} WHERE informe_id = ${reportId}`;
+      try {
+        await sql`UPDATE informes SET consecutivo = ${consecutive}, numero_secuencia = ${Number(seqCount)} WHERE informe_id = ${reportId}`;
+      } catch (updateError) {
+        if ((updateError as { code?: string })?.code === '23505') {
+          throw new Error(`El consecutivo "${consecutive}" ya está usado por otro informe.`);
+        }
+        throw updateError;
+      }
 
       if (responsableEmails.length > 0) {
         const contactRows = (await sql`SELECT contacto_id AS id FROM contactos WHERE LOWER(email) = ANY(${responsableEmails})`) as any[];

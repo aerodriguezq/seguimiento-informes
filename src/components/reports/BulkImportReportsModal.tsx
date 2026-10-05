@@ -25,16 +25,18 @@ export const BulkImportReportsModal: React.FC<{
 
     const exampleRow = {
       BPIN: projects[0]?.bpin ?? '20241301010175',
+      Proyecto: projects[0]?.name ?? '',
       'Código Tipo Informe': reportTypes[0]?.code ?? 'INF',
       Mes: 'Septiembre',
       Año: 2026,
       'Fecha Límite': '2026-10-10',
       Estado: 'Enviado',
+      Consecutivo: '',
       'Responsables (correos separados por coma)': '',
       Observaciones: '',
     };
     const informesSheet = XLSX.utils.json_to_sheet([exampleRow]);
-    informesSheet['!cols'] = [{ wch: 18 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 24 }, { wch: 36 }, { wch: 30 }];
+    informesSheet['!cols'] = [{ wch: 18 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 24 }, { wch: 16 }, { wch: 36 }, { wch: 30 }];
 
     const projectsSheet = XLSX.utils.json_to_sheet(
       projects.map((p) => ({ BPIN: p.bpin, Proyecto: p.name, Empresa: p.company })),
@@ -47,11 +49,13 @@ export const BulkImportReportsModal: React.FC<{
     typesSheet['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 14 }];
 
     const referenceSheet = XLSX.utils.json_to_sheet([
+      { Campo: 'BPIN / Proyecto', 'Valores válidos': 'Da al menos uno de los dos -- si falta el BPIN, se busca por el nombre exacto del proyecto.' },
       { Campo: 'Mes', 'Valores válidos': MONTHS_LIST.join(', ') },
       { Campo: 'Estado', 'Valores válidos': VALID_STATUSES.join(', ') },
       { Campo: 'Fecha Límite', 'Valores válidos': 'Formato AAAA-MM-DD, ej. 2026-10-10' },
+      { Campo: 'Consecutivo', 'Valores válidos': 'Opcional -- el número real que ya se usó antes del sistema (ej. en el documento entregado), para darle continuidad a la numeración. Si se deja vacío, se calcula solo como con "Nuevo Informe".' },
     ]);
-    referenceSheet['!cols'] = [{ wch: 14 }, { wch: 60 }];
+    referenceSheet['!cols'] = [{ wch: 16 }, { wch: 90 }];
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, informesSheet, 'Informes');
