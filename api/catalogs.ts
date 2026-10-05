@@ -314,7 +314,7 @@ export default async function handler(
         sql`
           SELECT c.contacto_id AS id, c.nombre AS name, COALESCE(c.email, '') AS email,
             COALESCE(r.nombre, '') AS role, COALESCE(e.nombre, '') AS company,
-            c.telefono AS phone, TRUE AS has_notification_alarm, c.activo AS active
+            c.telefono AS phone, c.alarma_activa AS "hasNotificationAlarm", c.activo AS active
           FROM contactos c
           LEFT JOIN roles r ON r.rol_id = c.rol_id
           LEFT JOIN empresas e ON e.empresa_id = c.empresa_id
@@ -343,6 +343,27 @@ export default async function handler(
 
     if (request.method === 'PATCH') {
       const body = request.body ?? {};
+
+      if (body.kind === 'contact') {
+        if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+        }
+        const contactId = Number(body.contactId);
+        if (!Number.isInteger(contactId) || contactId <= 0) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id del contacto es obligatorio.'] });
+        }
+        const has = (key: string) => Object.prototype.hasOwnProperty.call(body.data ?? {}, key);
+        if (!has('hasNotificationAlarm')) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['No hay cambios para guardar.'] });
+        }
+        const rows = await sql`
+          UPDATE contactos SET alarma_activa = ${Boolean(body.data.hasNotificationAlarm)}
+          WHERE contacto_id = ${contactId}
+          RETURNING contacto_id AS id, alarma_activa AS "hasNotificationAlarm"
+        `;
+        if (!rows[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Contacto no encontrado.'] });
+        return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+      }
 
       if (body.kind === 'reportTypeStepOrder') {
         const stepId = Number(body.stepId);
@@ -860,11 +881,11 @@ export default async function handler(
           COALESCE((SELECT MAX(contacto_id) FROM contactos), 0) + 1,
           ${roleId}, ${companyId}, ${String(data.name).trim()}, ${String(data.email).trim()}, ${String(data.phone ?? '').trim()}
         )
-        RETURNING contacto_id AS id, nombre AS name, email, telefono AS phone, activo AS active
+        RETURNING contacto_id AS id, nombre AS name, email, telefono AS phone, activo AS active, alarma_activa AS "hasNotificationAlarm"
       `;
 
       return response.status(201).json({
-        data: { ...rows[0], role: String(data.role).trim(), company: String(data.company).trim(), hasNotificationAlarm: true },
+        data: { ...rows[0], role: String(data.role).trim(), company: String(data.company).trim() },
         meta: {}, errors: [],
       });
     }

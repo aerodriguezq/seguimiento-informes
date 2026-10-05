@@ -51,6 +51,8 @@ interface ReportDetailModalProps {
   onEditReport: (reportId: string, updates: { month?: string; dueDate?: string; contactIds?: string[]; primaryContactId?: string; observations?: string }) => Promise<void>;
   onEditReportStage: (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null }) => Promise<void>;
   onDeleteReport: (reportId: string) => Promise<void>;
+  onToggleContactAlarm: (contactId: string, enabled: boolean) => Promise<void>;
+  onSimulateTrigger: (alert: ScheduledAlert) => Promise<void>;
 }
 
 export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
@@ -65,6 +67,8 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   onEditReport,
   onEditReportStage,
   onDeleteReport,
+  onToggleContactAlarm,
+  onSimulateTrigger,
 }) => {
   const { user, canEdit } = useAuth();
   const [isAdvancingStep, setIsAdvancingStep] = useState(false);
@@ -72,6 +76,9 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [stageStartInput, setStageStartInput] = useState('');
   const [stageDueInput, setStageDueInput] = useState('');
   const [isSavingStage, setIsSavingStage] = useState(false);
+  const [togglingAlarmId, setTogglingAlarmId] = useState<string | null>(null);
+  const [sendingAlertId, setSendingAlertId] = useState<string | null>(null);
+  const [sentAlertId, setSentAlertId] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editMonth, setEditMonth] = useState(report.month);
   const [editObservations, setEditObservations] = useState(report.observations);
@@ -163,6 +170,26 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
       setEditingStageId(null);
     } finally {
       setIsSavingStage(false);
+    }
+  };
+
+  const handleToggleAlarm = async (contactId: string, enabled: boolean) => {
+    setTogglingAlarmId(contactId);
+    try {
+      await onToggleContactAlarm(contactId, enabled);
+    } finally {
+      setTogglingAlarmId(null);
+    }
+  };
+
+  const handleSendAlertNow = async (alert: ScheduledAlert) => {
+    setSendingAlertId(alert.id);
+    try {
+      await onSimulateTrigger(alert);
+      setSentAlertId(alert.id);
+      window.setTimeout(() => setSentAlertId((prev) => (prev === alert.id ? null : prev)), 4000);
+    } finally {
+      setSendingAlertId(null);
     }
   };
 
@@ -659,43 +686,53 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
           {/* TAB 2: Responsables */}
           {activeTab === 'contacts' && (
             <div className="space-y-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Contactos y Notificaciones Asignadas
-              </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Contactos y Notificaciones Asignadas
+                </h4>
+                <p className="text-[10.5px] text-slate-400 mt-0.5">Haz clic en la alarma de un contacto para activarle o quitarle los recordatorios automáticos.</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {assignedContacts.map((contact) => {
                   const isPrimary = contact.id === report.primaryContactId;
+                  const isToggling = togglingAlarmId === contact.id;
                   return (
                     <div
                       key={contact.id}
-                      className="p-3.5 border border-slate-200 rounded-xl bg-white flex items-start justify-between gap-3 text-xs"
+                      className="p-3.5 border border-slate-200 rounded-xl bg-white text-xs space-y-2"
                     >
-                      <div>
-                        <div className="font-bold text-slate-900 flex items-center gap-2">
-                          <span>{contact.name}</span>
-                          {isPrimary && (
-                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-600 text-white">
-                              Principal
-                            </span>
-                          )}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-bold text-slate-900 flex items-center gap-2">
+                            <span className="truncate">{contact.name}</span>
+                            {isPrimary && (
+                              <span className="shrink-0 px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-600 text-white">
+                                Principal
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-slate-600 text-[11px] mt-0.5">
+                            {contact.role} • {contact.company}
+                          </div>
                         </div>
-                        <div className="text-slate-600 text-[11px] mt-0.5">
-                          {contact.role} • {contact.company}
-                        </div>
-                        <div className="text-slate-500 text-[11px] mt-1 font-mono">
-                          {contact.email} • {contact.phone}
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleAlarm(contact.id, !contact.hasNotificationAlarm)}
+                          disabled={isToggling}
+                          title={contact.hasNotificationAlarm ? 'Quitar recordatorios automáticos' : 'Activar recordatorios automáticos'}
+                          className={`shrink-0 px-2 py-1 rounded text-[10px] font-semibold flex items-center gap-1 border transition-colors disabled:opacity-50 ${
+                            contact.hasNotificationAlarm
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                              : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                          }`}
+                        >
+                          <Bell className="w-3 h-3" />
+                          {isToggling ? '...' : contact.hasNotificationAlarm ? 'Alarma Activa' : 'Sin Alarma'}
+                        </button>
                       </div>
-                      <span
-                        className={`px-2 py-1 rounded text-[10px] font-semibold flex items-center gap-1 shrink-0 ${
-                          contact.hasNotificationAlarm
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        <Bell className="w-3 h-3" />
-                        {contact.hasNotificationAlarm ? 'Alarma Activa' : 'Sin Alarma'}
-                      </span>
+                      <div className="pt-2 border-t border-slate-100 text-slate-500 text-[11px] font-mono truncate">
+                        {contact.email} • {contact.phone}
+                      </div>
                     </div>
                   );
                 })}
@@ -715,34 +752,52 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                     No hay reglas de alerta configuradas para este proyecto.
                   </p>
                 ) : (
-                  projectAlerts.map((alert) => (
-                    <div
-                      key={alert.id}
-                      className="p-3 border border-slate-200 rounded-xl bg-white flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                            alert.active ? 'bg-emerald-500' : 'bg-slate-300'
-                          }`}
-                        />
-                        <div>
-                          <div className="font-semibold text-slate-900">{alert.name}</div>
-                          <div className="text-[11px] text-slate-500 mt-0.5">
-                            Frecuencia: {alert.schedule} • Hora: {alert.time} • Tipo: {alert.type}
+                  projectAlerts.map((alert) => {
+                    const isSending = sendingAlertId === alert.id;
+                    const wasSent = sentAlertId === alert.id;
+                    return (
+                      <div
+                        key={alert.id}
+                        className="p-3 border border-slate-200 rounded-xl bg-white flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                              alert.active ? 'bg-emerald-500' : 'bg-slate-300'
+                            }`}
+                          />
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-900 truncate">{alert.name}</div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              Frecuencia: {alert.schedule} • Hora: {alert.time} • Tipo: {alert.type}
+                            </div>
                           </div>
                         </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className="text-right">
+                            <span className="text-[11px] font-semibold text-slate-700 block">
+                              Próxima: {alert.nextExecution}
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              {alert.recipientIds.length} destinatarios
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleSendAlertNow(alert)}
+                            disabled={isSending || alert.recipientIds.length === 0}
+                            title={alert.recipientIds.length === 0 ? 'No hay destinatarios para esta alerta' : 'Enviar esta alerta ahora'}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold disabled:opacity-50 disabled:cursor-not-allowed ${
+                              wasSent ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                            }`}
+                          >
+                            <Send className="w-3 h-3" />
+                            {isSending ? 'Enviando...' : wasSent ? 'Enviada' : 'Enviar ahora'}
+                          </button>
+                        </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <span className="text-[11px] font-semibold text-slate-700 block">
-                          Próxima: {alert.nextExecution}
-                        </span>
-                        <span className="text-[10px] text-slate-400">
-                          {alert.recipientIds.length} destinatarios
-                        </span>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

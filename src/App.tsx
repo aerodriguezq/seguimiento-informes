@@ -595,6 +595,23 @@ export default function App() {
     }
   };
 
+  const handleToggleContactAlarm = async (contactId: string, enabled: boolean) => {
+    try {
+      const response = await fetch('/api/catalogs', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'contact', contactId: Number(contactId), data: { hasNotificationAlarm: enabled } }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar la alarma.');
+      setContacts((prev) => prev.map((c) => (c.id === contactId ? { ...c, hasNotificationAlarm: payload.data.hasNotificationAlarm } : c)));
+      showToast(enabled ? 'Alarma activada.' : 'Alarma desactivada.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible actualizar la alarma.', 'info');
+      throw error;
+    }
+  };
+
   const handleSimulateAlertTrigger = async (alert: ScheduledAlert) => {
     const recipients = alert.recipientIds
       .map((id) => contacts.find((contact) => contact.id === id))
@@ -1061,6 +1078,8 @@ export default function App() {
           onEditReport={handleEditReport}
           onEditReportStage={handleEditReportStage}
           onDeleteReport={handleDeleteReport}
+          onToggleContactAlarm={handleToggleContactAlarm}
+          onSimulateTrigger={handleSimulateAlertTrigger}
         />
       )}
 
