@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../server/google-drive.js';
 import { findDeliveryEmail } from '../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
-import { isAdminRequest } from '../server/admin-auth.js';
+import { isAdminRequest, canEditModuleRequest } from '../server/admin-auth.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -361,6 +361,97 @@ async function createReportRow(sql: SqlClient, input: CreateReportInput): Promis
 
   await seedFirstWorkflowStep(sql, reportId, input.typeId, input.projectId, input.year, input.month);
   return reportId;
+}
+
+const VALID_REPORT_STATUSES = ['Pendientes Evidencias', 'Informe en Elaboración', 'Entregado a Of. Proyectos', 'Enviado'];
+
+type BulkImportRowResult = { row: number; status: 'created' | 'error'; message?: string; consecutive?: string };
+
+// Carga masiva de informes YA ocurridos (histórico anterior a usar el
+// sistema): a diferencia de createReportRow, NO calcula la fecha límite
+// sola ni siembra el primer paso del flujo (no tiene sentido generar
+// alertas en vivo para algo que ya pasó) -- toma la fecha límite real tal
+// cual viene en la fila, y solo registra el informe y sus responsables
+// (si se dieron) para que quede en el historial y los reportes.
+async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ created: number; errors: number; results: BulkImportRowResult[] }> {
+  const results: BulkImportRowResult[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = (rows[i] ?? {}) as Record<string, unknown>;
+    const rowNum = i + 2; // fila 1 del Excel es el encabezado
+    try {
+      const bpin = String(r.bpin ?? r.BPIN ?? '').trim();
+      const typeCode = String(r.typeCode ?? r['Código Tipo Informe'] ?? r.codigoTipo ?? '').trim().toUpperCase();
+      const month = String(r.month ?? r.Mes ?? '').trim();
+      const yearRaw = r.year ?? r['Año'] ?? r.Ano;
+      const year = Number(yearRaw);
+      const dueDate = String(r.dueDate ?? r['Fecha Límite'] ?? r.fechaLimite ?? '').trim();
+      const statusRaw = String(r.status ?? r.Estado ?? '').trim();
+      const status = VALID_REPORT_STATUSES.includes(statusRaw) ? statusRaw : 'Enviado';
+      const observations = String(r.observations ?? r.Observaciones ?? '').trim();
+      const responsableEmails = String(r.responsables ?? r.Responsables ?? '')
+        .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+
+      if (!bpin || !typeCode || !month || !year || !dueDate) {
+        throw new Error('Faltan campos obligatorios (BPIN, código de tipo, mes, año o fecha límite).');
+      }
+      if (!MONTHS_ES.includes(month)) {
+        throw new Error(`"${month}" no es un mes válido (ej. Septiembre).`);
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+        throw new Error('La fecha límite debe tener formato AAAA-MM-DD.');
+      }
+
+      const [project] = (await sql`SELECT proyecto_id AS id FROM proyectos WHERE bpin = ${bpin}`) as any[];
+      if (!project) throw new Error(`No existe un proyecto con BPIN "${bpin}".`);
+
+      const [type] = (await sql`SELECT tipo_informe_id AS id, codigo FROM tipos_informe WHERE UPPER(codigo) = ${typeCode}`) as any[];
+      if (!type) throw new Error(`No existe un tipo de informe con código "${typeCode}".`);
+
+      const insertedReports = await sql`
+        INSERT INTO informes (informe_id, proyecto_id, tipo_informe_id, estado, mes_nombre, anio, fecha, observaciones, flujo_completado, created_at, updated_at)
+        VALUES (
+          COALESCE((SELECT MAX(informe_id) FROM informes), 0) + 1,
+          ${project.id}, ${type.id}, ${status}, ${month}, ${year}, ${dueDate},
+          ${observations || 'Informe histórico cargado masivamente.'}, ${status === 'Enviado'},
+          NOW(), NOW()
+        )
+        RETURNING informe_id AS id
+      `;
+      const reportId = insertedReports[0].id;
+
+      const typeCodeForConsecutive = type.codigo || 'INF';
+      const [{ count }] = (await sql`SELECT COUNT(*) AS count FROM informes WHERE tipo_informe_id = ${type.id} AND anio = ${year}`) as any[];
+      const consecutive = `${typeCodeForConsecutive}-${year}-${String(count).padStart(3, '0')}`;
+      const [{ seqCount }] = (await sql`SELECT COUNT(*) AS "seqCount" FROM informes WHERE tipo_informe_id = ${type.id} AND proyecto_id = ${project.id}`) as any[];
+      await sql`UPDATE informes SET consecutivo = ${consecutive}, numero_secuencia = ${Number(seqCount)} WHERE informe_id = ${reportId}`;
+
+      if (responsableEmails.length > 0) {
+        const contactRows = (await sql`SELECT contacto_id AS id FROM contactos WHERE LOWER(email) = ANY(${responsableEmails})`) as any[];
+        for (let c = 0; c < contactRows.length; c++) {
+          await sql`INSERT INTO informe_contacto (informe_id, contacto_id, es_principal) VALUES (${reportId}, ${contactRows[c].id}, ${c === 0})`;
+        }
+      }
+
+      await sql`
+        INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
+        VALUES (
+          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          ${reportId}, ${status}, NOW(), 'Carga masiva', 'Informe histórico importado masivamente.'
+        )
+      `;
+
+      results.push({ row: rowNum, status: 'created', consecutive });
+    } catch (error) {
+      results.push({ row: rowNum, status: 'error', message: error instanceof Error ? error.message : 'Error desconocido.' });
+    }
+  }
+
+  return {
+    created: results.filter((r) => r.status === 'created').length,
+    errors: results.filter((r) => r.status === 'error').length,
+    results,
+  };
 }
 
 // Fase E: si el tipo de informe es mensual y el proyecto sigue vigente en la
@@ -736,6 +827,21 @@ export default async function handler(request: VercelRequest, response: VercelRe
       const reports = await fetchReportsByIds(sql, idRows.map((r: any) => r.id));
       reports.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       return response.status(200).json({ data: reports, meta: { total: reports.length }, errors: [] });
+    }
+
+    if (request.method === 'POST' && request.body?.action === 'bulkImportReports') {
+      if (!(await canEditModuleRequest(request, sql, 'reports'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Informes.'] });
+      }
+      const rows = Array.isArray(request.body?.rows) ? request.body.rows : [];
+      if (rows.length === 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['No se recibieron filas para importar.'] });
+      }
+      if (rows.length > 500) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Máximo 500 filas por carga -- divide el archivo en lotes más pequeños.'] });
+      }
+      const result = await bulkImportReports(sql, rows);
+      return response.status(200).json({ data: result, meta: {}, errors: [] });
     }
 
     if (request.method === 'POST') {

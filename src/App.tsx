@@ -314,6 +314,39 @@ export default function App() {
   };
 
   // Report creation
+  const handleRefetchReports = async () => {
+    const response = await fetch('/api/reports');
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible recargar los informes.');
+    const loadedReports: Report[] = payload.data.map((report: any) => ({
+      id: String(report.id),
+      consecutive: report.consecutive || '',
+      projectId: String(report.projectId),
+      projectName: report.projectName,
+      projectBpin: report.projectBpin,
+      typeId: String(report.typeId),
+      typeName: report.typeName,
+      month: report.month,
+      year: report.year,
+      dueDate: report.dueDate,
+      status: report.status,
+      contactIds: report.contactIds,
+      primaryContactId: report.primaryContactId,
+      observations: report.observations,
+      history: report.history.map((h: any) => ({ status: h.status, date: h.date, userName: h.userName, comment: h.comment })),
+      attachments: report.attachments.map((a: any) => ({ id: String(a.id), name: a.name, driveUrl: a.driveUrl, uploadedAt: a.uploadedAt, uploadedBy: a.uploadedBy })),
+      alertRulesCount: report.alertRulesCount,
+      createdAt: report.createdAt,
+      currentStepId: report.currentStepId ? String(report.currentStepId) : undefined,
+      currentStepName: report.currentStepName || undefined,
+      currentStepIsFinal: report.currentStepIsFinal ?? undefined,
+      currentStepEmailSubject: report.currentStepEmailSubject || undefined,
+      isWorkflowCompleted: report.isWorkflowCompleted ?? undefined,
+      stageInstances: report.stageInstances,
+    }));
+    setReports(loadedReports);
+  };
+
   const handleSubmitNewReport = async (input: {
     projectId: string;
     typeId: string;
@@ -936,6 +969,7 @@ export default function App() {
               alerts={alerts}
               onSelectReport={handleNavigateToReport}
               onOpenNewReport={() => handleOpenNewReport(currentProjectId)}
+              onReportsImported={handleRefetchReports}
               initialFilterStatus={reportsFilterStatus}
             />
           )}

@@ -13,12 +13,14 @@ import {
 } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
+import { BulkImportReportsModal } from './BulkImportReportsModal';
 import {
   Search,
   Filter,
   Plus,
   ArrowUpDown,
   Download,
+  Upload,
   Eye,
   Edit2,
   Calendar,
@@ -39,6 +41,7 @@ interface ReportsListViewProps {
   alerts: ScheduledAlert[];
   onSelectReport: (reportId: string) => void;
   onOpenNewReport: () => void;
+  onReportsImported: () => Promise<void>;
   onQuickChangeStatus?: (reportId: string, newStatus: ReportStatus) => void;
   initialFilterStatus?: string;
 }
@@ -51,8 +54,10 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
   alerts,
   onSelectReport,
   onOpenNewReport,
+  onReportsImported,
   initialFilterStatus = 'all',
 }) => {
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const countPendientes = reports.filter((r) => r.status === 'Pendientes Evidencias').length;
   const countElaboracion = reports.filter((r) => r.status === 'Informe en Elaboración').length;
   const countEntregados = reports.filter((r) => r.status === 'Entregado a Of. Proyectos').length;
@@ -179,6 +184,15 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
           >
             <Download className="w-3.5 h-3.5 text-slate-500" />
             <span>Exportar CSV</span>
+          </button>
+          <button
+            id="reports-bulk-import-btn"
+            type="button"
+            onClick={() => setIsBulkImportOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg shadow-2xs transition-colors"
+          >
+            <Upload className="w-3.5 h-3.5 text-slate-500" />
+            <span>Cargar informes anteriores</span>
           </button>
           <button
             id="reports-new-report-btn"
@@ -520,6 +534,15 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
           </table>
         </div>
       </div>
+
+      {isBulkImportOpen && (
+        <BulkImportReportsModal
+          projects={projects}
+          reportTypes={reportTypes}
+          onClose={() => setIsBulkImportOpen(false)}
+          onImported={onReportsImported}
+        />
+      )}
     </div>
   );
 };
