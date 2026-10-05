@@ -47,6 +47,7 @@ interface ReportDetailModalProps {
   onAddAttachment: (reportId: string, attachment: ReportAttachment) => void;
   onAdvanceStep: (reportId: string) => Promise<void>;
   onEditReport: (reportId: string, updates: { month?: string; dueDate?: string; contactIds?: string[]; primaryContactId?: string; observations?: string }) => Promise<void>;
+  onEditReportStage: (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null }) => Promise<void>;
   onDeleteReport: (reportId: string) => Promise<void>;
 }
 
@@ -59,10 +60,15 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   onAddAttachment,
   onAdvanceStep,
   onEditReport,
+  onEditReportStage,
   onDeleteReport,
 }) => {
   const { user, canEdit } = useAuth();
   const [isAdvancingStep, setIsAdvancingStep] = useState(false);
+  const [editingStageId, setEditingStageId] = useState<string | null>(null);
+  const [stageStartInput, setStageStartInput] = useState('');
+  const [stageDueInput, setStageDueInput] = useState('');
+  const [isSavingStage, setIsSavingStage] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editMonth, setEditMonth] = useState(report.month);
   const [editDueDate, setEditDueDate] = useState(report.dueDate);
@@ -143,6 +149,22 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
 
   // Current state index in cycle
   const currentStepIndex = STATUS_SEQUENCE.indexOf(report.status);
+
+  const openEditStage = (stepId: string, startDate: string | null, dueDate: string | null) => {
+    setEditingStageId(stepId);
+    setStageStartInput(startDate ?? '');
+    setStageDueInput(dueDate ?? '');
+  };
+
+  const handleSaveStage = async (stepId: string) => {
+    setIsSavingStage(true);
+    try {
+      await onEditReportStage(report.id, stepId, { startDate: stageStartInput || null, dueDate: stageDueInput || null });
+      setEditingStageId(null);
+    } finally {
+      setIsSavingStage(false);
+    }
+  };
 
   const handleOpenTransition = (newS: ReportStatus) => {
     setTargetStatus(newS);
@@ -474,6 +496,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                       <th className="py-2 px-3">Límite</th>
                       <th className="py-2 px-3">Estado</th>
                       <th className="py-2 px-3">Recepción real</th>
+                      {user.isAdmin && <th className="py-2 px-3 text-right">Editar</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -494,11 +517,34 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                         NO_RECIBIDA: 'bg-rose-50 text-rose-700 border border-rose-200',
                         EN_REVISION: 'bg-indigo-50 text-indigo-700 border border-indigo-200',
                       };
+                      const isEditingStage = editingStageId === stage.stepId;
                       return (
                         <tr key={stage.stepId}>
                           <td className="py-2.5 px-4 font-semibold text-slate-900">{stage.order}. {stage.stepName}</td>
-                          <td className="py-2.5 px-3 text-slate-600">{stage.startDate || '—'}</td>
-                          <td className="py-2.5 px-3 text-slate-600">{stage.dueDate || '—'}</td>
+                          <td className="py-2.5 px-3 text-slate-600">
+                            {isEditingStage ? (
+                              <input
+                                type="date"
+                                value={stageStartInput}
+                                onChange={(e) => setStageStartInput(e.target.value)}
+                                className="w-36 px-1.5 py-1 text-xs border border-slate-200 rounded-md outline-none focus:border-teal-600"
+                              />
+                            ) : (
+                              stage.startDate || '—'
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600">
+                            {isEditingStage ? (
+                              <input
+                                type="date"
+                                value={stageDueInput}
+                                onChange={(e) => setStageDueInput(e.target.value)}
+                                className="w-36 px-1.5 py-1 text-xs border border-slate-200 rounded-md outline-none focus:border-teal-600"
+                              />
+                            ) : (
+                              stage.dueDate || '—'
+                            )}
+                          </td>
                           <td className="py-2.5 px-3">
                             <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold whitespace-nowrap ${STAGE_COLOR[stage.status] || 'bg-slate-100 text-slate-600'}`}>
                               {STAGE_LABEL[stage.status] || stage.status}
@@ -507,6 +553,41 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                           <td className="py-2.5 px-3 text-slate-600">
                             {stage.receivedAt ? new Date(stage.receivedAt).toLocaleString('es-CO') : '—'}
                           </td>
+                          {user.isAdmin && (
+                            <td className="py-2.5 px-3 text-right">
+                              {isEditingStage ? (
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveStage(stage.stepId)}
+                                    disabled={isSavingStage}
+                                    className="text-teal-700 hover:text-teal-900 disabled:opacity-50"
+                                    title="Guardar"
+                                  >
+                                    <Save className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingStageId(null)}
+                                    disabled={isSavingStage}
+                                    className="text-slate-400 hover:text-slate-700"
+                                    title="Cancelar"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => openEditStage(stage.stepId, stage.startDate, stage.dueDate)}
+                                  className="text-slate-400 hover:text-teal-700"
+                                  title="Editar fechas de la etapa"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       );
                     })}

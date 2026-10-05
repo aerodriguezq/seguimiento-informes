@@ -411,6 +411,18 @@ export default function App() {
     showToast('Informe actualizado.', 'success');
   };
 
+  const handleEditReportStage = async (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null }) => {
+    const response = await fetch('/api/reports', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'edit_stage', reportId, stepId: Number(stepId), ...updates }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible editar la etapa.');
+    setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+    showToast('Fechas de la etapa actualizadas.', 'success');
+  };
+
   const handleDeleteReport = async (reportId: string) => {
     const response = await fetch(`/api/reports?reportId=${encodeURIComponent(reportId)}`, { method: 'DELETE' });
     const payload = await response.json();
@@ -1037,6 +1049,7 @@ export default function App() {
           onAddAttachment={handleAddReportAttachment}
           onAdvanceStep={handleAdvanceReportStep}
           onEditReport={handleEditReport}
+          onEditReportStage={handleEditReportStage}
           onDeleteReport={handleDeleteReport}
         />
       )}
