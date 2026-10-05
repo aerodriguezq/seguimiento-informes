@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ReportType, Contact, ReportStatus, ReportTypeStep, AreaConsolida, Project } from '../../types';
 import { STATUS_SEQUENCE, MONTHS_LIST, YEARS_LIST } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
@@ -71,6 +71,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [newStepKeywords, setNewStepKeywords] = useState('');
   const [stepError, setStepError] = useState('');
   const [isSavingStep, setIsSavingStep] = useState(false);
+  const [isAddStepFormOpen, setIsAddStepFormOpen] = useState(false);
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
   const [editStepName, setEditStepName] = useState('');
   const [editStepSubject, setEditStepSubject] = useState('');
@@ -218,6 +219,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       setNewStepDiaInicio('');
       setNewStepDiaLimite('');
       setNewStepKeywords('');
+      setIsAddStepFormOpen(false);
     } catch (error) {
       setStepError(error instanceof Error ? error.message : 'No fue posible guardar el paso.');
     } finally {
@@ -265,9 +267,18 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
     }
   };
 
+  // El formulario de "Agregar paso" se oculta por defecto en cuanto el
+  // flujo ya tiene un paso final (lo normal es que esté completo) -- se
+  // vuelve a mostrar con un botón explícito, y se resetea cada vez que se
+  // cambia de tipo de informe o de alcance (plantilla/proyecto).
+  useEffect(() => {
+    setIsAddStepFormOpen(false);
+  }, [stepsModalTypeId, stepsScopeProjectId]);
+
   const stepsForModalType = reportTypeSteps
     .filter((s) => s.typeId === stepsModalTypeId && (s.projectId ?? null) === stepsScopeProjectId)
     .sort((a, b) => a.order - b.order);
+  const hasFinalStep = stepsForModalType.some((s) => s.isFinal);
   const typeForStepsModal = reportTypes.find((t) => t.id === stepsModalTypeId);
   const projectsForStepsModal = projects.filter(
     (p) => stepsModalTypeId && (p.applicableTypeIds.length === 0 || p.applicableTypeIds.includes(stepsModalTypeId)),
@@ -1074,8 +1085,22 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 </div>
               )}
 
-              {/* Formulario: agregar paso nuevo */}
-              {canEditLists && (
+              {/* Formulario: agregar paso nuevo -- oculto por defecto si el
+                  flujo ya tiene un paso final, para no invitar a seguir
+                  agregando pasos después de uno que cierra el proceso. */}
+              {canEditLists && hasFinalStep && !isAddStepFormOpen && (
+                <div className="border-t border-slate-100 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddStepFormOpen(true)}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-600 hover:text-indigo-800"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Agregar otro paso
+                  </button>
+                </div>
+              )}
+              {canEditLists && (!hasFinalStep || isAddStepFormOpen) && (
                 <form onSubmit={handleSaveStep} className="space-y-3 border-t border-slate-100 pt-4">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
                     Agregar paso {stepsForModalType.length + 1}
