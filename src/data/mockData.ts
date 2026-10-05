@@ -9,8 +9,6 @@ import {
   SemaforoStatus,
 } from '../types';
 
-export const CURRENT_DATE_STR = '2026-09-14';
-
 export const INITIAL_REPORT_TYPES: ReportType[] = [
   {
     id: 'rt-1',
@@ -627,8 +625,9 @@ export function calculateDaysRemaining(dueDateStr: string, status: ReportStatus)
   if (status === 'Enviado') {
     return 0; // Already fulfilled
   }
-  const current = new Date(CURRENT_DATE_STR).getTime();
-  const due = new Date(dueDateStr).getTime();
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const current = new Date(`${todayIso}T00:00:00`).getTime();
+  const due = new Date(`${dueDateStr}T00:00:00`).getTime();
   const diffDays = Math.round((due - current) / (1000 * 60 * 60 * 24));
   return diffDays;
 }
