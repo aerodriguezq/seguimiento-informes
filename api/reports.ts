@@ -229,6 +229,25 @@ async function resolveStepsScope(sql: SqlClient, typeId: number, projectId: numb
   return row ? projectId : null;
 }
 
+// La "Fecha límite" general del informe (no la de cada etapa) se calcula
+// con el día límite del PASO FINAL del flujo, aplicado al mes siguiente al
+// período reportado -- ej. el informe de Septiembre, con el paso final
+// configurado a día límite 10, vence el 10 de Octubre. Sin un paso final
+// con día límite configurado, devuelve null (el llamador decide el
+// respaldo, para no romper tipos de informe sin flujo configurado todavía).
+async function computeReportDueDate(sql: SqlClient, typeId: number, projectId: number, month: string, year: number): Promise<string | null> {
+  const scope = await resolveStepsScope(sql, typeId, projectId);
+  const finalStepRows = (
+    scope === null
+      ? await sql`SELECT dia_limite AS "diaLimite" FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id IS NULL AND es_final = TRUE ORDER BY orden DESC LIMIT 1`
+      : await sql`SELECT dia_limite AS "diaLimite" FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id = ${scope} AND es_final = TRUE ORDER BY orden DESC LIMIT 1`
+  ) as any[];
+  const diaLimite = finalStepRows[0]?.diaLimite;
+  if (!diaLimite) return null;
+  const { month: nextMonth, year: nextYear } = nextMonthYear(month, year);
+  return dateFromDayOfMonth(nextYear, nextMonth, diaLimite);
+}
+
 // Crea la alerta del primer paso configurado para el tipo de informe (si existe)
 // y deja el informe apuntando a ese paso. Sin pasos configurados, no hace nada.
 async function seedFirstWorkflowStep(sql: SqlClient, reportId: number, typeId: number, projectId: number, year: number, monthName: string) {
@@ -259,11 +278,18 @@ type CreateReportInput = {
 };
 
 async function createReportRow(sql: SqlClient, input: CreateReportInput): Promise<number> {
+  // La fecha límite general se calcula sola a partir del paso final del
+  // flujo (ver computeReportDueDate) -- lo que venga del cliente solo se
+  // usa de respaldo si ese tipo de informe todavía no tiene un paso final
+  // con día límite configurado.
+  const computedDueDate = await computeReportDueDate(sql, Number(input.typeId), Number(input.projectId), input.month, input.year);
+  const dueDate = computedDueDate ?? input.dueDate;
+
   const insertedReports = await sql`
     INSERT INTO informes (informe_id, proyecto_id, tipo_informe_id, estado, mes_nombre, anio, fecha, observaciones, created_at, updated_at)
     VALUES (
       COALESCE((SELECT MAX(informe_id) FROM informes), 0) + 1,
-      ${input.projectId}, ${input.typeId}, ${input.status}, ${input.month}, ${input.year}, ${input.dueDate},
+      ${input.projectId}, ${input.typeId}, ${input.status}, ${input.month}, ${input.year}, ${dueDate},
       ${input.observations || 'Apertura de informe para seguimiento del cronograma contractual.'},
       NOW(), NOW()
     )
@@ -321,7 +347,7 @@ async function maybeScheduleNextMonth(sql: SqlClient, reportId: number) {
   if (!report || report.periodicity !== 'Mensual') return;
 
   const { month: nextMonth, year: nextYear } = nextMonthYear(report.month, report.year);
-  const nextDueDate = addOneMonth(report.dueDate);
+  const nextDueDate = (await computeReportDueDate(sql, report.typeId, report.projectId, nextMonth, nextYear)) ?? addOneMonth(report.dueDate);
   if (report.projectEndDate && nextDueDate > report.projectEndDate) return;
 
   const contactRows = (await sql`
@@ -738,11 +764,22 @@ export default async function handler(request: VercelRequest, response: VercelRe
         return response.status(400).json({ data: null, meta: {}, errors: ['Debe haber al menos un responsable.'] });
       }
 
-      const current = (await sql`SELECT mes_nombre, fecha, observaciones FROM informes WHERE informe_id = ${reportId}`) as any[];
+      const current = (await sql`
+        SELECT mes_nombre, fecha, observaciones, anio, tipo_informe_id AS "typeId", proyecto_id AS "projectId"
+        FROM informes WHERE informe_id = ${reportId}
+      `) as any[];
       if (!current[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Informe no encontrado.'] });
 
       const nextMonth = has('month') ? month : current[0].mes_nombre;
-      const nextDueDate = has('dueDate') ? dueDate : current[0].fecha;
+      // Si cambia el mes y no se manda una fecha límite explícita, se
+      // recalcula sola a partir del paso final del flujo (ver
+      // computeReportDueDate) -- una fecha explícita del cliente sigue
+      // ganando, para no quitarle al admin la posibilidad de corregirla a
+      // mano en casos puntuales.
+      const recomputedDueDate = has('month') && !has('dueDate')
+        ? await computeReportDueDate(sql, current[0].typeId, current[0].projectId, nextMonth, current[0].anio)
+        : null;
+      const nextDueDate = has('dueDate') ? dueDate : (recomputedDueDate ?? current[0].fecha);
       const nextObservations = has('observations') ? observations : current[0].observaciones;
 
       await sql`

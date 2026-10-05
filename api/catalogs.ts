@@ -508,6 +508,53 @@ export default async function handler(
         return response.status(200).json({ data: { ...rows[0], label: SWEEP_LABELS[sweepKind] }, meta: {}, errors: [] });
       }
 
+      if (body.kind === 'reportTypeStep') {
+        if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+        }
+        const stepId = Number(body.stepId);
+        if (!Number.isInteger(stepId) || stepId <= 0) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id del paso es obligatorio.'] });
+        }
+        const current = await sql`SELECT * FROM tipo_informe_pasos WHERE paso_id = ${stepId}`;
+        if (!current[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Paso no encontrado.'] });
+
+        const has = (key: string) => Object.prototype.hasOwnProperty.call(body.data ?? {}, key);
+        const d = body.data ?? {};
+        const nextName = has('name') ? String(d.name ?? '').trim() : current[0].nombre;
+        const nextSubject = has('emailSubject') ? String(d.emailSubject ?? '').trim() : current[0].asunto_correo;
+        const nextIsFinal = has('isFinal') ? Boolean(d.isFinal) : current[0].es_final;
+        const nextDiaInicio = has('diaInicio') ? (d.diaInicio === null || d.diaInicio === '' ? null : Number(d.diaInicio)) : current[0].dia_inicio;
+        const nextDiaLimite = has('diaLimite') ? (d.diaLimite === null || d.diaLimite === '' ? null : Number(d.diaLimite)) : current[0].dia_limite;
+        const nextPalabrasClave = has('palabrasClave') ? (String(d.palabrasClave ?? '').trim() || null) : current[0].palabras_clave;
+        if (!nextName || !nextSubject) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['Nombre y asunto de correo son obligatorios.'] });
+        }
+
+        const rows = await sql`
+          UPDATE tipo_informe_pasos SET nombre = ${nextName}, asunto_correo = ${nextSubject}, es_final = ${nextIsFinal},
+            dia_inicio = ${nextDiaInicio}, dia_limite = ${nextDiaLimite}, palabras_clave = ${nextPalabrasClave}
+          WHERE paso_id = ${stepId}
+          RETURNING paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
+            asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
+            palabras_clave AS "palabrasClave"
+        `;
+
+        let contactIds: string[];
+        if (Array.isArray(body.contactIds)) {
+          await sql`DELETE FROM tipo_informe_paso_contacto WHERE paso_id = ${stepId}`;
+          for (const contactId of body.contactIds) {
+            await sql`INSERT INTO tipo_informe_paso_contacto (paso_id, contacto_id) VALUES (${stepId}, ${contactId})`;
+          }
+          contactIds = body.contactIds.map(String);
+        } else {
+          const existingContacts = await sql`SELECT contacto_id AS id FROM tipo_informe_paso_contacto WHERE paso_id = ${stepId}`;
+          contactIds = existingContacts.map((c: any) => String(c.id));
+        }
+
+        return response.status(200).json({ data: { ...rows[0], contactIds }, meta: {}, errors: [] });
+      }
+
       if (body.kind !== 'authorizedUser') {
         return response.status(400).json({ data: null, meta: {}, errors: ['Catálogo no soportado.'] });
       }

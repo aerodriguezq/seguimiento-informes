@@ -34,6 +34,7 @@ interface MasterListsViewProps {
   onAddReportType: (type: ReportType) => Promise<void>;
   onAddContact: (contact: Contact) => Promise<void>;
   onAddReportTypeStep: (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => Promise<void>;
+  onEditReportTypeStep: (stepId: string, step: { name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number | null; diaLimite?: number | null; palabrasClave?: string | null }) => Promise<void>;
   onDeleteReportTypeStep: (stepId: string) => Promise<void>;
   onMoveReportTypeStep: (stepId: string, direction: 'up' | 'down') => Promise<void>;
   areasConsolida: AreaConsolida[];
@@ -49,6 +50,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   onAddReportType,
   onAddContact,
   onAddReportTypeStep,
+  onEditReportTypeStep,
   onDeleteReportTypeStep,
   onMoveReportTypeStep,
   areasConsolida,
@@ -69,6 +71,16 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [newStepKeywords, setNewStepKeywords] = useState('');
   const [stepError, setStepError] = useState('');
   const [isSavingStep, setIsSavingStep] = useState(false);
+  const [editingStepId, setEditingStepId] = useState<string | null>(null);
+  const [editStepName, setEditStepName] = useState('');
+  const [editStepSubject, setEditStepSubject] = useState('');
+  const [editStepIsFinal, setEditStepIsFinal] = useState(false);
+  const [editStepContactIds, setEditStepContactIds] = useState<string[]>([]);
+  const [editStepDiaInicio, setEditStepDiaInicio] = useState('');
+  const [editStepDiaLimite, setEditStepDiaLimite] = useState('');
+  const [editStepKeywords, setEditStepKeywords] = useState('');
+  const [editStepError, setEditStepError] = useState('');
+  const [isSavingStepEdit, setIsSavingStepEdit] = useState(false);
   const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'statuses' | 'periods' | 'areas'>('types');
   const [newAreaName, setNewAreaName] = useState('');
   const [areaError, setAreaError] = useState('');
@@ -210,6 +222,46 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       setStepError(error instanceof Error ? error.message : 'No fue posible guardar el paso.');
     } finally {
       setIsSavingStep(false);
+    }
+  };
+
+  const openEditStep = (step: ReportTypeStep) => {
+    setEditingStepId(step.id);
+    setEditStepName(step.name);
+    setEditStepSubject(step.emailSubject);
+    setEditStepIsFinal(step.isFinal);
+    setEditStepContactIds(step.contactIds);
+    setEditStepDiaInicio(step.diaInicio ? String(step.diaInicio) : '');
+    setEditStepDiaLimite(step.diaLimite ? String(step.diaLimite) : '');
+    setEditStepKeywords(step.palabrasClave ?? '');
+    setEditStepError('');
+  };
+
+  const toggleEditStepContact = (contactId: string) => {
+    setEditStepContactIds((prev) => (prev.includes(contactId) ? prev.filter((id) => id !== contactId) : [...prev, contactId]));
+  };
+
+  const handleSaveStepEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStepId || !editStepName.trim() || !editStepSubject.trim() || editStepContactIds.length === 0) return;
+
+    setIsSavingStepEdit(true);
+    setEditStepError('');
+    try {
+      await onEditReportTypeStep(editingStepId, {
+        name: editStepName.trim(),
+        emailSubject: editStepSubject.trim(),
+        isFinal: editStepIsFinal,
+        contactIds: editStepContactIds,
+        diaInicio: editStepDiaInicio === '' ? null : Number(editStepDiaInicio),
+        diaLimite: editStepDiaLimite === '' ? null : Number(editStepDiaLimite),
+        palabrasClave: editStepKeywords.trim() || null,
+      });
+      setEditingStepId(null);
+    } catch (error) {
+      setEditStepError(error instanceof Error ? error.message : 'No fue posible guardar los cambios del paso.');
+    } finally {
+      setIsSavingStepEdit(false);
     }
   };
 
@@ -853,58 +905,161 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 ) : (
                   <ol className="space-y-1.5">
                     {stepsForModalType.map((step, idx) => (
-                      <li key={step.id} className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 p-2.5">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] text-indigo-700">{idx + 1}</span>
-                            <span className="truncate">{step.name}</span>
-                            {step.isFinal && (
-                              <span className="inline-flex shrink-0 items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
-                                <Flag className="h-3 w-3" /> Final
-                              </span>
+                      <li key={step.id} className="rounded-lg border border-slate-200 p-2.5">
+                        {editingStepId === step.id ? (
+                          <form onSubmit={handleSaveStepEdit} className="space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Nombre del paso</label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={editStepName}
+                                  onChange={(e) => setEditStepName(e.target.value)}
+                                  className="w-full px-2 py-1 text-xs border border-slate-200 rounded-md outline-none focus:border-indigo-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Asunto de correo</label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={editStepSubject}
+                                  onChange={(e) => setEditStepSubject(e.target.value)}
+                                  className="w-full px-2 py-1 text-xs border border-slate-200 rounded-md outline-none focus:border-indigo-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día de inicio</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={31}
+                                  value={editStepDiaInicio}
+                                  onChange={(e) => setEditStepDiaInicio(e.target.value)}
+                                  className="w-full px-2 py-1 text-xs border border-slate-200 rounded-md outline-none focus:border-indigo-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Día límite</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={31}
+                                  value={editStepDiaLimite}
+                                  onChange={(e) => setEditStepDiaLimite(e.target.value)}
+                                  className="w-full px-2 py-1 text-xs border border-slate-200 rounded-md outline-none focus:border-indigo-500"
+                                />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Palabras clave adicionales</label>
+                                <input
+                                  type="text"
+                                  value={editStepKeywords}
+                                  onChange={(e) => setEditStepKeywords(e.target.value)}
+                                  placeholder="Separadas por coma"
+                                  className="w-full px-2 py-1 text-xs border border-slate-200 rounded-md outline-none focus:border-indigo-500"
+                                />
+                              </div>
+                            </div>
+                            <label className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={editStepIsFinal} onChange={(e) => setEditStepIsFinal(e.target.checked)} className="rounded" style={{ accentColor: '#4f46e5' }} />
+                              Es el paso final del flujo
+                            </label>
+                            <div>
+                              <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Responsables</label>
+                              <div className="max-h-24 overflow-y-auto rounded-md border border-slate-200 p-1.5 space-y-1">
+                                {contacts.map((c) => (
+                                  <label key={c.id} className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={editStepContactIds.includes(c.id)}
+                                      onChange={() => toggleEditStepContact(c.id)}
+                                      className="rounded"
+                                      style={{ accentColor: '#4f46e5' }}
+                                    />
+                                    {c.name}
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                            {editStepError && <p className="text-[11px] text-rose-600">{editStepError}</p>}
+                            <div className="flex items-center justify-end gap-2 pt-1">
+                              <button type="button" onClick={() => setEditingStepId(null)} className="px-2.5 py-1 text-[11px] font-semibold text-slate-500 hover:text-slate-700">
+                                Cancelar
+                              </button>
+                              <button
+                                type="submit"
+                                disabled={isSavingStepEdit}
+                                className="inline-flex items-center gap-1.5 px-3 py-1 text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md disabled:opacity-50"
+                              >
+                                {isSavingStepEdit ? 'Guardando...' : 'Guardar'}
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] text-indigo-700">{idx + 1}</span>
+                                <span className="truncate">{step.name}</span>
+                                {step.isFinal && (
+                                  <span className="inline-flex shrink-0 items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                                    <Flag className="h-3 w-3" /> Final
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-1 truncate text-[11px] text-slate-500">Asunto: "{step.emailSubject}"</p>
+                              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                {(step.diaInicio || step.diaLimite) && (
+                                  <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+                                    {step.diaInicio ? `Inicia día ${step.diaInicio}` : 'Inicia con la entrega anterior'}
+                                    {step.diaLimite ? ` · Límite día ${step.diaLimite}` : ''}
+                                  </span>
+                                )}
+                                <span className="text-[11px] text-slate-500 truncate">
+                                  {step.contactIds.map((id) => contacts.find((c) => c.id === id)?.name).filter(Boolean).join(', ') || 'Sin contactos'}
+                                </span>
+                              </div>
+                            </div>
+                            {canEditLists && (
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditStep(step)}
+                                  className="text-slate-400 hover:text-indigo-600"
+                                  title="Editar paso"
+                                >
+                                  <Edit2 className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onMoveReportTypeStep(step.id, 'up')}
+                                  disabled={idx === 0}
+                                  className="text-slate-400 hover:text-indigo-600 disabled:opacity-30 disabled:hover:text-slate-400"
+                                  title="Mover arriba"
+                                >
+                                  <ChevronUp className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onMoveReportTypeStep(step.id, 'down')}
+                                  disabled={idx === stepsForModalType.length - 1}
+                                  className="text-slate-400 hover:text-indigo-600 disabled:opacity-30 disabled:hover:text-slate-400"
+                                  title="Mover abajo"
+                                >
+                                  <ChevronDown className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteReportTypeStep(step.id)}
+                                  className="text-slate-400 hover:text-rose-600"
+                                  title="Eliminar paso"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
                             )}
-                          </div>
-                          <p className="mt-1 truncate text-[11px] text-slate-500">Asunto: "{step.emailSubject}"</p>
-                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                            {(step.diaInicio || step.diaLimite) && (
-                              <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
-                                {step.diaInicio ? `Inicia día ${step.diaInicio}` : 'Inicia con la entrega anterior'}
-                                {step.diaLimite ? ` · Límite día ${step.diaLimite}` : ''}
-                              </span>
-                            )}
-                            <span className="text-[11px] text-slate-500 truncate">
-                              {step.contactIds.map((id) => contacts.find((c) => c.id === id)?.name).filter(Boolean).join(', ') || 'Sin contactos'}
-                            </span>
-                          </div>
-                        </div>
-                        {canEditLists && (
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => onMoveReportTypeStep(step.id, 'up')}
-                              disabled={idx === 0}
-                              className="text-slate-400 hover:text-indigo-600 disabled:opacity-30 disabled:hover:text-slate-400"
-                              title="Mover arriba"
-                            >
-                              <ChevronUp className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onMoveReportTypeStep(step.id, 'down')}
-                              disabled={idx === stepsForModalType.length - 1}
-                              className="text-slate-400 hover:text-indigo-600 disabled:opacity-30 disabled:hover:text-slate-400"
-                              title="Mover abajo"
-                            >
-                              <ChevronDown className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onDeleteReportTypeStep(step.id)}
-                              className="text-slate-400 hover:text-rose-600"
-                              title="Eliminar paso"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
                           </div>
                         )}
                       </li>

@@ -678,6 +678,18 @@ export default function App() {
     showToast(`Paso "${step.name}" agregado al flujo.`, 'success');
   };
 
+  const handleEditReportTypeStep = async (stepId: string, step: { name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; diaInicio?: number | null; diaLimite?: number | null; palabrasClave?: string | null }) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'reportTypeStep', stepId: Number(stepId), data: step, contactIds: step.contactIds }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible editar el paso.');
+    setReportTypeSteps((prev) => prev.map((s) => (s.id === stepId ? { ...s, ...payload.data } : s)));
+    showToast(`Paso "${step.name}" actualizado.`, 'success');
+  };
+
   const handleAddAreaConsolida = async (name: string) => {
     try {
       const response = await fetch('/api/catalogs', {
@@ -996,6 +1008,7 @@ export default function App() {
               onAddReportType={handleAddReportType}
               onAddContact={handleAddContact}
               onAddReportTypeStep={handleAddReportTypeStep}
+              onEditReportTypeStep={handleEditReportTypeStep}
               onDeleteReportTypeStep={handleDeleteReportTypeStep}
               onMoveReportTypeStep={handleMoveReportTypeStep}
               areasConsolida={areasConsolida}
