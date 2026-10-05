@@ -74,7 +74,6 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [isSavingStage, setIsSavingStage] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editMonth, setEditMonth] = useState(report.month);
-  const [editDueDate, setEditDueDate] = useState(report.dueDate);
   const [editObservations, setEditObservations] = useState(report.observations);
   const [editContactIds, setEditContactIds] = useState<string[]>(report.contactIds);
   const [editPrimaryContactId, setEditPrimaryContactId] = useState(report.primaryContactId);
@@ -84,7 +83,6 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
 
   const startEditing = () => {
     setEditMonth(report.month);
-    setEditDueDate(report.dueDate);
     setEditObservations(report.observations);
     setEditContactIds(report.contactIds);
     setEditPrimaryContactId(report.primaryContactId);
@@ -102,7 +100,6 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
     try {
       await onEditReport(report.id, {
         month: editMonth,
-        dueDate: editDueDate,
         observations: editObservations,
         contactIds: editContactIds,
         primaryContactId: editContactIds.includes(editPrimaryContactId) ? editPrimaryContactId : editContactIds[0],
@@ -290,28 +287,18 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
               <span className="text-xs font-bold uppercase tracking-wider text-indigo-700">Editando informe</span>
               <span className="text-[11px] text-slate-500">Año, tipo y proyecto no se pueden cambiar aquí.</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Mes</label>
-                <select
-                  value={editMonth}
-                  onChange={(e) => setEditMonth(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white"
-                >
-                  {MONTHS_LIST.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Fecha límite</label>
-                <input
-                  type="date"
-                  value={editDueDate}
-                  onChange={(e) => setEditDueDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white"
-                />
-              </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Mes</label>
+              <select
+                value={editMonth}
+                onChange={(e) => setEditMonth(e.target.value)}
+                className="w-full max-w-xs px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white"
+              >
+                {MONTHS_LIST.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10.5px] text-slate-500">La fecha límite se recalcula sola según el paso final del flujo configurado para este tipo de informe.</p>
             </div>
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">Observaciones</label>
