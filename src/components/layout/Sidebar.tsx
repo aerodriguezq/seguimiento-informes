@@ -15,6 +15,7 @@ import {
   Users,
   ChevronRight,
   Inbox,
+  ShieldCheck,
 } from 'lucide-react';
 import { ActiveModule } from '../../types';
 import { useAuth } from '../../auth/AuthContext';
@@ -185,6 +186,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label: 'Usuarios',
           icon: Users,
           visible: user.isAdmin,
+        },
+        {
+          kind: 'leaf',
+          id: 'file_cleaner',
+          label: 'Limpieza de Archivos',
+          icon: ShieldCheck,
+          visible: true,
         },
       ],
     },

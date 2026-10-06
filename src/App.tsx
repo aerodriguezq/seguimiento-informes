@@ -32,6 +32,7 @@ import { AlertsView } from './components/alerts/AlertsView';
 import { MasterListsView } from './components/master-lists/MasterListsView';
 import { DriveLinksView } from './components/drive/DriveLinksView';
 import { UsersManagementView, AuthorizedUser, SweepConfig } from './components/users/UsersManagementView';
+import { FileCleanerView } from './components/files/FileCleanerView';
 import { useAuth } from './auth/AuthContext';
 import { CheckCircle2, Info, X } from 'lucide-react';
 
@@ -47,6 +48,7 @@ const MODULE_ROUTES: Record<ActiveModule, string> = {
   seguimiento: '/seguimiento',
   peticiones: '/peticiones',
   users: '/usuarios',
+  file_cleaner: '/limpieza-archivos',
 };
 
 const PATH_TO_MODULE: Partial<Record<string, ActiveModule>> = Object.fromEntries(
@@ -80,6 +82,9 @@ export default function App() {
 
   const canViewModule = (mod: ActiveModule): boolean => {
     if (mod === 'users') return user.isAdmin;
+    // Herramienta local (todo corre en el navegador, el archivo nunca sale
+    // de la máquina) -- no depende de los módulos de permisos existentes.
+    if (mod === 'file_cleaner') return true;
     if (mod === 'dashboard' || mod === 'new_report' || mod === 'project_detail') {
       return mod === 'new_report' ? canView('reports') : mod === 'project_detail' ? canView('projects') : true;
     }
@@ -1113,6 +1118,11 @@ export default function App() {
               onUpdateSweep={handleUpdateSweep}
               onTriggerSweep={handleTriggerSweep}
             />
+          )}
+
+          {/* Limpieza de metadatos de archivos: 100% cliente, el archivo nunca sale del navegador */}
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'file_cleaner' && (
+            <FileCleanerView />
           )}
         </main>
       </div>

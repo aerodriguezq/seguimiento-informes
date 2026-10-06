@@ -172,7 +172,8 @@ export type ActiveModule =
   | 'drive_links'
   | 'seguimiento'
   | 'peticiones'
-  | 'users';
+  | 'users'
+  | 'file_cleaner';
 
 export interface PeticionResponsable {
   id: string;
