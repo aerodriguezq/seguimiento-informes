@@ -14,6 +14,7 @@ import {
 } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
+import { STAGE_LABEL, STAGE_COLOR } from '../common/stageStatus';
 import { BulkImportReportsModal } from './BulkImportReportsModal';
 import {
   Search,
@@ -511,9 +512,30 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
                         <SemaforoBadge status={semaforo} daysRemaining={daysRemaining} />
                       </td>
 
-                      {/* Estado del ciclo */}
+                      {/* Estado del ciclo -- depende del paso de flujo real del
+                          informe, no de un ciclo genérico de 4 estados */}
                       <td className="py-3.5 px-4">
-                        <StatusBadge status={report.status} size="sm" />
+                        {report.isWorkflowCompleted ? (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800 whitespace-nowrap">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Flujo completado
+                          </span>
+                        ) : report.currentStepName ? (
+                          (() => {
+                            const stage = report.stageInstances?.find((s) => s.stepId === report.currentStepId);
+                            const colorClass = (stage && STAGE_COLOR[stage.status]) || 'bg-slate-100 text-slate-600';
+                            return (
+                              <span
+                                className={`inline-block max-w-44 truncate rounded-full px-2 py-0.5 text-xs whitespace-nowrap ${colorClass}`}
+                                title={`${report.currentStepName}${stage ? ` — ${STAGE_LABEL[stage.status] || stage.status}` : ''}`}
+                              >
+                                {report.currentStepName}
+                              </span>
+                            );
+                          })()
+                        ) : (
+                          <StatusBadge status={report.status} size="sm" />
+                        )}
                       </td>
 
                       {/* Responsables */}
