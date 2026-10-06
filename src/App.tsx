@@ -355,6 +355,18 @@ export default function App() {
     setReports(loadedReports);
   };
 
+  // Cualquier acción que pueda crear/cerrar alertas de paso en el backend
+  // (crear informe, avanzar o cambiar el paso a mano) debe llamar esto para
+  // que la pestaña "Alertas Vinculadas" no se quede mostrando datos viejos
+  // hasta el próximo refresh de página.
+  const refetchAlerts = async () => {
+    const alertsResponse = await fetch('/api/alerts');
+    const alertsPayload = await alertsResponse.json();
+    if (alertsResponse.ok) {
+      setAlerts(alertsPayload.data.map(mapAlert));
+    }
+  };
+
   const handleSubmitNewReport = async (input: {
     projectId: string;
     typeId: string;
@@ -384,6 +396,7 @@ export default function App() {
     }
 
     setReports((prev) => [newReport, ...prev]);
+    await refetchAlerts();
     goToModule('reports');
     setSelectedReportId(newReport.id);
     showToast(`Informe ${newReport.consecutive} creado y registrado con éxito.`, 'success');
@@ -470,6 +483,7 @@ export default function App() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible cambiar el paso actual.');
     setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+    await refetchAlerts();
     showToast('Paso actual del informe actualizado.', 'success');
   };
 
@@ -504,12 +518,7 @@ export default function App() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible avanzar el paso.');
       setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
-
-      const alertsResponse = await fetch('/api/alerts');
-      const alertsPayload = await alertsResponse.json();
-      if (alertsResponse.ok) {
-        setAlerts(alertsPayload.data.map(mapAlert));
-      }
+      await refetchAlerts();
       showToast('Paso del flujo actualizado. Las alertas del paso anterior se detuvieron.', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'No fue posible avanzar el paso.', 'info');
