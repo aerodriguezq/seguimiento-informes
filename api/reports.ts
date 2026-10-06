@@ -1064,6 +1064,49 @@ export default async function handler(request: VercelRequest, response: VercelRe
         UPDATE informe_pasos_instancia SET fecha_inicio = ${nextStart}, fecha_limite = ${nextDue}, updated_at = NOW()
         WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
       `;
+    } else if (action === 'setCurrentStep') {
+      // Reemplaza el viejo "cambiar estado manualmente" (que movía un estado
+      // administrativo genérico de 4 valores, desconectado del flujo real):
+      // esto mueve el informe a cualquier paso configurado de su propio
+      // flujo -- para corregir un salto mal hecho o retroceder un paso.
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede cambiar el paso actual manualmente.'] });
+      }
+      const { stepId, comment, userName } = request.body ?? {};
+      const stepIdNum = Number(stepId);
+      if (!Number.isInteger(stepIdNum) || stepIdNum <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Falta el paso.'] });
+      }
+
+      const [report] = (await sql`
+        SELECT proyecto_id AS "projectId", tipo_informe_id AS "typeId", mes_nombre AS "monthName", anio AS "year"
+        FROM informes WHERE informe_id = ${reportId}
+      `) as any[];
+      if (!report) return response.status(404).json({ data: null, meta: {}, errors: ['Informe no encontrado.'] });
+
+      const [step] = (await sql`
+        SELECT paso_id AS id, nombre AS name, proyecto_id AS "projectId"
+        FROM tipo_informe_pasos WHERE paso_id = ${stepIdNum} AND tipo_informe_id = ${report.typeId}
+      `) as any[];
+      if (!step) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Ese paso no pertenece al tipo de informe de este registro.'] });
+      }
+      if (step.projectId !== null && Number(step.projectId) !== Number(report.projectId)) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Ese paso pertenece al flujo propio de otro proyecto.'] });
+      }
+
+      await sql`UPDATE alertas SET activa = FALSE, updated_at = NOW() WHERE informe_id = ${reportId}`;
+      await sql`UPDATE informes SET paso_actual_id = ${stepIdNum}, flujo_completado = FALSE, updated_at = NOW() WHERE informe_id = ${reportId}`;
+      await createStepAlert(sql, reportId, report.projectId, stepIdNum, step.name, report.year, report.monthName);
+
+      await sql`
+        INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
+        VALUES (
+          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), ${userName || 'Usuario'},
+          ${`Cambio manual de paso a: "${step.name}".${comment ? ` ${comment}` : ''}`}
+        )
+      `;
     } else if (action === 'setPrimaryContact') {
       const { contactId } = request.body ?? {};
       const contactIdNum = Number(contactId);

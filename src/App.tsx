@@ -461,6 +461,18 @@ export default function App() {
     showToast('Fechas de la etapa actualizadas.', 'success');
   };
 
+  const handleSetCurrentStep = async (reportId: string, stepId: string, comment: string) => {
+    const response = await fetch('/api/reports', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'setCurrentStep', reportId, stepId: Number(stepId), comment, userName: user.name || user.email }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible cambiar el paso actual.');
+    setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+    showToast('Paso actual del informe actualizado.', 'success');
+  };
+
   const handleSetPrimaryContact = async (reportId: string, contactId: string) => {
     const response = await fetch('/api/reports', {
       method: 'PATCH',
@@ -1158,6 +1170,7 @@ export default function App() {
           reportTypeSteps={reportTypeSteps}
           onClose={() => setSelectedReportId(null)}
           onUpdateStatus={handleUpdateReportStatus}
+          onSetCurrentStep={handleSetCurrentStep}
           onAddAttachment={handleAddReportAttachment}
           onAdvanceStep={handleAdvanceReportStep}
           onEditReport={handleEditReport}

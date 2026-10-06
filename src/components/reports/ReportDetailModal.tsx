@@ -47,6 +47,7 @@ interface ReportDetailModalProps {
   reportTypeSteps: ReportTypeStep[];
   onClose: () => void;
   onUpdateStatus: (reportId: string, newStatus: ReportStatus, comment: string) => void;
+  onSetCurrentStep: (reportId: string, stepId: string, comment: string) => Promise<void>;
   onAddAttachment: (reportId: string, attachment: ReportAttachment) => void;
   onAdvanceStep: (reportId: string) => Promise<void>;
   onEditReport: (reportId: string, updates: { month?: string; dueDate?: string; contactIds?: string[]; primaryContactId?: string; observations?: string }) => Promise<void>;
@@ -64,6 +65,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   reportTypeSteps,
   onClose,
   onUpdateStatus,
+  onSetCurrentStep,
   onAddAttachment,
   onAdvanceStep,
   onEditReport,
@@ -135,6 +137,10 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [showTransitionModal, setShowTransitionModal] = useState(false);
   const [targetStatus, setTargetStatus] = useState<ReportStatus>(report.status);
   const [transitionComment, setTransitionComment] = useState('');
+  const [showStepTransitionModal, setShowStepTransitionModal] = useState(false);
+  const [targetStepId, setTargetStepId] = useState<string>(report.currentStepId ?? '');
+  const [stepTransitionComment, setStepTransitionComment] = useState('');
+  const [isSavingStepTransition, setIsSavingStepTransition] = useState(false);
   const [activeTab, setActiveTab] = useState<'timeline' | 'contacts' | 'alerts' | 'attachments' | 'history'>('timeline');
 
   const daysRemaining = calculateDaysRemaining(report.dueDate, report.status);
@@ -207,6 +213,26 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
     setTargetStatus(newS);
     setTransitionComment('');
     setShowTransitionModal(true);
+  };
+
+  const handleOpenStepTransition = (stepId: string) => {
+    setTargetStepId(stepId);
+    setStepTransitionComment('');
+    setShowStepTransitionModal(true);
+  };
+
+  const handleConfirmStepTransition = async () => {
+    if (!stepTransitionComment.trim()) {
+      alert('Por favor ingrese un comentario u observación para la trazabilidad del cambio de paso.');
+      return;
+    }
+    setIsSavingStepTransition(true);
+    try {
+      await onSetCurrentStep(report.id, targetStepId, stepTransitionComment.trim());
+      setShowStepTransitionModal(false);
+    } finally {
+      setIsSavingStepTransition(false);
+    }
   };
 
   const handleConfirmTransition = () => {
@@ -654,20 +680,39 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                   <span className="text-[11px] text-slate-500">Sistema centralizado</span>
                 </div>
 
-                <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
-                  <span className="text-slate-500 block">Cambiar estado manualmente:</span>
-                  <select
-                    value={report.status}
-                    onChange={(e) => handleOpenTransition(e.target.value as ReportStatus)}
-                    className="w-full mt-1 px-2 py-1 border border-slate-200 rounded text-xs bg-slate-50 font-semibold"
-                  >
-                    {STATUS_SEQUENCE.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {scopedFlowSteps.length > 0 && report.currentStepId ? (
+                  user.isAdmin && (
+                    <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
+                      <span className="text-slate-500 block">Cambiar paso actual manualmente:</span>
+                      <select
+                        value={report.currentStepId}
+                        onChange={(e) => handleOpenStepTransition(e.target.value)}
+                        className="w-full mt-1 px-2 py-1 border border-slate-200 rounded text-xs bg-slate-50 font-semibold"
+                      >
+                        {[...scopedFlowSteps].sort((a, b) => a.order - b.order).map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.order}. {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )
+                ) : (
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
+                    <span className="text-slate-500 block">Cambiar estado manualmente:</span>
+                    <select
+                      value={report.status}
+                      onChange={(e) => handleOpenTransition(e.target.value as ReportStatus)}
+                      className="w-full mt-1 px-2 py-1 border border-slate-200 rounded text-xs bg-slate-50 font-semibold"
+                    >
+                      {STATUS_SEQUENCE.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               {(report.revisorNombre || report.fechaEntregaReal || report.fechaRevision) && (
@@ -971,6 +1016,45 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                 className="px-4 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
               >
                 Confirmar y Guardar Transición
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showStepTransitionModal && (
+        <div className="fixed inset-0 z-60 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4 animate-in zoom-in-95">
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-indigo-600" />
+              Cambiar paso a: {scopedFlowSteps.find((s) => s.id === targetStepId)?.name || targetStepId}
+            </h3>
+            <p className="text-xs text-slate-600">
+              Esto mueve el informe directamente a este paso del flujo (reabre el flujo si estaba completado y reactiva su alerta). Indique el motivo para la trazabilidad:
+            </p>
+            <textarea
+              rows={3}
+              value={stepTransitionComment}
+              onChange={(e) => setStepTransitionComment(e.target.value)}
+              placeholder="Ejemplo: Se corrigió un salto de paso hecho por error..."
+              className="w-full p-2.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowStepTransitionModal(false)}
+                disabled={isSavingStepTransition}
+                className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmStepTransition}
+                disabled={isSavingStepTransition}
+                className="px-4 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {isSavingStepTransition ? 'Guardando...' : 'Confirmar Cambio de Paso'}
               </button>
             </div>
           </div>
