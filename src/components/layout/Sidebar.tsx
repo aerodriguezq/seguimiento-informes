@@ -192,7 +192,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           id: 'file_cleaner',
           label: 'Limpieza de Archivos',
           icon: ShieldCheck,
-          visible: true,
+          visible: canView('file_cleaner'),
         },
       ],
     },

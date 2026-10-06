@@ -82,9 +82,6 @@ export default function App() {
 
   const canViewModule = (mod: ActiveModule): boolean => {
     if (mod === 'users') return user.isAdmin;
-    // Herramienta local (todo corre en el navegador, el archivo nunca sale
-    // de la máquina) -- no depende de los módulos de permisos existentes.
-    if (mod === 'file_cleaner') return true;
     if (mod === 'dashboard' || mod === 'new_report' || mod === 'project_detail') {
       return mod === 'new_report' ? canView('reports') : mod === 'project_detail' ? canView('projects') : true;
     }

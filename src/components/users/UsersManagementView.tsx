@@ -32,15 +32,20 @@ interface UsersManagementViewProps {
   onTriggerSweep: (kind: string) => Promise<Record<string, unknown>>;
 }
 
-const MODULES: { key: PermissionModule; label: string }[] = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'reports', label: 'Informes' },
-  { key: 'projects', label: 'Proyectos' },
-  { key: 'alerts', label: 'Alertas' },
-  { key: 'lists', label: 'Listas Maestras' },
-  { key: 'drive_links', label: 'Fuentes Drive' },
-  { key: 'seguimiento', label: 'Seguimiento' },
-  { key: 'peticiones', label: 'Peticiones' },
+// defaultLevel: con qué nivel arranca un usuario no-admin si nunca se le ha
+// tocado el permiso de ese módulo. Los módulos históricos quedan en 'edit'
+// (comportamiento ya existente); cualquier módulo NUEVO debe agregarse con
+// defaultLevel: 'none' -- solo admins lo ven hasta activarlo aquí por usuario.
+const MODULES: { key: PermissionModule; label: string; defaultLevel: PermissionLevel }[] = [
+  { key: 'dashboard', label: 'Dashboard', defaultLevel: 'edit' },
+  { key: 'reports', label: 'Informes', defaultLevel: 'edit' },
+  { key: 'projects', label: 'Proyectos', defaultLevel: 'edit' },
+  { key: 'alerts', label: 'Alertas', defaultLevel: 'edit' },
+  { key: 'lists', label: 'Listas Maestras', defaultLevel: 'edit' },
+  { key: 'drive_links', label: 'Fuentes Drive', defaultLevel: 'edit' },
+  { key: 'seguimiento', label: 'Seguimiento', defaultLevel: 'edit' },
+  { key: 'peticiones', label: 'Peticiones', defaultLevel: 'edit' },
+  { key: 'file_cleaner', label: 'Limpieza de Archivos', defaultLevel: 'none' },
 ];
 
 const PERMISSION_LABEL: Record<PermissionLevel, string> = { none: 'Sin acceso', view: 'Solo ver', edit: 'Editar' };
@@ -112,10 +117,10 @@ const UserRow: React.FC<{
     }
   };
 
-  // Un módulo sin valor guardado es "Editar" por defecto (misma regla que
+  // Un módulo sin valor guardado toma su defaultLevel (misma regla que
   // levelOf() en AuthContext) — contar solo las claves explícitas subestima
   // el resumen y hace parecer que un permiso no se guardó.
-  const summaryPermCount = MODULES.filter((m) => (user.permissions?.[m.key] ?? 'edit') === 'edit').length;
+  const summaryPermCount = MODULES.filter((m) => (user.permissions?.[m.key] ?? m.defaultLevel) === 'edit').length;
 
   return (
     <div className={`rounded-xl border overflow-hidden ${user.active ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-70'}`}>
@@ -189,7 +194,7 @@ const UserRow: React.FC<{
                   <div key={m.key} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs">
                     <span className="text-slate-700">{m.label}</span>
                     <select
-                      value={permissions[m.key] ?? 'edit'}
+                      value={permissions[m.key] ?? m.defaultLevel}
                       onChange={(e) => setPermissions((prev) => ({ ...prev, [m.key]: e.target.value as PermissionLevel }))}
                       className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] outline-none focus:border-teal-600"
                     >

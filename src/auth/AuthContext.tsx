@@ -1,8 +1,26 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { LogIn, ShieldAlert, ShieldCheck } from 'lucide-react';
 
-export type PermissionModule = 'dashboard' | 'reports' | 'projects' | 'alerts' | 'lists' | 'drive_links' | 'seguimiento' | 'peticiones';
+export type PermissionModule = 'dashboard' | 'reports' | 'projects' | 'alerts' | 'lists' | 'drive_links' | 'seguimiento' | 'peticiones' | 'file_cleaner';
 export type PermissionLevel = 'none' | 'view' | 'edit';
+
+// Nivel con el que arranca un módulo para un usuario no-admin cuando no hay
+// un permiso explícito guardado. Los módulos históricos quedan en 'edit'
+// para no cambiar el comportamiento ya existente; cualquier módulo NUEVO
+// que se agregue de aquí en adelante debe quedar en 'none' por defecto --
+// solo admins lo ven hasta que se active explícitamente por usuario en
+// Usuarios Autorizados.
+const MODULE_DEFAULT_LEVEL: Record<PermissionModule, PermissionLevel> = {
+  dashboard: 'edit',
+  reports: 'edit',
+  projects: 'edit',
+  alerts: 'edit',
+  lists: 'edit',
+  drive_links: 'edit',
+  seguimiento: 'edit',
+  peticiones: 'edit',
+  file_cleaner: 'none',
+};
 
 interface AuthUser {
   email: string;
@@ -98,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const levelOf = (module: PermissionModule): PermissionLevel => {
     if (user.isAdmin) return 'edit';
-    return user.permissions[module] ?? 'edit';
+    return user.permissions[module] ?? MODULE_DEFAULT_LEVEL[module];
   };
   const canView = (module: PermissionModule) => levelOf(module) !== 'none';
   const canEdit = (module: PermissionModule) => levelOf(module) === 'edit';
