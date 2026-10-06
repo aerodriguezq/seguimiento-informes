@@ -57,12 +57,13 @@ function urgencyColors(daysRemaining: number | null): UrgencyColors {
 }
 
 export function buildAlertEmailHtml(options: {
-  subtitle: string;
+  alertType: string;
   projectName: string;
-  type: string;
-  schedule: string;
+  bpin: string | null;
   daysRemaining: number | null;
-  actionUrl: string;
+  dueDate: string | null;
+  expectedSubject?: string | null;
+  expectedFromEmails?: string[];
 }): string {
   const { bg, accent } = urgencyColors(options.daysRemaining);
   const isBreach = options.daysRemaining !== null && options.daysRemaining < 0;
@@ -71,15 +72,19 @@ export function buildAlertEmailHtml(options: {
   const escape = (value: string) => String(value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c] as string));
-  const daysLine = isBreach
-    ? `Vencido hace ${Math.abs(options.daysRemaining as number)} día(s) — esto atrasa el siguiente paso del flujo`
-    : escape(options.subtitle);
+
+  const plazoLine = (() => {
+    if (options.daysRemaining === null || !options.dueDate) return 'Sin fecha límite asociada.';
+    if (options.daysRemaining < 0) return `Venció hace ${Math.abs(options.daysRemaining)} día(s) (fecha límite: ${options.dueDate})`;
+    if (options.daysRemaining === 0) return `Vence hoy (fecha límite: ${options.dueDate})`;
+    return `Quedan ${options.daysRemaining} día(s) para la fecha límite de entrega (${options.dueDate})`;
+  })();
 
   return `<div style="max-width: 480px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dce4ec; border-radius: 8px; font-family: Arial, sans-serif; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
   <div style="background-color: ${bg}; color: #ffffff; padding: 20px; text-align: center;">
     <div style="font-size: 24px; margin-bottom: 5px;">${headerEmoji}</div>
     <h2 style="margin: 0; font-size: 18px; font-weight: bold; color: #ffffff;">${headerTitle}</h2>
-    <p style="margin: 5px 0 0 0; font-size: 16px; font-weight: 600; color: ${accent};">${daysLine}</p>
+    <p style="margin: 5px 0 0 0; font-size: 16px; font-weight: 600; color: ${accent};">${escape(options.alertType.toUpperCase())}</p>
   </div>
 
   <div style="padding: 20px; background-color: #f8fafc;">
@@ -89,19 +94,25 @@ export function buildAlertEmailHtml(options: {
         <td style="padding: 10px 0;">${escape(options.projectName)}</td>
       </tr>
       <tr style="border-bottom: 1px solid #e2e8f0;">
-        <td style="padding: 10px 0; font-weight: bold;">📈 Tipo:</td>
-        <td style="padding: 10px 0;">${escape(options.type)}</td>
+        <td style="padding: 10px 0; font-weight: bold;">🔢 BPIN:</td>
+        <td style="padding: 10px 0;">${escape(options.bpin || 'No disponible')}</td>
       </tr>
       <tr>
-        <td style="padding: 10px 0; font-weight: bold;">📅 Programación:</td>
-        <td style="padding: 10px 0;">${escape(options.schedule)}</td>
+        <td style="padding: 10px 0; font-weight: bold;">⏳ Plazo:</td>
+        <td style="padding: 10px 0;">${escape(plazoLine)}</td>
       </tr>
     </table>
   </div>
 
+  ${options.expectedSubject ? `<div style="padding: 16px 20px; background-color: #eff6ff; border-top: 1px solid #e2e8f0;">
+    <p style="margin: 0 0 8px 0; font-size: 12.5px; font-weight: bold; color: #1e3a8a;">📧 Para que el sistema detecte tu entrega automáticamente:</p>
+    <p style="margin: 0 0 4px 0; font-size: 12.5px; color: #334155;">Envía el correo con el documento adjunto usando este <strong>asunto exacto</strong>:</p>
+    <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: bold; color: #1e3a8a; background-color: #ffffff; border: 1px dashed #93c5fd; border-radius: 4px; padding: 8px 10px;">${escape(options.expectedSubject)}</p>
+    ${options.expectedFromEmails && options.expectedFromEmails.length > 0 ? `<p style="margin: 0; font-size: 11.5px; color: #64748b;">Debe enviarse desde: <strong>${escape(options.expectedFromEmails.join(', '))}</strong></p>` : ''}
+  </div>` : ''}
+
   <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">
-    <p style="font-size: 11px; color: #64748b; margin: 0 0 12px 0;">Este mensaje fue enviado automáticamente desde <strong>Seguimiento de Informes</strong>.</p>
-    <a href="${escape(options.actionUrl)}" style="display: inline-block; background-color: ${bg}; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 13px;">Revisar Ahora</a>
+    <p style="font-size: 11px; color: #64748b; margin: 0;">Este mensaje fue enviado automáticamente desde <strong>Seguimiento de Informes</strong>.</p>
   </div>
 </div>`;
 }

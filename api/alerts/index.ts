@@ -14,51 +14,67 @@ async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
   return getDriveAccessToken(session[0].token_json);
 }
 
-// Busca el tipo de informe y calcula los días restantes hasta la fecha
-// límite vinculada a la alerta: si viene de un paso de flujo con su propia
-// fecha límite calculada (Fase 1), usa esa; si no, cae a la fecha única del
-// informe. Sin informe vinculado, no hay urgencia que calcular.
-async function resolveReportContext(sql: SqlClient, reportId: unknown, stepId?: unknown) {
-  const id = Number(reportId);
-  if (!Number.isInteger(id) || id <= 0) return { typeName: null as string | null, daysRemaining: null as number | null };
-
-  const [row] = (await sql`
-    SELECT ti.nombre AS "typeName", TO_CHAR(i.fecha, 'YYYY-MM-DD') AS "dueDate",
-      TO_CHAR(ipi.fecha_limite, 'YYYY-MM-DD') AS "stepDueDate"
-    FROM informes i
-    JOIN tipos_informe ti ON ti.tipo_informe_id = i.tipo_informe_id
-    LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = i.informe_id AND ipi.paso_id = ${Number(stepId) || null}
-    WHERE i.informe_id = ${id}
-  `) as any[];
-  if (!row) return { typeName: null, daysRemaining: null };
-
-  const dueDateStr = row.stepDueDate || row.dueDate;
-  if (!dueDateStr) return { typeName: row.typeName as string | null, daysRemaining: null };
-  const due = new Date(`${dueDateStr}T00:00:00Z`);
-  const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
-  const daysRemaining = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  return { typeName: row.typeName as string | null, daysRemaining };
-}
-
-async function buildAlertEmail(sql: SqlClient, alert: { name: string; projectName?: string; type?: string; schedule?: string; reportId?: unknown; stepId?: unknown }) {
-  const context = await resolveReportContext(sql, alert.reportId, alert.stepId);
-  const actionUrl = `${(process.env.APP_URL || 'https://seguimiento-informes.vercel.app').replace(/\/$/, '')}/reports`;
-  return buildAlertEmailHtml({
-    subtitle: context.typeName || alert.type || 'Seguimiento',
-    projectName: alert.projectName || 'Todos los proyectos',
-    type: alert.type || 'Seguimiento',
-    schedule: alert.schedule || '',
-    daysRemaining: context.daysRemaining,
-    actionUrl,
-  });
-}
-
 // Igual que composeStepEmailSubject en api/reports.ts: el asunto real que la
 // automatización busca en Gmail es la base configurada en el paso más el
 // número de secuencia del informe (con 2 dígitos), cuando aplica.
 function composeStepEmailSubject(baseSubject: string, sequenceNumber: number | null): string {
   if (sequenceNumber == null) return baseSubject;
   return `${baseSubject} ${String(sequenceNumber).padStart(2, '0')}`;
+}
+
+// Busca el BPIN del proyecto, calcula los días restantes hasta la fecha
+// límite vinculada a la alerta (si viene de un paso de flujo con su propia
+// fecha límite calculada -- Fase 1 -- usa esa; si no, cae a la fecha única
+// del informe), y arma el asunto exacto + remitentes que la automatización
+// de Gmail espera para detectar la entrega sola. Sin informe vinculado, no
+// hay nada de esto que mostrar.
+async function resolveReportContext(sql: SqlClient, reportId: unknown, stepId?: unknown) {
+  const empty = {
+    bpin: null as string | null, dueDate: null as string | null, daysRemaining: null as number | null,
+    expectedSubject: null as string | null, expectedFromEmails: [] as string[],
+  };
+  const id = Number(reportId);
+  if (!Number.isInteger(id) || id <= 0) return empty;
+
+  const [row] = (await sql`
+    SELECT p.bpin AS bpin, TO_CHAR(i.fecha, 'YYYY-MM-DD') AS "dueDate",
+      TO_CHAR(ipi.fecha_limite, 'YYYY-MM-DD') AS "stepDueDate",
+      wp.asunto_correo AS "subjectBase", i.numero_secuencia AS "sequenceNumber"
+    FROM informes i
+    JOIN proyectos p ON p.proyecto_id = i.proyecto_id
+    LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = i.informe_id AND ipi.paso_id = ${Number(stepId) || null}
+    LEFT JOIN tipo_informe_pasos wp ON wp.paso_id = ${Number(stepId) || null}
+    WHERE i.informe_id = ${id}
+  `) as any[];
+  if (!row) return empty;
+
+  const expectedSubject = row.subjectBase ? composeStepEmailSubject(row.subjectBase, row.sequenceNumber) : null;
+  const fromRows = Number(stepId) > 0 ? ((await sql`
+    SELECT c.email FROM tipo_informe_paso_contacto tpc
+    JOIN contactos c ON c.contacto_id = tpc.contacto_id
+    WHERE tpc.paso_id = ${Number(stepId)} AND c.email IS NOT NULL AND c.email <> ''
+  `) as any[]) : [];
+  const expectedFromEmails = fromRows.map((r: any) => r.email as string);
+
+  const dueDateStr = row.stepDueDate || row.dueDate;
+  if (!dueDateStr) return { bpin: row.bpin as string | null, dueDate: null, daysRemaining: null, expectedSubject, expectedFromEmails };
+  const due = new Date(`${dueDateStr}T00:00:00Z`);
+  const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const daysRemaining = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  return { bpin: row.bpin as string | null, dueDate: dueDateStr as string, daysRemaining, expectedSubject, expectedFromEmails };
+}
+
+async function buildAlertEmail(sql: SqlClient, alert: { name: string; projectName?: string; type?: string; schedule?: string; reportId?: unknown; stepId?: unknown }) {
+  const context = await resolveReportContext(sql, alert.reportId, alert.stepId);
+  return buildAlertEmailHtml({
+    alertType: alert.type || 'Seguimiento',
+    projectName: alert.projectName || 'Todos los proyectos',
+    bpin: context.bpin,
+    daysRemaining: context.daysRemaining,
+    dueDate: context.dueDate,
+    expectedSubject: context.expectedSubject,
+    expectedFromEmails: context.expectedFromEmails,
+  });
 }
 
 async function fetchAlertsByIds(sql: SqlClient, ids: number[]) {
