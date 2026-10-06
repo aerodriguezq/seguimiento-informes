@@ -56,6 +56,10 @@ function urgencyColors(daysRemaining: number | null): UrgencyColors {
   return { bg: '#15803d', accent: '#bbf7d0' };
 }
 
+// Correo que siempre debe ir en copia en la entrega de informes, sin
+// importar el paso o el proyecto -- requisito fijo del área de seguimiento.
+const MANDATORY_CC_EMAIL = 'a.rodriguez@gdm.com.co';
+
 export function buildAlertEmailHtml(options: {
   alertType: string;
   projectName: string;
@@ -108,7 +112,8 @@ export function buildAlertEmailHtml(options: {
     <p style="margin: 0 0 8px 0; font-size: 12.5px; font-weight: bold; color: #1e3a8a;">📧 Para que el sistema detecte tu entrega automáticamente:</p>
     <p style="margin: 0 0 4px 0; font-size: 12.5px; color: #334155;">Envía el correo con el documento adjunto usando este <strong>asunto exacto</strong>:</p>
     <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: bold; color: #1e3a8a; background-color: #ffffff; border: 1px dashed #93c5fd; border-radius: 4px; padding: 8px 10px;">${escape(options.expectedSubject)}</p>
-    ${options.expectedFromEmails && options.expectedFromEmails.length > 0 ? `<p style="margin: 0; font-size: 11.5px; color: #64748b;">Debe enviarse desde: <strong>${escape(options.expectedFromEmails.join(', '))}</strong></p>` : ''}
+    ${options.expectedFromEmails && options.expectedFromEmails.length > 0 ? `<p style="margin: 0 0 4px 0; font-size: 11.5px; color: #64748b;">Debe enviarse desde: <strong>${escape(options.expectedFromEmails.join(', '))}</strong></p>` : ''}
+    <p style="margin: 0; font-size: 11.5px; color: #64748b;">Debe ir en copia (CC): <strong>${escape(MANDATORY_CC_EMAIL)}</strong></p>
   </div>` : ''}
 
   <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">
