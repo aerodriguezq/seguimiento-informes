@@ -1035,6 +1035,7 @@ export default function App() {
             <NewReportWizard
               projects={projects}
               reportTypes={reportTypes}
+              reportTypeSteps={reportTypeSteps}
               preselectedProjectId={currentProjectId}
               onCancel={() => goToModule('reports')}
               onSubmitReport={handleSubmitNewReport}

@@ -4,8 +4,9 @@ import {
   ReportType,
   ReportStatus,
   ReportAttachment,
+  ReportTypeStep,
 } from '../../types';
-import { MONTHS_LIST, YEARS_LIST, STATUS_SEQUENCE } from '../../data/mockData';
+import { MONTHS_LIST, YEARS_LIST } from '../../data/mockData';
 import {
   Building2,
   FileText,
@@ -24,6 +25,7 @@ import {
 interface NewReportWizardProps {
   projects: Project[];
   reportTypes: ReportType[];
+  reportTypeSteps: ReportTypeStep[];
   preselectedProjectId?: string;
   onCancel: () => void;
   onSubmitReport: (input: {
@@ -40,6 +42,7 @@ interface NewReportWizardProps {
 export const NewReportWizard: React.FC<NewReportWizardProps> = ({
   projects,
   reportTypes,
+  reportTypeSteps,
   preselectedProjectId,
   onCancel,
   onSubmitReport,
@@ -53,7 +56,11 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
   const [selectedTypeId, setSelectedTypeId] = useState('');
   const [selectedMonth, setSelectedMonth] = useState('Septiembre');
   const [selectedYear, setSelectedYear] = useState(2026);
-  const [status, setStatus] = useState<ReportStatus>('Pendientes Evidencias');
+  // El estado administrativo inicial ya no se elige a mano -- el informe
+  // siempre arranca en el primer paso del flujo configurado (ver STEP 4);
+  // este valor solo alimenta el campo genérico de respaldo para tipos sin
+  // flujo configurado todavía.
+  const status: ReportStatus = 'Pendientes Evidencias';
   const [observations, setObservations] = useState('');
   const [attachments, setAttachments] = useState<ReportAttachment[]>([]);
   const [errorMsg, setErrorMsg] = useState('');
@@ -108,11 +115,20 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
     setAttachments(attachments.filter((a) => a.id !== id));
   };
 
+  // El flujo que realmente va a correr: el propio del proyecto si ese tipo
+  // de informe tiene uno configurado para él, si no la plantilla general --
+  // mismo alcance que usa el motor de etapas al crear el informe (Fase 1).
+  const flowStepsForType = reportTypeSteps.filter((s) => s.typeId === selectedTypeId);
+  const hasProjectScope = flowStepsForType.some((s) => s.projectId === selectedProjectId);
+  const scopedFlowSteps = flowStepsForType
+    .filter((s) => (hasProjectScope ? s.projectId === selectedProjectId : s.projectId === null))
+    .sort((a, b) => a.order - b.order);
+
   const steps = [
     { num: 1, title: 'Proyecto' },
     { num: 2, title: 'Tipo' },
     { num: 3, title: 'Período' },
-    { num: 4, title: 'Estado' },
+    { num: 4, title: 'Paso Inicial' },
     { num: 5, title: 'Evidencias' },
   ];
 
@@ -416,47 +432,69 @@ export const NewReportWizard: React.FC<NewReportWizardProps> = ({
             </div>
           )}
 
-          {/* STEP 4: Estado Inicial */}
+          {/* STEP 4: Paso Inicial (depende del flujo configurado en Listas Maestras) */}
           {currentStep === 4 && (
             <div className="space-y-4">
               <div className="border-b border-slate-100 pb-3">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                   <Clock className="w-4 h-4 text-indigo-600" />
-                  Paso 4: Estado Inicial del Informe
+                  Paso 4: Flujo de Entrega
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Indique en qué etapa del ciclo de vida se crea este registro (por defecto: Pendientes Evidencias).
+                  {scopedFlowSteps.length > 0
+                    ? 'El informe se crea en el primer paso de este flujo; los siguientes avanzan solos a medida que se confirma cada entrega.'
+                    : 'Este tipo de informe aún no tiene pasos configurados en Listas Maestras.'}
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                {STATUS_SEQUENCE.map((s) => {
-                  const isSelected = status === s;
-                  return (
+              {scopedFlowSteps.length > 0 ? (
+                <div className="space-y-2 pt-2">
+                  {scopedFlowSteps.map((s, idx) => (
                     <div
-                      key={s}
-                      id={`wizard-status-${s}`}
-                      onClick={() => setStatus(s)}
-                      className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                        isSelected
-                          ? 'border-indigo-600 bg-indigo-50/30 shadow-xs'
-                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      key={s.id}
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${
+                        idx === 0 ? 'border-indigo-600 bg-indigo-50/30' : 'border-slate-200 bg-white'
                       }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs text-slate-900">{s}</span>
-                        {isSelected && <Check className="w-4 h-4 text-indigo-600" />}
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span
+                          className={`shrink-0 flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-bold ${
+                            idx === 0 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          {s.order}
+                        </span>
+                        <div className="min-w-0">
+                          <span className="font-bold text-xs text-slate-900 truncate block">{s.name}</span>
+                          <span className="text-[11px] text-slate-500">
+                            {s.contactIds.length} responsable{s.contactIds.length === 1 ? '' : 's'}
+                            {s.diaLimite ? ` · día límite ${s.diaLimite}` : ''}
+                          </span>
+                        </div>
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-1.5">
-                        {s === 'Pendientes Evidencias' && 'Se esperan certificaciones, firmas o ensayos del contratista.'}
-                        {s === 'Informe en Elaboración' && 'Equipo técnico redactando el documento y cuadros de soporte.'}
-                        {s === 'Entregado a Of. Proyectos' && 'Radicado formalmente para revisión y aprobación.'}
-                        {s === 'Enviado' && 'Aprobado y remitido al cliente o entidad contratante.'}
-                      </p>
+                      <div className="shrink-0 flex items-center gap-1.5">
+                        {idx === 0 && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-600 text-white whitespace-nowrap">
+                            Inicia aquí
+                          </span>
+                        )}
+                        {s.isFinal && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">
+                            Final
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-800 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    Puedes crear el informe igual, pero no tendrá pasos ni alertas automáticas hasta que configures el flujo de este tipo de informe en Listas Maestras.
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
