@@ -733,6 +733,29 @@ export default function App() {
     showToast(`Contacto "${newContact.name}" registrado en la lista maestra.`, 'success');
   };
 
+  const handleUpdateContact = async (
+    contactId: string,
+    updates: Partial<Pick<Contact, 'name' | 'email' | 'role' | 'company' | 'phone' | 'active'>>,
+  ) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'contact', contactId: Number(contactId), data: updates }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el contacto.');
+    setContacts((prev) => prev.map((c) => (c.id === contactId ? { ...c, ...payload.data, id: String(payload.data.id) } : c)));
+    showToast('Contacto actualizado.', 'success');
+  };
+
+  const handleDeleteContact = async (contactId: string) => {
+    const response = await fetch(`/api/catalogs?kind=contact&id=${Number(contactId)}`, { method: 'DELETE' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el contacto.');
+    setContacts((prev) => prev.filter((c) => c.id !== contactId));
+    showToast('Contacto eliminado.', 'success');
+  };
+
   const handleAddReportTypeStep = async (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => {
     const response = await fetch('/api/catalogs', {
       method: 'POST',
@@ -1075,6 +1098,8 @@ export default function App() {
               projects={projects}
               onAddReportType={handleAddReportType}
               onAddContact={handleAddContact}
+              onUpdateContact={handleUpdateContact}
+              onDeleteContact={handleDeleteContact}
               onAddReportTypeStep={handleAddReportTypeStep}
               onEditReportTypeStep={handleEditReportTypeStep}
               onDeleteReportTypeStep={handleDeleteReportTypeStep}

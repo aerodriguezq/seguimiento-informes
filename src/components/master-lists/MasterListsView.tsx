@@ -33,6 +33,8 @@ interface MasterListsViewProps {
   projects: Project[];
   onAddReportType: (type: ReportType) => Promise<void>;
   onAddContact: (contact: Contact) => Promise<void>;
+  onUpdateContact: (contactId: string, updates: Partial<Pick<Contact, 'name' | 'email' | 'role' | 'company' | 'phone' | 'active'>>) => Promise<void>;
+  onDeleteContact: (contactId: string) => Promise<void>;
   onAddReportTypeStep: (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => Promise<void>;
   onEditReportTypeStep: (stepId: string, step: { name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number | null; diaLimite?: number | null; palabrasClave?: string | null }) => Promise<void>;
   onDeleteReportTypeStep: (stepId: string) => Promise<void>;
@@ -49,6 +51,8 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   projects,
   onAddReportType,
   onAddContact,
+  onUpdateContact,
+  onDeleteContact,
   onAddReportTypeStep,
   onEditReportTypeStep,
   onDeleteReportTypeStep,
@@ -131,6 +135,18 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [newContactPhone, setNewContactPhone] = useState('');
   const [formError, setFormError] = useState('');
 
+  // Edit/Delete Contact
+  const [editingContactId, setEditingContactId] = useState<string | null>(null);
+  const [editContactName, setEditContactName] = useState('');
+  const [editContactEmail, setEditContactEmail] = useState('');
+  const [editContactRole, setEditContactRole] = useState('');
+  const [editContactCompany, setEditContactCompany] = useState('');
+  const [editContactPhone, setEditContactPhone] = useState('');
+  const [editContactError, setEditContactError] = useState('');
+  const [isSavingContactEdit, setIsSavingContactEdit] = useState(false);
+  const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
+  const [togglingContactActiveId, setTogglingContactActiveId] = useState<string | null>(null);
+
   const filteredTypes = reportTypes.filter(
     (t) =>
       t.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -193,6 +209,58 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       setNewContactPhone('');
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'No fue posible guardar el contacto.');
+    }
+  };
+
+  const handleOpenEditContact = (contact: Contact) => {
+    setEditingContactId(contact.id);
+    setEditContactName(contact.name);
+    setEditContactEmail(contact.email);
+    setEditContactRole(contact.role);
+    setEditContactCompany(contact.company);
+    setEditContactPhone(contact.phone ?? '');
+    setEditContactError('');
+  };
+
+  const handleSaveContactEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingContactId || !editContactName.trim() || !editContactEmail.trim()) return;
+    setIsSavingContactEdit(true);
+    setEditContactError('');
+    try {
+      await onUpdateContact(editingContactId, {
+        name: editContactName.trim(),
+        email: editContactEmail.trim(),
+        role: editContactRole.trim(),
+        company: editContactCompany.trim(),
+        phone: editContactPhone.trim(),
+      });
+      setEditingContactId(null);
+    } catch (error) {
+      setEditContactError(error instanceof Error ? error.message : 'No fue posible actualizar el contacto.');
+    } finally {
+      setIsSavingContactEdit(false);
+    }
+  };
+
+  const handleToggleContactActive = async (contact: Contact) => {
+    setTogglingContactActiveId(contact.id);
+    try {
+      await onUpdateContact(contact.id, { active: !contact.active });
+    } finally {
+      setTogglingContactActiveId(null);
+    }
+  };
+
+  const handleDeleteContactClick = async (contact: Contact) => {
+    if (!window.confirm(`¿Eliminar a "${contact.name}" de la lista de contactos? Esto solo es posible si no tiene historial vinculado.`)) return;
+    setDeletingContactId(contact.id);
+    try {
+      await onDeleteContact(contact.id);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'No fue posible eliminar el contacto.');
+    } finally {
+      setDeletingContactId(null);
     }
   };
 
@@ -546,10 +614,37 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
             {filteredContacts.map((contact) => (
               <div
                 key={contact.id}
-                className="p-4 bg-white border border-slate-200 rounded-xl shadow-xs text-xs space-y-2 hover:border-indigo-300 transition-colors"
+                className={`p-4 bg-white border rounded-xl shadow-xs text-xs space-y-2 transition-colors ${
+                  contact.active === false ? 'border-slate-200 opacity-60' : 'border-slate-200 hover:border-indigo-300'
+                }`}
               >
-                <div className="flex items-start justify-between">
-                  <div className="font-bold text-slate-900">{contact.name}</div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-bold text-slate-900 truncate">{contact.name}</div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {canEditLists && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditContact(contact)}
+                          title="Editar contacto"
+                          className="p-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteContactClick(contact)}
+                          disabled={deletingContactId === contact.id}
+                          title="Eliminar contacto"
+                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <span
                     className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                       contact.hasNotificationAlarm
@@ -559,6 +654,16 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                   >
                     {contact.hasNotificationAlarm ? 'Alarmas Activas' : 'Silenciado'}
                   </span>
+                  <button
+                    type="button"
+                    disabled={!canEditLists || togglingContactActiveId === contact.id}
+                    onClick={() => handleToggleContactActive(contact)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-semibold disabled:cursor-default ${
+                      contact.active === false ? 'bg-rose-50 text-rose-700' : 'bg-indigo-50 text-indigo-700'
+                    } ${canEditLists ? 'hover:opacity-80' : ''}`}
+                  >
+                    {contact.active === false ? 'Inactivo (reactivar)' : 'Activo'}
+                  </button>
                 </div>
                 <div className="text-indigo-700 font-medium">{contact.role}</div>
                 <div className="flex items-center gap-1.5 text-slate-600 text-[11px]">
@@ -854,6 +959,102 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Contact Modal */}
+      {editingContactId && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h3 className="font-bold text-sm text-slate-900">Editar Contacto</h3>
+              <button
+                type="button"
+                onClick={() => setEditingContactId(null)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {editContactError && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700" role="alert">
+                {editContactError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveContactEdit} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Nombre completo</label>
+                <input
+                  type="text"
+                  required
+                  value={editContactName}
+                  onChange={(e) => setEditContactName(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Correo electrónico</label>
+                <input
+                  type="email"
+                  required
+                  value={editContactEmail}
+                  onChange={(e) => setEditContactEmail(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Rol / Cargo</label>
+                  <input
+                    type="text"
+                    value={editContactRole}
+                    onChange={(e) => setEditContactRole(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Empresa</label>
+                  <input
+                    type="text"
+                    value={editContactCompany}
+                    onChange={(e) => setEditContactCompany(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Teléfono celular</label>
+                <input
+                  type="text"
+                  value={editContactPhone}
+                  onChange={(e) => setEditContactPhone(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingContactId(null)}
+                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingContactEdit}
+                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:opacity-50"
+                >
+                  {isSavingContactEdit ? 'Guardando...' : 'Guardar Cambios'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

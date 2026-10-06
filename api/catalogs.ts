@@ -221,6 +221,38 @@ export default async function handler(
         return response.status(200).json({ data: deletedUser[0], meta: {}, errors: [] });
       }
 
+      if (request.query.kind === 'contact') {
+        if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+        }
+        const contactId = Number(request.query.id);
+        if (!Number.isInteger(contactId) || contactId <= 0) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id del contacto es obligatorio.'] });
+        }
+
+        // Un contacto con historial (pasos de flujo, informes, alertas o
+        // peticiones en los que participó) no se puede borrar sin perder esa
+        // trazabilidad -- se desactiva en su lugar (botón "Desactivar").
+        const [refs] = (await sql`
+          SELECT
+            (SELECT COUNT(*) FROM tipo_informe_paso_contacto WHERE contacto_id = ${contactId}) AS "stepRefs",
+            (SELECT COUNT(*) FROM informe_contacto WHERE contacto_id = ${contactId}) AS "reportRefs",
+            (SELECT COUNT(*) FROM alerta_contacto WHERE contacto_id = ${contactId}) AS "alertRefs",
+            (SELECT COUNT(*) FROM peticion_responsables WHERE contacto_id = ${contactId}) AS "peticionRefs"
+        `) as any[];
+        const totalRefs = Number(refs.stepRefs) + Number(refs.reportRefs) + Number(refs.alertRefs) + Number(refs.peticionRefs);
+        if (totalRefs > 0) {
+          return response.status(409).json({
+            data: null, meta: {},
+            errors: [`No se puede eliminar: este contacto está vinculado a ${totalRefs} registro(s) (pasos de flujo, informes, alertas o peticiones). Desactívalo en su lugar.`],
+          });
+        }
+
+        const deleted = await sql`DELETE FROM contactos WHERE contacto_id = ${contactId} RETURNING contacto_id AS id`;
+        if (!deleted[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Contacto no encontrado.'] });
+        return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+      }
+
       if (request.query.kind === 'areaConsolida') {
         const areaId = Number(request.query.id);
         if (!Number.isInteger(areaId) || areaId <= 0) {
@@ -357,17 +389,80 @@ export default async function handler(
         if (!Number.isInteger(contactId) || contactId <= 0) {
           return response.status(400).json({ data: null, meta: {}, errors: ['El id del contacto es obligatorio.'] });
         }
-        const has = (key: string) => Object.prototype.hasOwnProperty.call(body.data ?? {}, key);
-        if (!has('hasNotificationAlarm')) {
+        const data = body.data ?? {};
+        const has = (key: string) => Object.prototype.hasOwnProperty.call(data, key);
+
+        // Toggle rápido de alarma (lo único que se usaba antes de tener
+        // edición completa) sigue funcionando igual, sin tocar lo demás.
+        if (has('hasNotificationAlarm') && !has('name') && !has('email') && !has('role') && !has('company') && !has('phone') && !has('active')) {
+          const rows = await sql`
+            UPDATE contactos SET alarma_activa = ${Boolean(data.hasNotificationAlarm)}
+            WHERE contacto_id = ${contactId}
+            RETURNING contacto_id AS id, alarma_activa AS "hasNotificationAlarm"
+          `;
+          if (!rows[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Contacto no encontrado.'] });
+          return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+        }
+
+        if (!has('name') && !has('email') && !has('role') && !has('company') && !has('phone') && !has('active') && !has('hasNotificationAlarm')) {
           return response.status(400).json({ data: null, meta: {}, errors: ['No hay cambios para guardar.'] });
         }
+        if ((has('name') && !String(data.name).trim()) || (has('email') && !String(data.email).trim())) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['Nombre y correo no pueden quedar vacíos.'] });
+        }
+
+        const current = (await sql`
+          SELECT c.rol_id AS "roleId", c.empresa_id AS "companyId", c.nombre AS name, c.email, c.telefono AS phone,
+            c.activo AS active, c.alarma_activa AS "hasNotificationAlarm", r.nombre AS role, e.nombre AS company
+          FROM contactos c
+          LEFT JOIN roles r ON r.rol_id = c.rol_id
+          LEFT JOIN empresas e ON e.empresa_id = c.empresa_id
+          WHERE c.contacto_id = ${contactId}
+        `) as any[];
+        if (!current[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Contacto no encontrado.'] });
+
+        let roleId = current[0].roleId;
+        if (has('role') && String(data.role).trim() && String(data.role).trim() !== current[0].role) {
+          const roleRows = await sql`SELECT rol_id FROM roles WHERE nombre = ${String(data.role).trim()} LIMIT 1`;
+          roleId = roleRows[0]?.rol_id;
+          if (!roleId) {
+            const createdRole = await sql`
+              INSERT INTO roles (rol_id, nombre) VALUES (COALESCE((SELECT MAX(rol_id) FROM roles), 0) + 1, ${String(data.role).trim()})
+              RETURNING rol_id
+            `;
+            roleId = createdRole[0]?.rol_id;
+          }
+        }
+
+        let companyId = current[0].companyId;
+        if (has('company') && String(data.company).trim() && String(data.company).trim() !== current[0].company) {
+          const companyRows = await sql`SELECT empresa_id FROM empresas WHERE nombre = ${String(data.company).trim()} LIMIT 1`;
+          companyId = companyRows[0]?.empresa_id;
+          if (!companyId) {
+            const createdCompany = await sql`
+              INSERT INTO empresas (empresa_id, nombre) VALUES (COALESCE((SELECT MAX(empresa_id) FROM empresas), 0) + 1, ${String(data.company).trim()})
+              RETURNING empresa_id
+            `;
+            companyId = createdCompany[0]?.empresa_id;
+          }
+        }
+
+        const nextName = has('name') ? String(data.name).trim() : current[0].name;
+        const nextEmail = has('email') ? String(data.email).trim() : current[0].email;
+        const nextPhone = has('phone') ? String(data.phone ?? '').trim() : current[0].phone;
+        const nextActive = has('active') ? Boolean(data.active) : current[0].active;
+        const nextAlarm = has('hasNotificationAlarm') ? Boolean(data.hasNotificationAlarm) : current[0].hasNotificationAlarm;
+
         const rows = await sql`
-          UPDATE contactos SET alarma_activa = ${Boolean(body.data.hasNotificationAlarm)}
+          UPDATE contactos
+          SET nombre = ${nextName}, email = ${nextEmail}, telefono = ${nextPhone},
+            rol_id = ${roleId}, empresa_id = ${companyId}, activo = ${nextActive}, alarma_activa = ${nextAlarm}
           WHERE contacto_id = ${contactId}
-          RETURNING contacto_id AS id, alarma_activa AS "hasNotificationAlarm"
+          RETURNING contacto_id AS id, nombre AS name, email, telefono AS phone, activo AS active, alarma_activa AS "hasNotificationAlarm"
         `;
-        if (!rows[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Contacto no encontrado.'] });
-        return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+        const roleName = has('role') && String(data.role).trim() ? String(data.role).trim() : current[0].role;
+        const companyName = has('company') && String(data.company).trim() ? String(data.company).trim() : current[0].company;
+        return response.status(200).json({ data: { ...rows[0], role: roleName, company: companyName }, meta: {}, errors: [] });
       }
 
       if (body.kind === 'reportTypeStepOrder') {
