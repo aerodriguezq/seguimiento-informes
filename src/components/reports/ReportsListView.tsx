@@ -120,6 +120,13 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
       return true;
     }).sort((a, b) => {
       if (sortField === 'dueDate') {
+        // Un informe ya entregado tiene su fecha límite en el pasado, así que
+        // con el orden ascendente simple aparecía primero -- lo cual tapaba
+        // los pendientes reales. Los entregados se agrupan siempre al final;
+        // dentro de cada grupo (pendientes / entregados) se ordena por fecha.
+        const aDelivered = a.isWorkflowCompleted || a.status === 'Enviado';
+        const bDelivered = b.isWorkflowCompleted || b.status === 'Enviado';
+        if (aDelivered !== bDelivered) return aDelivered ? 1 : -1;
         const comp = new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
         return sortOrder === 'asc' ? comp : -comp;
       }
