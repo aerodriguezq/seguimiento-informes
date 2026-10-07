@@ -2,21 +2,15 @@ name: Barridos automaticos
 
 on:
   schedule:
-    # Deteccion de entregas por correo: solo 3 veces al dia, hora Colombia
-    # (UTC-5) -- 8:00am, 1:00pm y 6:00pm -- en vez de cada 2 horas, para
-    # bajar aun mas el consumo de compute en Neon.
-    - cron: '0 13 * * *' # 8:00am Colombia
-    - cron: '0 18 * * *' # 1:00pm Colombia
-    - cron: '0 23 * * *' # 6:00pm Colombia
+    # Corre cada 15 min todo el dia; el backend decide si a esta hora exacta
+    # (hora Colombia) le toca ejecutar de verdad, segun las horas que el
+    # administrador configuro en Usuarios Autorizados > Barridos -- por eso
+    # ya no hay horas fijas aqui, GitHub solo "toca la puerta" seguido.
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
   deteccion-entregas:
-    if: >
-      github.event.schedule == '0 13 * * *' ||
-      github.event.schedule == '0 18 * * *' ||
-      github.event.schedule == '0 23 * * *' ||
-      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Barrido de deteccion de entregas (avanza el flujo si llego el correo)
@@ -25,8 +19,6 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
 
   recordatorios-alertas:
-    # Se aprovecha el mismo disparo de las 8:00am para no sumar un cron mas.
-    if: github.event.schedule == '0 13 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Envio de recordatorios de alertas vencidas

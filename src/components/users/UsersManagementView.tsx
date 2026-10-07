@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Plus, Trash2, Save, UserCog, ChevronDown, ChevronRight, ShieldAlert, Users as UsersIcon, RadioTower, Play, AlertTriangle, CheckCircle2, PauseCircle, Send } from 'lucide-react';
+import { ShieldCheck, Plus, Trash2, Save, UserCog, ChevronDown, ChevronRight, ShieldAlert, Users as UsersIcon, RadioTower, Play, AlertTriangle, CheckCircle2, PauseCircle, Send, X } from 'lucide-react';
 import type { PermissionModule, PermissionLevel } from '../../auth/AuthContext';
 
 export interface AuthorizedUser {
@@ -15,6 +15,7 @@ export interface SweepConfig {
   label: string;
   active: boolean;
   frequencyMinutes: number;
+  scheduledTimes: string[];
   lastRunAt: string | null;
   lastRunSuccess: boolean | null;
   lastRunResult: Record<string, unknown> | null;
@@ -28,7 +29,7 @@ interface UsersManagementViewProps {
   onRemoveUser: (email: string) => Promise<void>;
   onSendTestEmail: (email: string) => Promise<void>;
   sweeps: SweepConfig[];
-  onUpdateSweep: (kind: string, updates: { active?: boolean; frequencyMinutes?: number }) => Promise<void>;
+  onUpdateSweep: (kind: string, updates: { active?: boolean; frequencyMinutes?: number; scheduledTimes?: string[] }) => Promise<void>;
   onTriggerSweep: (kind: string) => Promise<Record<string, unknown>>;
 }
 
@@ -291,8 +292,11 @@ const SweepCard: React.FC<{
   onTriggerSweep: UsersManagementViewProps['onTriggerSweep'];
 }> = ({ sweep, onUpdateSweep, onTriggerSweep }) => {
   const unit = getSweepUnit(sweep.kind);
+  const usesSchedule = sweep.kind !== 'importacion_cronograma';
   const [frequency, setFrequency] = useState(String(sweep.frequencyMinutes / unit.factor));
+  const [newTime, setNewTime] = useState('08:00');
   const [isSavingFreq, setIsSavingFreq] = useState(false);
+  const [isSavingTimes, setIsSavingTimes] = useState(false);
   const [isTogglingActive, setIsTogglingActive] = useState(false);
   const [isRunningNow, setIsRunningNow] = useState(false);
   const [error, setError] = useState('');
@@ -313,7 +317,10 @@ const SweepCard: React.FC<{
     ? { label: 'Con errores', tone: 'rose', Icon: AlertTriangle }
     : (() => {
         const elapsedMinutes = (Date.now() - new Date(sweep.lastRunAt as string).getTime()) / 60000;
-        return elapsedMinutes > sweep.frequencyMinutes * 3
+        // Las horas programadas son diarias -- 26h de margen cubre un día
+        // completo más el colchón de 15 min de la ventana de disparo.
+        const staleThresholdMinutes = usesSchedule ? 26 * 60 : sweep.frequencyMinutes * 3;
+        return elapsedMinutes > staleThresholdMinutes
           ? { label: 'Posible interrupción', tone: 'amber', Icon: AlertTriangle }
           : { label: 'Funcionando', tone: 'emerald', Icon: CheckCircle2 };
       })();
@@ -349,6 +356,31 @@ const SweepCard: React.FC<{
       setError(err instanceof Error ? err.message : 'No fue posible guardar la frecuencia.');
     } finally {
       setIsSavingFreq(false);
+    }
+  };
+
+  const handleAddTime = async () => {
+    if (!newTime || sweep.scheduledTimes.includes(newTime)) return;
+    setIsSavingTimes(true);
+    setError('');
+    try {
+      await onUpdateSweep(sweep.kind, { scheduledTimes: [...sweep.scheduledTimes, newTime] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No fue posible agregar la hora.');
+    } finally {
+      setIsSavingTimes(false);
+    }
+  };
+
+  const handleRemoveTime = async (time: string) => {
+    setIsSavingTimes(true);
+    setError('');
+    try {
+      await onUpdateSweep(sweep.kind, { scheduledTimes: sweep.scheduledTimes.filter((t) => t !== time) });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No fue posible quitar la hora.');
+    } finally {
+      setIsSavingTimes(false);
     }
   };
 
@@ -401,30 +433,71 @@ const SweepCard: React.FC<{
           <span className="font-semibold text-slate-700">{sweep.active ? 'Activo' : 'Desactivado'}</span>
         </label>
 
-        <div className="flex items-center gap-1.5">
-          <span className="font-semibold text-slate-700">Cada</span>
-          <input
-            id={`sweep-frequency-${sweep.kind}`}
-            type="number"
-            min={unit.min}
-            step={unit.step}
-            value={frequency}
-            onChange={(e) => setFrequency(e.target.value)}
-            className="w-16 px-2 py-1 border border-slate-200 rounded-lg outline-none focus:border-teal-600 text-center"
-          />
-          <span className="text-slate-500">{unit.label}</span>
-          {frequencyDirty && (
+        {usesSchedule ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="font-semibold text-slate-700">Horas (Colombia):</span>
+            {sweep.scheduledTimes.length === 0 && (
+              <span className="text-[11px] text-amber-700">Sin horas configuradas -- no correrá solo.</span>
+            )}
+            {sweep.scheduledTimes.map((t) => (
+              <span
+                key={t}
+                className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200 text-[11px] font-mono"
+              >
+                {t}
+                <button
+                  type="button"
+                  onClick={() => handleRemoveTime(t)}
+                  disabled={isSavingTimes}
+                  title="Quitar esta hora"
+                  className="p-0.5 rounded-full hover:bg-teal-100 disabled:opacity-50"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </span>
+            ))}
+            <input
+              type="time"
+              value={newTime}
+              onChange={(e) => setNewTime(e.target.value)}
+              className="px-2 py-1 border border-slate-200 rounded-lg outline-none focus:border-teal-600 text-[11px]"
+            />
             <button
               type="button"
-              onClick={handleSaveFrequency}
-              disabled={isSavingFreq}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
+              onClick={handleAddTime}
+              disabled={isSavingTimes || sweep.scheduledTimes.includes(newTime)}
+              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-teal-700 border border-teal-200 bg-teal-50 hover:bg-teal-100 rounded-lg disabled:opacity-50"
             >
-              <Save className="h-3 w-3" />
-              {isSavingFreq ? 'Guardando...' : 'Guardar'}
+              <Plus className="h-3 w-3" />
+              Agregar hora
             </button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-slate-700">Cada</span>
+            <input
+              id={`sweep-frequency-${sweep.kind}`}
+              type="number"
+              min={unit.min}
+              step={unit.step}
+              value={frequency}
+              onChange={(e) => setFrequency(e.target.value)}
+              className="w-16 px-2 py-1 border border-slate-200 rounded-lg outline-none focus:border-teal-600 text-center"
+            />
+            <span className="text-slate-500">{unit.label}</span>
+            {frequencyDirty && (
+              <button
+                type="button"
+                onClick={handleSaveFrequency}
+                disabled={isSavingFreq}
+                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
+              >
+                <Save className="h-3 w-3" />
+                {isSavingFreq ? 'Guardando...' : 'Guardar'}
+              </button>
+            )}
+          </div>
+        )}
 
         <button
           type="button"
@@ -589,7 +662,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
       {activeTab === 'sweeps' ? (
         <div className="space-y-2.5">
           <p className="text-xs text-slate-500 -mt-1">
-            Controla cada cuánto se revisan las entregas por correo y se envían los recordatorios, o lánzalos ya mismo.
+            Controla a qué horas del día se revisan las entregas por correo y se envían los recordatorios (hora Colombia), o lánzalos ya mismo.
           </p>
           {sweeps.length === 0 ? (
             <div className="py-8 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">

@@ -924,7 +924,7 @@ export default function App() {
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible enviar el correo de prueba.');
   };
 
-  const handleUpdateSweep = async (kind: string, updates: { active?: boolean; frequencyMinutes?: number }) => {
+  const handleUpdateSweep = async (kind: string, updates: { active?: boolean; frequencyMinutes?: number; scheduledTimes?: string[] }) => {
     const response = await fetch('/api/catalogs', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

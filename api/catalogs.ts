@@ -151,6 +151,7 @@ const SWEEP_LABELS: Record<string, string> = {
 async function fetchSweepConfig(sql: any) {
   const rows = (await sql`
     SELECT kind, activo AS active, frecuencia_minutos AS "frequencyMinutes",
+      horas_programadas AS "scheduledTimes",
       ultima_ejecucion AS "lastRunAt", ultimo_exito AS "lastRunSuccess", ultimo_resultado AS "lastRunResult"
     FROM barrido_config ORDER BY kind ASC
   `) as any[];
@@ -619,11 +620,23 @@ export default async function handler(
         const nextActive = has('active') ? Boolean(body.active) : current[0].activo;
         const nextFrequency = has('frequencyMinutes') ? Math.max(5, Number(body.frequencyMinutes) || 0) : current[0].frecuencia_minutos;
 
+        let nextScheduledTimes: string[] = current[0].horas_programadas || [];
+        if (has('scheduledTimes')) {
+          if (!Array.isArray(body.scheduledTimes)) {
+            return response.status(400).json({ data: null, meta: {}, errors: ['Las horas programadas deben ser una lista.'] });
+          }
+          const invalid = body.scheduledTimes.find((t: unknown) => typeof t !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(t));
+          if (invalid !== undefined) {
+            return response.status(400).json({ data: null, meta: {}, errors: ['Cada hora debe tener el formato HH:MM (ej. 08:00).'] });
+          }
+          nextScheduledTimes = Array.from(new Set(body.scheduledTimes as string[])).sort();
+        }
+
         const rows = await sql`
           UPDATE barrido_config
-          SET activo = ${nextActive}, frecuencia_minutos = ${nextFrequency}, updated_at = NOW()
+          SET activo = ${nextActive}, frecuencia_minutos = ${nextFrequency}, horas_programadas = ${nextScheduledTimes}, updated_at = NOW()
           WHERE kind = ${sweepKind}
-          RETURNING kind, activo AS active, frecuencia_minutos AS "frequencyMinutes",
+          RETURNING kind, activo AS active, frecuencia_minutos AS "frequencyMinutes", horas_programadas AS "scheduledTimes",
             ultima_ejecucion AS "lastRunAt", ultimo_exito AS "lastRunSuccess", ultimo_resultado AS "lastRunResult"
         `;
         return response.status(200).json({ data: { ...rows[0], label: SWEEP_LABELS[sweepKind] }, meta: {}, errors: [] });
