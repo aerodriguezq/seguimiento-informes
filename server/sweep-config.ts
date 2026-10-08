@@ -10,6 +10,13 @@ function colombiaMinutesOfDay(date: Date): number {
   return (((date.getUTCHours() - 5 + 24) % 24) * 60 + date.getUTCMinutes());
 }
 
+// Fecha calendario en Colombia (no en UTC) -- restar 5h antes de tomar la
+// fecha evita que una franja de la tarde/noche (ej. 18:00 Colombia, que ya
+// es el día siguiente en UTC desde las 19:00 Colombia) quede mal comparada.
+function colombiaDateString(date: Date): string {
+  return new Date(date.getTime() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 function parseHHMM(value: string): number | null {
   const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
   if (!match) return null;
@@ -35,23 +42,27 @@ export async function getSweepGate(sql: SqlClient, kind: SweepKind, force: boole
 
   const scheduledTimes: string[] = config.scheduledTimes || [];
   if (scheduledTimes.length > 0) {
-    const nowMinutes = colombiaMinutesOfDay(new Date());
+    const now = new Date();
+    const nowMinutes = colombiaMinutesOfDay(now);
     // Ventana de 20 min después de cada hora programada -- el workflow
     // dispara cada 15 min, y GitHub Actions puede retrasar el tick varios
     // minutos bajo carga, así que el margen queda un poco más ancho que el
     // intervalo de sondeo para no perderse la franja.
-    const withinSlot = scheduledTimes.some((raw) => {
-      const slotMinutes = parseHHMM(raw);
-      if (slotMinutes === null) return false;
-      const diff = nowMinutes - slotMinutes;
-      return diff >= 0 && diff < 20;
-    });
-    if (!withinSlot) return { run: false, reason: 'throttled' };
+    const matchingSlotMinutes = scheduledTimes
+      .map(parseHHMM)
+      .find((slotMinutes): slotMinutes is number => slotMinutes !== null && nowMinutes - slotMinutes >= 0 && nowMinutes - slotMinutes < 20);
+    if (matchingSlotMinutes === undefined) return { run: false, reason: 'throttled' };
+
     if (config.lastRunAt) {
-      // Ya corrió para esta franja -- evita que dos ticks de 15 min
-      // consecutivos dentro de la misma ventana disparen el envío dos veces.
-      const elapsedMinutes = (Date.now() - new Date(config.lastRunAt).getTime()) / 60000;
-      if (elapsedMinutes < 50) return { run: false, reason: 'throttled' };
+      // Dedup por FRANJA, no por "hace cuánto corrió por última vez": un
+      // "Ejecutar ahora" manual (force) no debe bloquear la siguiente franja
+      // programada real -- solo evita repetir la MISMA franja si dos ticks
+      // de 15 min caen dentro de su ventana de 20 min.
+      const lastRun = new Date(config.lastRunAt);
+      const lastRunMinutes = colombiaMinutesOfDay(lastRun);
+      const sameDay = colombiaDateString(lastRun) === colombiaDateString(now);
+      const alreadyServedThisSlot = sameDay && lastRunMinutes - matchingSlotMinutes >= 0 && lastRunMinutes - matchingSlotMinutes < 20;
+      if (alreadyServedThisSlot) return { run: false, reason: 'throttled' };
     }
     return { run: true };
   }
