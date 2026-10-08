@@ -308,10 +308,11 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
   const todayIso = new Date().toISOString().slice(0, 10);
   const rows = (await sql`
     SELECT a.alerta_id AS id, a.nombre AS name, a.tipo AS type, a.frecuencia AS schedule,
-           a.informe_id AS "reportId", a.paso_id AS "stepId", a.ultimo_disparo AS "lastFiredAt",
+           a.informe_id AS "reportId", a.paso_id AS "stepId",
            COALESCE(p.nombre, 'Todos los proyectos') AS "projectName",
+           TO_CHAR(ipi.fecha_inicio, 'YYYY-MM-DD') AS "fechaInicio",
            TO_CHAR(ipi.fecha_limite, 'YYYY-MM-DD') AS "fechaLimite",
-           ipi.ultimo_recordatorio_nivel AS "ultimoNivel", TO_CHAR(ipi.ultimo_recordatorio_en, 'YYYY-MM-DD') AS "ultimoEn"
+           TO_CHAR(ipi.ultimo_recordatorio_en, 'YYYY-MM-DD') AS "ultimoEn"
     FROM alertas a
     LEFT JOIN proyectos p ON p.proyecto_id = a.proyecto_id
     LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = a.informe_id AND ipi.paso_id = a.paso_id
@@ -320,26 +321,14 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
 
   let sentCount = 0;
   for (const alert of rows) {
-    let level: NivelAlerta | null = null;
-    let shouldSend: boolean;
-    let days: number | null = null;
-
-    if (alert.fechaLimite) {
-      const due = new Date(`${alert.fechaLimite}T00:00:00Z`);
-      const today = new Date(`${todayIso}T00:00:00Z`);
-      days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      level = levelForDays(days);
-      shouldSend = level !== null && shouldSendForLevel(level, alert.ultimoNivel, alert.ultimoEn, todayIso);
-    } else {
-      // Sin fecha límite propia todavía (paso sin dia_limite configurado):
-      // respaldo al comportamiento anterior, una vez al día.
-      shouldSend = !alert.lastFiredAt || new Date(alert.lastFiredAt) < new Date(Date.now() - 24 * 60 * 60 * 1000);
-    }
+    const days = alert.fechaLimite
+      ? Math.round((new Date(`${alert.fechaLimite}T00:00:00Z`).getTime() - new Date(`${todayIso}T00:00:00Z`).getTime()) / (1000 * 60 * 60 * 24))
+      : null;
 
     // Etapa vencida y todavía sin entrega: el estado pasa a NO_RECIBIDA
     // (motor de estados) independientemente de si toca reenviar el correo
     // hoy o no -- así el dashboard de "procesos en riesgo" refleja la
-    // realidad aunque el nivel rojo ya se haya enviado hoy.
+    // realidad aunque hoy ya se haya avisado.
     if (days !== null && days < 0) {
       await sql`
         UPDATE informe_pasos_instancia SET estado_etapa = 'NO_RECIBIDA', updated_at = NOW()
@@ -347,7 +336,14 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
       `;
     }
 
-    if (!shouldSend) continue;
+    // Recordatorio diario mientras el paso esté dentro de su rango
+    // configurado: respeta la fecha de inicio (no avisa antes de que
+    // empiece el paso; sin fecha de inicio configurada no hay límite
+    // inferior), pero NO tiene límite superior -- sigue avisando todos los
+    // días aunque ya esté vencido, para no perder de vista un
+    // incumplimiento real. Como máximo un correo por día (ultimoEn).
+    if (alert.fechaInicio && todayIso < alert.fechaInicio) continue;
+    if (alert.ultimoEn === todayIso) continue;
 
     const recipientRows = (await sql`
       SELECT c.email FROM alerta_contacto ac
@@ -369,12 +365,10 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
         reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null, success: true,
       });
       await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alert.id}`;
-      if (level) {
-        await sql`
-          UPDATE informe_pasos_instancia SET ultimo_recordatorio_nivel = ${level}, ultimo_recordatorio_en = ${todayIso}
-          WHERE informe_id = ${alert.reportId} AND paso_id = ${alert.stepId}
-        `;
-      }
+      await sql`
+        UPDATE informe_pasos_instancia SET ultimo_recordatorio_en = ${todayIso}
+        WHERE informe_id = ${alert.reportId} AND paso_id = ${alert.stepId}
+      `;
       sentCount++;
     } catch (error) {
       console.error('Informe step reminder failed', alert.id, error);

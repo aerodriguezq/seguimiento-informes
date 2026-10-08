@@ -698,8 +698,8 @@ async function fetchStagesDashboard(sql: SqlClient) {
       COUNT(*) FILTER (WHERE fecha_limite = CURRENT_DATE AND estado_etapa = ANY(${OPEN_STATES})) AS "entregasHoy",
       COUNT(*) FILTER (WHERE fecha_limite > CURRENT_DATE AND fecha_limite <= CURRENT_DATE + 7 AND estado_etapa = ANY(${OPEN_STATES})) AS "entregasProximas",
       COUNT(*) FILTER (WHERE estado_etapa = 'NO_RECIBIDA' OR (fecha_limite < CURRENT_DATE AND estado_etapa = ANY(${OPEN_STATES}))) AS "entregasVencidas",
-      COUNT(*) FILTER (WHERE ultimo_recordatorio_nivel IN ('verde', 'amarillo') AND estado_etapa = ANY(${OPEN_STATES})) AS "alertasProximas",
-      COUNT(*) FILTER (WHERE ultimo_recordatorio_nivel = 'rojo' AND estado_etapa IN ('PENDIENTE', 'ALERTA_GENERADA', 'NO_RECIBIDA')) AS "alertasCriticas"
+      COUNT(*) FILTER (WHERE fecha_limite - CURRENT_DATE BETWEEN 3 AND 5 AND estado_etapa = ANY(${OPEN_STATES})) AS "alertasProximas",
+      COUNT(*) FILTER (WHERE fecha_limite - CURRENT_DATE <= 2 AND estado_etapa IN ('PENDIENTE', 'ALERTA_GENERADA', 'NO_RECIBIDA')) AS "alertasCriticas"
     FROM informe_pasos_instancia
   `) as any[];
 
