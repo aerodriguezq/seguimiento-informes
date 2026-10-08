@@ -44,24 +44,28 @@ export async function getSweepGate(sql: SqlClient, kind: SweepKind, force: boole
   if (scheduledTimes.length > 0) {
     const now = new Date();
     const nowMinutes = colombiaMinutesOfDay(now);
-    // Ventana de 20 min después de cada hora programada -- el workflow
-    // dispara cada 15 min, y GitHub Actions puede retrasar el tick varios
-    // minutos bajo carga, así que el margen queda un poco más ancho que el
-    // intervalo de sondeo para no perderse la franja.
+    // Ventana de 45 min después de cada hora programada. El workflow de
+    // GitHub Actions dispara cada 15 min "en teoría", pero en la práctica
+    // se observaron huecos reales de hasta 25 min entre ticks (su propio
+    // scheduler es "mejor esfuerzo", no garantizado) -- una ventana de solo
+    // 20 min era más angosta que esos huecos y podía dejar el día entero
+    // sin ningún tick que cayera adentro. 45 min da margen de sobra incluso
+    // si GitHub se salta uno o dos ticks seguidos.
+    const SLOT_WINDOW_MINUTES = 45;
     const matchingSlotMinutes = scheduledTimes
       .map(parseHHMM)
-      .find((slotMinutes): slotMinutes is number => slotMinutes !== null && nowMinutes - slotMinutes >= 0 && nowMinutes - slotMinutes < 20);
+      .find((slotMinutes): slotMinutes is number => slotMinutes !== null && nowMinutes - slotMinutes >= 0 && nowMinutes - slotMinutes < SLOT_WINDOW_MINUTES);
     if (matchingSlotMinutes === undefined) return { run: false, reason: 'throttled' };
 
     if (config.lastRunAt) {
       // Dedup por FRANJA, no por "hace cuánto corrió por última vez": un
       // "Ejecutar ahora" manual (force) no debe bloquear la siguiente franja
       // programada real -- solo evita repetir la MISMA franja si dos ticks
-      // de 15 min caen dentro de su ventana de 20 min.
+      // caen dentro de su misma ventana.
       const lastRun = new Date(config.lastRunAt);
       const lastRunMinutes = colombiaMinutesOfDay(lastRun);
       const sameDay = colombiaDateString(lastRun) === colombiaDateString(now);
-      const alreadyServedThisSlot = sameDay && lastRunMinutes - matchingSlotMinutes >= 0 && lastRunMinutes - matchingSlotMinutes < 20;
+      const alreadyServedThisSlot = sameDay && lastRunMinutes - matchingSlotMinutes >= 0 && lastRunMinutes - matchingSlotMinutes < SLOT_WINDOW_MINUTES;
       if (alreadyServedThisSlot) return { run: false, reason: 'throttled' };
     }
     return { run: true };
