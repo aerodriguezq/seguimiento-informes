@@ -146,16 +146,15 @@ export const FileCleanerView: React.FC = () => {
   const [isCleaning, setIsCleaning] = useState(false);
   const [error, setError] = useState('');
   const [cleanedReady, setCleanedReady] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = React.useRef(0);
 
   const reset = () => {
     setFileName(''); setOriginalBytes(null); setReport(null); setCleanedReport(null);
     setCleanedSize(null); setSigConfirmed(false); setError(''); setCleanedReady(false);
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
+  const processFile = async (file: File) => {
     reset();
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
       setError('Por ahora esta herramienta solo procesa archivos PDF.');
@@ -174,6 +173,39 @@ export const FileCleanerView: React.FC = () => {
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    void processFile(file);
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    if (!e.dataTransfer.types.includes('Files')) return;
+    dragCounterRef.current += 1;
+    setIsDragging(true);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    if (e.dataTransfer.types.includes('Files')) e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) void processFile(file);
   };
 
   const handleClean = async () => {
@@ -229,10 +261,18 @@ export const FileCleanerView: React.FC = () => {
           </span>
         </div>
 
-        <label className="mt-4 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40 transition-colors px-6 py-8 cursor-pointer">
-          <Upload className="h-6 w-6 text-slate-400" />
+        <label
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`mt-4 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed transition-colors px-6 py-8 cursor-pointer ${
+            isDragging ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40'
+          }`}
+        >
+          <Upload className={`h-6 w-6 ${isDragging ? 'text-indigo-500' : 'text-slate-400'}`} />
           <span className="text-xs font-semibold text-slate-700">{fileName || 'Elegir archivo PDF'}</span>
-          <span className="text-[10.5px] text-slate-400">Clic para seleccionar</span>
+          <span className="text-[10.5px] text-slate-400">{isDragging ? 'Suelta el archivo aquí' : 'Arrastra el archivo aquí, o haz clic para seleccionar'}</span>
           <input type="file" accept="application/pdf,.pdf" className="hidden" onChange={handleFileChange} />
         </label>
 
