@@ -107,93 +107,168 @@ export async function uploadDriveFile(
   return payload as { id: string; webViewLink: string | null };
 }
 
+type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
+
 export type DriveCopyLogEntry = {
   path: string;
   name: string;
   type: 'folder' | 'file';
   mimeType: string;
-  status: 'copied' | 'skipped' | 'created_folder' | 'reused_folder';
+  status: 'copied' | 'skipped' | 'error';
 };
 
-export type DriveCopySummary = { copiedFiles: number; skippedFiles: number; createdFolders: number; reusedFolders: number };
-
-// Una carpeta se procesa primero (lista sus hijos y crea/reutiliza la
-// carpeta destino); cada hijo (subcarpeta o archivo) se encola como su
-// propio item -- así cada vuelta del while de copyDriveTreeChunk hace un
-// único trabajo (una llamada a Drive como mucho), lo que permite cortar la
-// copia en cualquier punto, incluso a mitad de una carpeta con miles de
-// archivos, y retomarla exactamente donde quedó en la siguiente invocación.
-export type DriveCopyQueueItem =
-  | { kind: 'folder'; sourceId: string; destinationParentId: string; parentPath: string }
-  | { kind: 'file'; sourceFileId: string; name: string; mimeType: string; destinationFolderId: string; folderPath: string; alreadyExists: boolean };
-
-export function initialDriveCopyQueue(sourceId: string, destinationParentId: string): DriveCopyQueueItem[] {
-  return [{ kind: 'folder', sourceId, destinationParentId, parentPath: '' }];
-}
+export type DriveCopySummary = { copiedFiles: number; skippedFiles: number; createdFolders: number; reusedFolders: number; errors: number };
 
 export function emptyDriveCopySummary(): DriveCopySummary {
-  return { copiedFiles: 0, skippedFiles: 0, createdFolders: 0, reusedFolders: 0 };
+  return { copiedFiles: 0, skippedFiles: 0, createdFolders: 0, reusedFolders: 0, errors: 0 };
 }
 
-// Procesa items de la cola hasta vaciarla, hasta `deadline` (ms epoch) o
-// hasta que isCancelled() devuelva true -- lo que ocurra primero. El
-// llamador persiste `queue`/`summary`/`log` entre llamadas (una fila en
-// drive_copy_jobs) para poder reanudar en una invocación posterior cuando
-// la copia no cabe en el límite de tiempo de una función serverless.
-export async function copyDriveTreeChunk(
+// En vez de acumular cada archivo/carpeta en un arreglo compartido que
+// crece sin límite y se reenvía entero en cada invocación (lo que colapsaba
+// con una sola carpeta de origen que tuviera miles de archivos directos),
+// cada item de origen queda como su propia fila en drive_copy_items. La
+// cola entre invocaciones solo necesita guardar qué CARPETAS faltan por
+// listar (fase de escaneo) -- mucho más liviano.
+export type DriveScanQueueItem = { sourceId: string; parentItemId: number | null; relativePath: string };
+
+export function initialDriveScanQueue(sourceRootId: string): DriveScanQueueItem[] {
+  return [{ sourceId: sourceRootId, parentItemId: null, relativePath: '' }];
+}
+
+// Fase 1 (barrido inicial): solo lista el árbol de origen y lo vuelca como
+// filas "pending" en drive_copy_items -- no copia nada todavía. Mucho más
+// rápido que la copia real, pero igual se trocea por si el árbol tiene
+// muchísimas carpetas.
+export async function scanDriveTreeChunk(
+  sql: SqlClient,
   accessToken: string,
-  queue: DriveCopyQueueItem[],
-  summary: DriveCopySummary,
-  log: DriveCopyLogEntry[],
+  jobId: string,
+  scanQueue: DriveScanQueueItem[],
   deadline: number,
-  isCancelled: () => boolean = () => false,
-): Promise<{ queue: DriveCopyQueueItem[]; summary: DriveCopySummary; log: DriveCopyLogEntry[]; done: boolean; cancelled: boolean }> {
-  while (queue.length) {
-    if (isCancelled()) return { queue, summary, log, done: false, cancelled: true };
-    if (Date.now() > deadline) return { queue, summary, log, done: false, cancelled: false };
-    const item = queue.shift()!;
+): Promise<{ scanQueue: DriveScanQueueItem[]; done: boolean }> {
+  while (scanQueue.length) {
+    if (Date.now() > deadline) return { scanQueue, done: false };
+    const current = scanQueue.shift()!;
 
-    if (item.kind === 'folder') {
-      const source = await driveRequest<DriveFile>(accessToken, `/files/${item.sourceId}?fields=id,name,mimeType&supportsAllDrives=true`);
-      const folderPath = item.parentPath ? `${item.parentPath}/${source.name}` : source.name;
-      const destinationItems = await listDriveChildren(accessToken, item.destinationParentId);
-      const existingFolder = destinationItems.find((file) => file.name === source.name && file.mimeType === 'application/vnd.google-apps.folder');
-      const destinationFolderId = existingFolder?.id ?? (await driveRequest<DriveFile>(accessToken, '/files?supportsAllDrives=true', {
-        method: 'POST',
-        body: JSON.stringify({ name: source.name, mimeType: 'application/vnd.google-apps.folder', parents: [item.destinationParentId] }),
-      })).id;
+    const source = await driveRequest<DriveFile>(accessToken, `/files/${current.sourceId}?fields=id,name,mimeType&supportsAllDrives=true`);
+    const relativePath = current.relativePath ? `${current.relativePath}/${source.name}` : source.name;
+    const isFolder = source.mimeType === 'application/vnd.google-apps.folder';
 
-      if (existingFolder) summary.reusedFolders++;
-      else summary.createdFolders++;
-      log.push({
-        path: folderPath,
-        name: source.name,
-        type: 'folder',
-        mimeType: source.mimeType,
-        status: existingFolder ? 'reused_folder' : 'created_folder',
-      });
+    const [row] = (await sql`
+      INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
+      VALUES (${jobId}, ${current.sourceId}, ${current.parentItemId}, ${isFolder}, ${source.name}, ${source.mimeType}, ${relativePath})
+      RETURNING item_id AS id
+    `) as any[];
+    const itemId = Number(row.id);
 
-      const sourceItems = await listDriveChildren(accessToken, item.sourceId);
-      for (const file of sourceItems) {
-        if (file.mimeType === 'application/vnd.google-apps.folder') {
-          queue.push({ kind: 'folder', sourceId: file.id, destinationParentId: destinationFolderId, parentPath: folderPath });
-        } else {
-          const alreadyExists = destinationItems.some((existing) => existing.name === file.name && existing.mimeType === file.mimeType);
-          queue.push({ kind: 'file', sourceFileId: file.id, name: file.name, mimeType: file.mimeType, destinationFolderId, folderPath, alreadyExists });
-        }
+    if (isFolder) {
+      const children = await listDriveChildren(accessToken, current.sourceId);
+      for (const child of children) {
+        scanQueue.push({ sourceId: child.id, parentItemId: itemId, relativePath });
       }
-    } else if (item.alreadyExists) {
-      summary.skippedFiles++;
-      log.push({ path: `${item.folderPath}/${item.name}`, name: item.name, type: 'file', mimeType: item.mimeType, status: 'skipped' });
-    } else {
-      await driveRequest<DriveFile>(accessToken, `/files/${item.sourceFileId}/copy?supportsAllDrives=true`, {
-        method: 'POST',
-        body: JSON.stringify({ name: item.name, parents: [item.destinationFolderId] }),
-      });
-      summary.copiedFiles++;
-      log.push({ path: `${item.folderPath}/${item.name}`, name: item.name, type: 'file', mimeType: item.mimeType, status: 'copied' });
     }
   }
+  return { scanQueue, done: true };
+}
 
-  return { queue, summary, log, done: true, cancelled: false };
+const COPY_BATCH_SELECT_SIZE = 25;
+
+// Fase 2 (copia por lotes): toma filas "pending" cuyo padre ya se resolvió
+// en destino (o que son la raíz), las procesa, y repite hasta vaciar lo
+// disponible o toparse con `deadline`/cancelación. Si algo se rompe a
+// mitad de camino, lo único que se pierde es el lote en curso -- la
+// siguiente invocación retoma consultando qué filas siguen "pending", sin
+// necesidad de reconstruir ni reenviar nada.
+export async function copyDriveItemsBatch(
+  sql: SqlClient,
+  accessToken: string,
+  jobId: string,
+  destinationRootId: string,
+  summary: DriveCopySummary,
+  deadline: number,
+  isCancelled: () => boolean = () => false,
+): Promise<{ summary: DriveCopySummary; done: boolean; cancelled: boolean }> {
+  const destChildrenCache = new Map<string, DriveFile[]>();
+  const getDestChildren = async (destFolderId: string): Promise<DriveFile[]> => {
+    const cached = destChildrenCache.get(destFolderId);
+    if (cached) return cached;
+    const children = await listDriveChildren(accessToken, destFolderId);
+    destChildrenCache.set(destFolderId, children);
+    return children;
+  };
+
+  while (true) {
+    if (isCancelled()) return { summary, done: false, cancelled: true };
+    if (Date.now() > deadline) return { summary, done: false, cancelled: false };
+
+    const items = (await sql`
+      SELECT ci.item_id AS id, ci.source_id AS "sourceId", ci.parent_item_id AS "parentItemId",
+        ci.is_folder AS "isFolder", ci.name, ci.mime_type AS "mimeType", parent.dest_id AS "parentDestId"
+      FROM drive_copy_items ci
+      LEFT JOIN drive_copy_items parent ON parent.item_id = ci.parent_item_id
+      WHERE ci.job_id = ${jobId} AND ci.status = 'pending'
+        AND (ci.parent_item_id IS NULL OR parent.status = 'copied')
+      ORDER BY ci.is_folder DESC, ci.item_id ASC
+      LIMIT ${COPY_BATCH_SELECT_SIZE}
+    `) as any[];
+
+    if (items.length === 0) {
+      // Si no quedan filas "pending" en absoluto, terminamos de verdad. Si
+      // quedan pero ninguna es elegible, es porque su carpeta padre falló
+      // (quedó en 'error') y jamás van a quedar "listas" -- se marcan como
+      // bloqueadas en vez de girar en vacío para siempre.
+      const [{ pendingCount }] = (await sql`
+        SELECT COUNT(*) AS "pendingCount" FROM drive_copy_items WHERE job_id = ${jobId} AND status = 'pending'
+      `) as any[];
+      if (Number(pendingCount) > 0) {
+        const blocked = (await sql`
+          UPDATE drive_copy_items SET status = 'error', error_message = 'La carpeta superior no se pudo copiar.', updated_at = NOW()
+          WHERE job_id = ${jobId} AND status = 'pending'
+          RETURNING item_id
+        `) as any[];
+        summary.errors += blocked.length;
+      }
+      return { summary, done: true, cancelled: false };
+    }
+
+    for (const item of items) {
+      if (isCancelled()) return { summary, done: false, cancelled: true };
+      if (Date.now() > deadline) return { summary, done: false, cancelled: false };
+
+      const destParentId: string = item.parentItemId === null ? destinationRootId : item.parentDestId;
+      try {
+        if (item.isFolder) {
+          const siblings = await getDestChildren(destParentId);
+          const existing = siblings.find((f) => f.name === item.name && f.mimeType === 'application/vnd.google-apps.folder');
+          const destFolder = existing ?? (await driveRequest<DriveFile>(accessToken, '/files?supportsAllDrives=true', {
+            method: 'POST',
+            body: JSON.stringify({ name: item.name, mimeType: 'application/vnd.google-apps.folder', parents: [destParentId] }),
+          }));
+          if (existing) summary.reusedFolders++;
+          else summary.createdFolders++;
+          await sql`UPDATE drive_copy_items SET status = 'copied', dest_id = ${destFolder.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
+        } else {
+          const siblings = await getDestChildren(destParentId);
+          const existing = siblings.find((f) => f.name === item.name && f.mimeType === item.mimeType);
+          if (existing) {
+            summary.skippedFiles++;
+            await sql`UPDATE drive_copy_items SET status = 'skipped', dest_id = ${existing.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
+          } else {
+            const copied = await driveRequest<DriveFile>(accessToken, `/files/${item.sourceId}/copy?supportsAllDrives=true`, {
+              method: 'POST',
+              body: JSON.stringify({ name: item.name, parents: [destParentId] }),
+            });
+            summary.copiedFiles++;
+            await sql`UPDATE drive_copy_items SET status = 'copied', dest_id = ${copied.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
+          }
+        }
+      } catch (error) {
+        summary.errors++;
+        await sql`
+          UPDATE drive_copy_items SET status = 'error', error_message = ${error instanceof Error ? error.message : String(error)}, updated_at = NOW()
+          WHERE item_id = ${item.id}
+        `;
+      }
+    }
+  }
 }

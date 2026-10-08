@@ -7,14 +7,13 @@ type DriveCopyLogEntry = {
   name: string;
   type: 'folder' | 'file';
   mimeType: string;
-  status: 'copied' | 'skipped' | 'created_folder' | 'reused_folder';
+  status: 'copied' | 'skipped' | 'error';
 };
 
 const STATUS_LABELS: Record<DriveCopyLogEntry['status'], string> = {
   copied: 'Copiado',
   skipped: 'Omitido (ya existía)',
-  created_folder: 'Carpeta creada',
-  reused_folder: 'Carpeta reutilizada',
+  error: 'Error',
 };
 
 // Si Vercel mata la función por exceder el tiempo máximo (60s en el plan
@@ -32,6 +31,42 @@ async function parseJsonResponse(response: Response): Promise<any> {
       );
     }
     throw new Error('El servidor devolvió una respuesta inesperada.');
+  }
+}
+
+// Si la copia se corta por un error de red (no un "Detener" explícito), el
+// siguiente clic en "Copiar" retoma el mismo trabajo en vez de volver a
+// escanear todo el origen desde cero -- se guarda solo mientras el par
+// origen/destino no cambie.
+const DRIVE_COPY_JOB_STORAGE_KEY = 'seguimiento_drive_copy_job';
+
+function readSavedCopyJob(sourceUrl: string, destinationUrl: string): string | null {
+  try {
+    const raw = window.localStorage.getItem(DRIVE_COPY_JOB_STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    if (saved?.sourceUrl === sourceUrl && saved?.destinationUrl === destinationUrl && typeof saved?.jobId === 'string') {
+      return saved.jobId;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCopyJob(jobId: string, sourceUrl: string, destinationUrl: string) {
+  try {
+    window.localStorage.setItem(DRIVE_COPY_JOB_STORAGE_KEY, JSON.stringify({ jobId, sourceUrl, destinationUrl }));
+  } catch {
+    // Conveniencia solamente -- si no se puede guardar, el próximo intento simplemente arranca de cero.
+  }
+}
+
+function clearSavedCopyJob() {
+  try {
+    window.localStorage.removeItem(DRIVE_COPY_JOB_STORAGE_KEY);
+  } catch {
+    // No crítico.
   }
 }
 
@@ -134,7 +169,10 @@ export const DriveLinksView: React.FC = () => {
       // poder copiar carpetas grandes sin toparse con ese límite.
       directCancelRequestedRef.current = false;
       directJobIdRef.current = null;
-      let jobId: string | null = null;
+      let jobId: string | null = readSavedCopyJob(links.sourceUrl, links.destinationUrl);
+      if (jobId) {
+        setMessage({ type: 'success', text: 'Retomando una copia interrumpida anteriormente...' });
+      }
       let done = false;
       try {
         while (!done) {
@@ -156,23 +194,36 @@ export const DriveLinksView: React.FC = () => {
           const result = payload.data;
           jobId = result.jobId;
           directJobIdRef.current = jobId;
+          saveCopyJob(jobId, links.sourceUrl, links.destinationUrl);
 
-          const processed = result.copiedFiles + result.skippedFiles;
-          const total = processed + (result.remaining ?? 0);
-          setCopyProgress({
-            percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
-            processed,
-            total,
-            phase: result.done ? 'Copia completada' : `Copiando... ${processed} procesado(s), ${result.remaining ?? 0} en cola`,
-          });
+          if (result.phase === 'scanning') {
+            setCopyProgress({
+              percent: 3,
+              processed: 0,
+              total: 0,
+              phase: `Haciendo un barrido inicial del origen... ${result.itemsFound ?? 0} elemento(s) encontrados`,
+            });
+          } else {
+            const processed = result.copiedFiles + result.skippedFiles + (result.errors ?? 0);
+            const total = result.total ?? processed;
+            setCopyProgress({
+              percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
+              processed,
+              total,
+              phase: result.done ? 'Copia completada' : `Copiando... ${processed} de ${total} elemento(s) procesados`,
+            });
+          }
 
           if (result.cancelled) {
+            clearSavedCopyJob();
             setCopyLog(result.log || []);
             setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
             done = true;
           } else if (result.done) {
+            clearSavedCopyJob();
             setCopyLog(result.log || []);
-            setMessage({ type: 'success', text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} omitidos.` });
+            const errorNote = result.errors > 0 ? ` (${result.errors} con error -- revisa el reporte CSV)` : '';
+            setMessage({ type: 'success', text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} omitidos${errorNote}.` });
             done = true;
           }
         }
