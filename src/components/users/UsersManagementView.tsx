@@ -21,6 +21,22 @@ export interface SweepConfig {
   lastRunResult: Record<string, unknown> | null;
 }
 
+export interface EmailLogEntry {
+  id: string;
+  sentAt: string;
+  to: string[];
+  cc: string[] | null;
+  subject: string;
+  kind: string;
+  success: boolean;
+  errorMessage: string | null;
+  reportId: string | null;
+  reportConsecutive: string | null;
+  alertId: string | null;
+  peticionId: string | null;
+  peticionRadicado: string | null;
+}
+
 interface UsersManagementViewProps {
   users: AuthorizedUser[];
   currentUserEmail: string;
@@ -31,6 +47,7 @@ interface UsersManagementViewProps {
   sweeps: SweepConfig[];
   onUpdateSweep: (kind: string, updates: { active?: boolean; frequencyMinutes?: number; scheduledTimes?: string[] }) => Promise<void>;
   onTriggerSweep: (kind: string) => Promise<Record<string, unknown>>;
+  emailLog: EmailLogEntry[];
 }
 
 // defaultLevel: con qué nivel arranca un usuario no-admin si nunca se le ha
@@ -285,6 +302,75 @@ const DEFAULT_UNIT = { label: 'min', factor: 1, min: 5, step: 5 };
 function getSweepUnit(kind: string) {
   return SWEEP_UNITS[kind] || DEFAULT_UNIT;
 }
+
+const EMAIL_KIND_LABELS: Record<string, string> = {
+  manual: 'Manual ("Enviar ahora")',
+  recordatorio_paso: 'Recordatorio de paso',
+  recordatorio_general: 'Recordatorio general',
+  peticion_recordatorio: 'Recordatorio de petición',
+  peticion_asignacion: 'Asignación de petición',
+  prueba: 'Correo de prueba',
+};
+
+const EmailLogSection: React.FC<{ entries: EmailLogEntry[] }> = ({ entries }) => {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+      <div>
+        <p className="text-sm font-bold text-slate-900">Historial de Correos Enviados</p>
+        <p className="text-[11px] text-slate-500">Cada correo que el sistema intenta enviar, manual o automático, queda registrado aquí (últimos 150).</p>
+      </div>
+      {entries.length === 0 ? (
+        <div className="py-6 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+          Todavía no se ha enviado ningún correo.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                <th className="py-2 pr-3">Fecha</th>
+                <th className="py-2 pr-3">Asunto</th>
+                <th className="py-2 pr-3">Destinatarios</th>
+                <th className="py-2 pr-3">Tipo</th>
+                <th className="py-2 pr-3">Referencia</th>
+                <th className="py-2 pr-3">Resultado</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {entries.map((entry) => (
+                <tr key={entry.id}>
+                  <td className="py-2 pr-3 text-slate-500 whitespace-nowrap">
+                    {new Date(entry.sentAt).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}
+                  </td>
+                  <td className="py-2 pr-3 text-slate-800 max-w-56 truncate" title={entry.subject}>{entry.subject}</td>
+                  <td className="py-2 pr-3 text-slate-600 max-w-48 truncate" title={[...entry.to, ...(entry.cc ?? [])].join(', ')}>
+                    {entry.to.length > 0 ? entry.to.join(', ') : '—'}
+                    {entry.cc && entry.cc.length > 0 && <span className="text-slate-400"> (CC: {entry.cc.join(', ')})</span>}
+                  </td>
+                  <td className="py-2 pr-3 text-slate-600 whitespace-nowrap">{EMAIL_KIND_LABELS[entry.kind] || entry.kind}</td>
+                  <td className="py-2 pr-3 text-slate-500 whitespace-nowrap">
+                    {entry.reportConsecutive || (entry.peticionRadicado ? `Pet. ${entry.peticionRadicado}` : '—')}
+                  </td>
+                  <td className="py-2 pr-3 whitespace-nowrap">
+                    {entry.success ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
+                        <CheckCircle2 className="h-3 w-3" /> Enviado
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-rose-600 font-semibold" title={entry.errorMessage || ''}>
+                        <AlertTriangle className="h-3 w-3" /> Error
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const SweepCard: React.FC<{
   sweep: SweepConfig;
@@ -546,6 +632,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
   sweeps,
   onUpdateSweep,
   onTriggerSweep,
+  emailLog,
 }) => {
   const [activeTab, setActiveTab] = useState<'admins' | 'users' | 'sweeps'>('users');
   const [newEmail, setNewEmail] = useState('');
@@ -673,6 +760,8 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
               <SweepCard key={s.kind} sweep={s} onUpdateSweep={onUpdateSweep} onTriggerSweep={onTriggerSweep} />
             ))
           )}
+
+          <EmailLogSection entries={emailLog} />
         </div>
       ) : (
         <div className="space-y-2.5">

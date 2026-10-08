@@ -3,6 +3,7 @@ import { getDriveAccessToken } from '../../server/google-drive.js';
 import { sendEmail, buildAlertEmailHtml, buildPeticionReminderEmailHtml } from '../../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../../server/sweep-config.js';
 import { canEditModuleRequest } from '../../server/admin-auth.js';
+import { logEmailSend } from '../../server/email-log.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -160,21 +161,27 @@ async function handleSend(request: VercelRequest, response: VercelResponse, sql:
     const cc = primaryEmail && !toEmails.includes(primaryEmail) ? [primaryEmail] : undefined;
 
     const html = await buildAlertEmail(sql, alert);
-    await sendEmail(accessToken, {
-      to: toEmails,
-      cc,
-      subject: `[Seguimiento] ${alert.name}`,
-      body: html,
-      html: true,
-    });
+    const subject = `[Seguimiento] ${alert.name}`;
+    const reportId = Number(alert.reportId) || null;
+    const alertId = /^\d+$/.test(String(alert.id ?? '')) ? Number(alert.id) : null;
+    await sendEmail(accessToken, { to: toEmails, cc, subject, body: html, html: true });
+    await logEmailSend(sql, { to: toEmails, cc, subject, kind: 'manual', reportId, alertId, success: true });
 
-    if (alert.id && /^\d+$/.test(String(alert.id))) {
-      await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${Number(alert.id)}`;
+    if (alertId) {
+      await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alertId}`;
     }
 
     return response.status(200).json({ data: { sent: true, recipientCount: validRecipients.length }, meta: {}, errors: [] });
   } catch (error) {
     console.error('Alert delivery failed', error);
+    await logEmailSend(sql, {
+      to: Array.isArray(request.body?.recipients) ? request.body.recipients.map((r: any) => r?.email).filter(Boolean) : [],
+      subject: `[Seguimiento] ${request.body?.alert?.name ?? ''}`,
+      kind: 'manual',
+      reportId: Number(request.body?.alert?.reportId) || null,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
     return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible enviar el correo.'] });
   }
 }
@@ -246,13 +253,9 @@ async function sendPeticionReminder(
     observaciones: peticion.observaciones,
     actionUrl,
   });
-  await sendEmail(accessToken, {
-    to: finalTo,
-    cc: finalCc,
-    subject: `[Peticiones · ${level.toUpperCase()}] ${peticion.radicado} — ${peticion.asunto}`,
-    body: html,
-    html: true,
-  });
+  const subject = `[Peticiones · ${level.toUpperCase()}] ${peticion.radicado} — ${peticion.asunto}`;
+  await sendEmail(accessToken, { to: finalTo, cc: finalCc, subject, body: html, html: true });
+  await logEmailSend(sql, { to: finalTo, cc: finalCc, subject, kind: 'peticion_recordatorio', peticionId: peticion.id, success: true });
   return true;
 }
 
@@ -284,6 +287,11 @@ async function handlePeticionesReminders(sql: SqlClient, accessToken: string): P
       }
     } catch (error) {
       console.error('Petición reminder send failed', p.id, error);
+      await logEmailSend(sql, {
+        to: [], subject: `[Peticiones · ${level.toUpperCase()}] ${p.radicado} — ${p.asunto}`,
+        kind: 'peticion_recordatorio', peticionId: p.id,
+        success: false, errorMessage: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -354,12 +362,11 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
       const cc = primaryEmail && !toEmails.includes(primaryEmail) ? [primaryEmail] : undefined;
 
       const html = await buildAlertEmail(sql, alert);
-      await sendEmail(accessToken, {
-        to: toEmails,
-        cc,
-        subject: `[Seguimiento] ${alert.name}`,
-        body: html,
-        html: true,
+      const subject = `[Seguimiento] ${alert.name}`;
+      await sendEmail(accessToken, { to: toEmails, cc, subject, body: html, html: true });
+      await logEmailSend(sql, {
+        to: toEmails, cc, subject, kind: 'recordatorio_paso',
+        reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null, success: true,
       });
       await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alert.id}`;
       if (level) {
@@ -371,6 +378,11 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
       sentCount++;
     } catch (error) {
       console.error('Informe step reminder failed', alert.id, error);
+      await logEmailSend(sql, {
+        to: [], subject: `[Seguimiento] ${alert.name}`, kind: 'recordatorio_paso',
+        reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null,
+        success: false, errorMessage: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -406,16 +418,22 @@ async function handleCronSweep(sql: SqlClient): Promise<{ evaluated: number; sen
 
     try {
       const html = await buildAlertEmail(sql, alert);
-      await sendEmail(accessToken, {
-        to: recipientRows.map((r: any) => r.email),
-        subject: `[Seguimiento] ${alert.name}`,
-        body: html,
-        html: true,
+      const toEmails = recipientRows.map((r: any) => r.email);
+      const subject = `[Seguimiento] ${alert.name}`;
+      await sendEmail(accessToken, { to: toEmails, subject, body: html, html: true });
+      await logEmailSend(sql, {
+        to: toEmails, subject, kind: 'recordatorio_general',
+        reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null, success: true,
       });
       await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alert.id}`;
       sentCount++;
     } catch (error) {
       console.error('Cron alert send failed', alert.id, error);
+      await logEmailSend(sql, {
+        to: [], subject: `[Seguimiento] ${alert.name}`, kind: 'recordatorio_general',
+        reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null,
+        success: false, errorMessage: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { canEditModuleRequest } from '../server/admin-auth.js';
 import { sendEmail, buildPeticionAssignedEmailHtml } from '../server/google-gmail.js';
 import { ensureDriveFolder, uploadDriveFile, extractDriveFolderId } from '../server/google-drive.js';
+import { logEmailSend } from '../server/email-log.js';
 
 // fecha_plazo_respuesta siempre se recalcula a partir de fecha_radicacion +
 // plazo_respuesta (días calendario) — es un dato derivado, no editable a mano.
@@ -98,16 +99,18 @@ async function notifyNewPeticionResponsables(
     responsables: allResponsables.map((r) => r.name),
     actionUrl,
   });
+  const toEmails = toNotify.map((r) => r.email);
+  const cc = peticion.correoPersonaAsignada && peticion.correoPersonaAsignada.includes('@') ? [peticion.correoPersonaAsignada] : undefined;
+  const subject = `[Peticiones] Se te asignó: ${peticion.radicado} — ${peticion.asunto}`;
   try {
-    await sendEmail(accessToken, {
-      to: toNotify.map((r) => r.email),
-      cc: peticion.correoPersonaAsignada && peticion.correoPersonaAsignada.includes('@') ? [peticion.correoPersonaAsignada] : undefined,
-      subject: `[Peticiones] Se te asignó: ${peticion.radicado} — ${peticion.asunto}`,
-      body: html,
-      html: true,
-    });
+    await sendEmail(accessToken, { to: toEmails, cc, subject, body: html, html: true });
+    await logEmailSend(sql, { to: toEmails, cc, subject, kind: 'peticion_asignacion', peticionId: peticion.id, success: true });
   } catch (error) {
     console.error('No fue posible enviar el correo de asignación de la petición', peticion.id, error);
+    await logEmailSend(sql, {
+      to: toEmails, cc, subject, kind: 'peticion_asignacion', peticionId: peticion.id,
+      success: false, errorMessage: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -156,6 +159,20 @@ async function fetchSweepConfig(sql: any) {
     FROM barrido_config ORDER BY kind ASC
   `) as any[];
   return rows.map((row) => ({ ...row, label: SWEEP_LABELS[row.kind] || row.kind }));
+}
+
+async function fetchEmailLog(sql: any) {
+  return (await sql`
+    SELECT cl.correo_log_id AS id, cl.enviado_en AS "sentAt", cl.destinatarios AS "to", cl.copia AS cc,
+      cl.asunto AS subject, cl.tipo AS kind, cl.exito AS success, cl.error_mensaje AS "errorMessage",
+      cl.informe_id AS "reportId", i.consecutivo AS "reportConsecutive",
+      cl.alerta_id AS "alertId", cl.peticion_id AS "peticionId", p.radicado AS "peticionRadicado"
+    FROM correo_log cl
+    LEFT JOIN informes i ON i.informe_id = cl.informe_id
+    LEFT JOIN peticiones p ON p.peticion_id = cl.peticion_id
+    ORDER BY cl.enviado_en DESC
+    LIMIT 150
+  `) as any[];
 }
 
 // Ejecuta el barrido ya mismo llamando al propio endpoint (reports.ts o
@@ -338,6 +355,7 @@ export default async function handler(
         ? await sql`SELECT email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions FROM usuarios_autorizados ORDER BY created_at ASC`
         : [];
       const sweeps = isAdmin ? await fetchSweepConfig(sql) : [];
+      const emailLog = isAdmin ? await fetchEmailLog(sql) : [];
       const [reportTypes, contacts, steps, stepContacts, empresas, areasConsolida, peticionesConfigRows] = await Promise.all([
         sql`
           SELECT tipo_informe_id AS id, COALESCE(codigo, '') AS code, nombre AS name,
@@ -376,7 +394,7 @@ export default async function handler(
         };
       });
 
-      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, isAdmin, empresas, areasConsolida, peticionesConfig }, meta: {}, errors: [] });
+      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, emailLog, isAdmin, empresas, areasConsolida, peticionesConfig }, meta: {}, errors: [] });
     }
 
     if (request.method === 'PATCH') {
@@ -792,14 +810,15 @@ export default async function handler(
         const { sendEmail, buildAccessApprovedEmailHtml } = await import('../server/google-gmail.js');
         const baseUrl = (process.env.APP_URL || 'https://seguimiento-informes.vercel.app').replace(/\/$/, '');
         const html = buildAccessApprovedEmailHtml({ name: target.name, loginUrl: baseUrl });
-        await sendEmail(accessToken, {
-          to: [email],
-          subject: 'Acceso aprobado — Seguimiento de Informes',
-          body: html,
-          html: true,
-        });
+        const subject = 'Acceso aprobado — Seguimiento de Informes';
+        await sendEmail(accessToken, { to: [email], subject, body: html, html: true });
+        await logEmailSend(sql, { to: [email], subject, kind: 'prueba', success: true });
         return response.status(200).json({ data: { sent: true, email }, meta: {}, errors: [] });
       } catch (error) {
+        await logEmailSend(sql, {
+          to: [email], subject: 'Acceso aprobado — Seguimiento de Informes', kind: 'prueba',
+          success: false, errorMessage: error instanceof Error ? error.message : String(error),
+        });
         return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible enviar el correo de prueba.'] });
       }
     }

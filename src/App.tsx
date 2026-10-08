@@ -31,7 +31,7 @@ import { PeticionesView } from './components/peticiones/PeticionesView';
 import { AlertsView } from './components/alerts/AlertsView';
 import { MasterListsView } from './components/master-lists/MasterListsView';
 import { DriveLinksView } from './components/drive/DriveLinksView';
-import { UsersManagementView, AuthorizedUser, SweepConfig } from './components/users/UsersManagementView';
+import { UsersManagementView, AuthorizedUser, SweepConfig, EmailLogEntry } from './components/users/UsersManagementView';
 import { FileCleanerView } from './components/files/FileCleanerView';
 import { useAuth } from './auth/AuthContext';
 import { CheckCircle2, Info, X } from 'lucide-react';
@@ -123,6 +123,7 @@ export default function App() {
   const [reportTypeSteps, setReportTypeSteps] = useState<ReportTypeStep[]>([]);
   const [authorizedUsers, setAuthorizedUsers] = useState<AuthorizedUser[]>([]);
   const [sweeps, setSweeps] = useState<SweepConfig[]>([]);
+  const [emailLog, setEmailLog] = useState<EmailLogEntry[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [areasConsolida, setAreasConsolida] = useState<AreaConsolida[]>([]);
@@ -231,6 +232,7 @@ export default function App() {
         setReportTypeSteps(catalogsPayload.data.reportTypeSteps || []);
         setAuthorizedUsers(catalogsPayload.data.authorizedUsers || []);
         setSweeps(catalogsPayload.data.sweeps || []);
+        setEmailLog(catalogsPayload.data.emailLog || []);
         setContacts(catalogsPayload.data.contacts);
         setEmpresas(catalogsPayload.data.empresas || []);
         setAreasConsolida(catalogsPayload.data.areasConsolida || []);
@@ -922,6 +924,13 @@ export default function App() {
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible enviar el correo de prueba.');
+    try {
+      const catalogsResponse = await fetch('/api/catalogs');
+      const catalogsPayload = await catalogsResponse.json();
+      if (catalogsResponse.ok) setEmailLog(catalogsPayload.data.emailLog || []);
+    } catch {
+      // No crítico.
+    }
   };
 
   const handleUpdateSweep = async (kind: string, updates: { active?: boolean; frequencyMinutes?: number; scheduledTimes?: string[] }) => {
@@ -951,6 +960,15 @@ export default function App() {
     if (!response.ok) throw new Error(payload?.errors?.[0] || `El barrido falló (estado ${response.status}).`);
     if (payload.data.config) {
       setSweeps((prev) => prev.map((s) => (s.kind === kind ? payload.data.config : s)));
+    }
+    // Un barrido puede haber enviado correos nuevos -- refresca el
+    // historial para que se vean sin tener que recargar la página.
+    try {
+      const catalogsResponse = await fetch('/api/catalogs');
+      const catalogsPayload = await catalogsResponse.json();
+      if (catalogsResponse.ok) setEmailLog(catalogsPayload.data.emailLog || []);
+    } catch {
+      // No crítico -- el historial se refresca solo en el próximo recargue.
     }
     showToast('Barrido ejecutado manualmente.', 'success');
     return payload.data.result || {};
@@ -1161,6 +1179,7 @@ export default function App() {
               sweeps={sweeps}
               onUpdateSweep={handleUpdateSweep}
               onTriggerSweep={handleTriggerSweep}
+              emailLog={emailLog}
             />
           )}
 

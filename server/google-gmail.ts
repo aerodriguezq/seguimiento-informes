@@ -11,11 +11,20 @@ function toBase64Url(value: string) {
     .replace(/=+$/, '');
 }
 
+// Remitente fijo para TODO correo que sale del sistema, sin importar qué
+// cuenta de Google quede conectada en Fuentes Drive -- si esa cuenta cambia
+// en el futuro, Gmail solo respeta este From si la nueva cuenta tiene esta
+// dirección configurada como "Enviar como" (alias verificado); si no, el
+// envío falla con un error claro en vez de salir silenciosamente desde la
+// cuenta equivocada.
+const FIXED_SENDER_EMAIL = 'a.rodriguez@gdm.com.co';
+
 export async function sendEmail(
   accessToken: string,
   options: { to: string[]; cc?: string[]; subject: string; body: string; html?: boolean },
 ): Promise<void> {
   const rawMessage = [
+    `From: ${FIXED_SENDER_EMAIL}`,
     `To: ${options.to.join(', ')}`,
     ...(options.cc && options.cc.length > 0 ? [`Cc: ${options.cc.join(', ')}`] : []),
     `Content-Type: text/${options.html ? 'html' : 'plain'}; charset="UTF-8"`,
