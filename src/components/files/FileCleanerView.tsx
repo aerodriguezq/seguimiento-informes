@@ -35,13 +35,15 @@ type PdfReport = {
   hasLang: boolean;
   hasStructTree: boolean;
   possibleSignature: boolean;
+  pageMetadataCount: number;
+  annotationAuthorCount: number;
 };
 
 const PDF_INFO_FIELD_KEYS = ['Title', 'Author', 'Subject', 'Keywords', 'Creator', 'Producer', 'CreationDate', 'ModDate', 'Trapped'];
 const PDF_CATALOG_KEYS_TO_STRIP = ['Metadata', 'OpenAction', 'Names', 'Outlines', 'Lang', 'PieceInfo', 'AA', 'StructTreeRoot', 'MarkInfo'];
 
 async function analyzePdf(bytes: Uint8Array): Promise<PdfReport> {
-  const { PDFDocument, PDFName, PDFDict } = await import('pdf-lib');
+  const { PDFDocument, PDFName, PDFDict, PDFArray } = await import('pdf-lib');
   // Escaneo de bytes crudos para lo que pdf-lib no expone directo: versión
   // de cabecera, número de revisiones (%%EOF) y rastro de firma (/Type
   // /Sig o /ByteRange son el indicio estándar de una firma incrustada).
@@ -72,6 +74,22 @@ async function analyzePdf(bytes: Uint8Array): Promise<PdfReport> {
     // formularios de pdf-lib -- se reporta como "no se pudo leer", no como "no tiene".
   }
 
+  // El catálogo no es el único lugar con rastros: cada página puede traer
+  // su propio /Metadata (XMP), y cada anotación (comentarios, marcas)
+  // puede traer /T con el nombre de quien la agregó.
+  let pageMetadataCount = 0;
+  let annotationAuthorCount = 0;
+  for (const page of doc.getPages()) {
+    if (page.node.lookup(PDFName.of('Metadata'))) pageMetadataCount++;
+    const annots = page.node.Annots();
+    if (annots instanceof PDFArray) {
+      for (let i = 0; i < annots.size(); i++) {
+        const annotDict = doc.context.lookupMaybe(annots.get(i), PDFDict);
+        if (annotDict?.lookup(PDFName.of('T'))) annotationAuthorCount++;
+      }
+    }
+  }
+
   return {
     kind: 'pdf',
     sizeBytes: bytes.length,
@@ -99,11 +117,15 @@ async function analyzePdf(bytes: Uint8Array): Promise<PdfReport> {
     hasLang: lookupFlag('Lang'),
     hasStructTree: lookupFlag('StructTreeRoot'),
     possibleSignature,
+    pageMetadataCount,
+    annotationAuthorCount,
   };
 }
 
+const PDF_ANNOTATION_KEYS_TO_STRIP = ['T', 'CreationDate', 'M', 'NM'];
+
 async function cleanPdf(bytes: Uint8Array): Promise<Uint8Array> {
-  const { PDFDocument, PDFName } = await import('pdf-lib');
+  const { PDFDocument, PDFName, PDFDict, PDFArray } = await import('pdf-lib');
   // updateMetadata:false evita que pdf-lib se auto-firme como Producer y
   // pise el ModDate apenas se carga el documento (lo hace por defecto).
   const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
@@ -117,6 +139,24 @@ async function cleanPdf(bytes: Uint8Array): Promise<Uint8Array> {
 
   const catalog = doc.catalog;
   PDF_CATALOG_KEYS_TO_STRIP.forEach((k) => catalog.delete(PDFName.of(k)));
+
+  // El catálogo no es el único lugar con XMP o rastros de autoría: cada
+  // PÁGINA puede traer su propio /Metadata, y cada ANOTACIÓN (comentarios,
+  // marcas, firmas de campo) puede traer /T (nombre de quien la agregó),
+  // /M y /CreationDate (cuándo) y /NM (id interno). Se limpia uno por uno
+  // sin tocar /Contents (el texto visible del comentario, si lo tiene).
+  for (const page of doc.getPages()) {
+    page.node.delete(PDFName.of('Metadata'));
+    const annots = page.node.Annots();
+    if (annots instanceof PDFArray) {
+      for (let i = 0; i < annots.size(); i++) {
+        const annotDict = doc.context.lookupMaybe(annots.get(i), PDFDict);
+        if (annotDict) {
+          PDF_ANNOTATION_KEYS_TO_STRIP.forEach((k) => annotDict.delete(PDFName.of(k)));
+        }
+      }
+    }
+  }
 
   // Sin object streams, como se pidió -- pdf-lib no soporta linealizar
   // ni fijar un /ID determinístico, eso no se puede replicar aquí.
@@ -246,6 +286,7 @@ type XlsxReport = {
   company: string | null;
   manager: string | null;
   hasCustomProps: boolean;
+  commentAuthorCount: number;
 };
 
 const XLSX_CORE_TAGS: Array<keyof Omit<XlsxReport, 'kind' | 'sizeBytes' | 'company' | 'manager' | 'hasCustomProps'>> = [
@@ -292,6 +333,15 @@ async function analyzeXlsx(bytes: Uint8Array): Promise<XlsxReport> {
     manager = getXmlText(doc, ['Manager']);
   }
 
+  // Los comentarios de celda guardan el nombre de quien comentó en
+  // <author> -- es tan "autor" como el de las propiedades del documento.
+  let commentAuthorCount = 0;
+  const commentFiles = Object.keys(zip.files).filter((p) => /^xl\/comments\d*\.xml$/.test(p));
+  for (const path of commentFiles) {
+    const doc = parser.parseFromString(await zip.file(path)!.async('text'), 'application/xml');
+    commentAuthorCount += Array.from(doc.getElementsByTagName('author')).filter((el) => el.textContent?.trim()).length;
+  }
+
   return {
     kind: 'xlsx',
     sizeBytes: bytes.length,
@@ -307,6 +357,7 @@ async function analyzeXlsx(bytes: Uint8Array): Promise<XlsxReport> {
     company,
     manager,
     hasCustomProps: !!zip.file('docProps/custom.xml'),
+    commentAuthorCount,
   };
 }
 
@@ -353,6 +404,34 @@ async function cleanXlsx(bytes: Uint8Array): Promise<Uint8Array> {
     zip.file('docProps/custom.xml', serializer.serializeToString(doc));
   }
 
+  // Los comentarios de celda guardan el nombre de quien comentó en
+  // <author> -- se vacía el nombre, dejando el texto del comentario tal
+  // cual (eso sí es contenido visible, no metadato).
+  const commentFiles = Object.keys(zip.files).filter((p) => /^xl\/comments\d*\.xml$/.test(p));
+  for (const path of commentFiles) {
+    const xml = await zip.file(path)!.async('text');
+    const doc = parser.parseFromString(xml, 'application/xml');
+    Array.from(doc.getElementsByTagName('author')).forEach((el) => { el.textContent = ''; });
+    zip.file(path, serializer.serializeToString(doc));
+  }
+
+  // El propio contenedor ZIP guarda una fecha de "última modificación" por
+  // cada archivo interno (hojas, estilos, etc.), independiente de las
+  // propiedades del documento -- sin tocar esto, un archivo que nunca se
+  // reescribe (ej. xl/worksheets/sheet1.xml) conserva la fecha original en
+  // la que Excel lo guardó. Se reescribe cada entrada con una fecha fija
+  // para que ninguna quede delatando cuándo se creó el original.
+  const FIXED_DATE = new Date('1980-01-01T00:00:00Z');
+  const filePaths = Object.keys(zip.files).filter((p) => !zip.files[p].dir);
+  for (const path of filePaths) {
+    const content = await zip.file(path)!.async('uint8array');
+    zip.file(path, content, { date: FIXED_DATE });
+  }
+  const dirPaths = Object.keys(zip.files).filter((p) => zip.files[p].dir);
+  for (const path of dirPaths) {
+    zip.file(path, null, { dir: true, date: FIXED_DATE });
+  }
+
   return zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -388,13 +467,14 @@ async function cleanByKind(kind: FileKind, bytes: Uint8Array): Promise<Uint8Arra
 function countTraces(report: AnyReport): number {
   if (report.kind === 'pdf') {
     return [report.hasXMP, report.hasJavaScript, report.hasEmbeddedFiles, report.hasOpenAction, report.hasOutlines, report.hasStructTree, report.hasLang]
-      .filter(Boolean).length + (Object.values(report.info).some((v) => v) ? 1 : 0);
+      .filter(Boolean).length + (Object.values(report.info).some((v) => v) ? 1 : 0)
+      + (report.pageMetadataCount > 0 ? 1 : 0) + (report.annotationAuthorCount > 0 ? 1 : 0);
   }
   if (report.kind === 'png') {
     return report.textKeywords.length + (report.hasExif ? 1 : 0) + (report.hasTimeChunk ? 1 : 0);
   }
   return [report.creator, report.lastModifiedBy, report.created, report.modified, report.title, report.subject, report.description, report.keywords, report.category, report.company, report.manager]
-    .filter((v) => v).length + (report.hasCustomProps ? 1 : 0);
+    .filter((v) => v).length + (report.hasCustomProps ? 1 : 0) + (report.commentAuthorCount > 0 ? 1 : 0);
 }
 
 function fmtBytes(n: number): string {
@@ -884,6 +964,8 @@ export const FileCleanerView: React.FC = () => {
                             <FlagRow label="Idioma declarado (/Lang)" present={item.report.hasLang} />
                             <FlagRow label="Etiquetado de accesibilidad (StructTree)" present={item.report.hasStructTree} />
                             <FlagRow label="Campos de formulario" present={item.report.hasForm} detail={item.report.hasForm ? `${item.report.formFieldCount} campo(s)` : undefined} />
+                            <FlagRow label="XMP por página" present={item.report.pageMetadataCount > 0} detail={item.report.pageMetadataCount > 0 ? `${item.report.pageMetadataCount} página(s)` : undefined} />
+                            <FlagRow label="Autor en anotaciones/comentarios" present={item.report.annotationAuthorCount > 0} detail={item.report.annotationAuthorCount > 0 ? `${item.report.annotationAuthorCount} anotación(es)` : undefined} />
                           </div>
                         </>
                       )}
@@ -914,7 +996,7 @@ export const FileCleanerView: React.FC = () => {
                             ['Título', item.report.title], ['Asunto', item.report.subject],
                             ['Descripción', item.report.description], ['Palabras clave', item.report.keywords],
                             ['Categoría', item.report.category], ['Empresa', item.report.company], ['Administrador', item.report.manager],
-                          ].filter(([, v]) => v).length === 0 && !item.report.hasCustomProps ? (
+                          ].filter(([, v]) => v).length === 0 && !item.report.hasCustomProps && item.report.commentAuthorCount === 0 ? (
                             <p className="text-[11px] italic text-slate-400">Ninguna.</p>
                           ) : (
                             <div className="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100 text-[11px]">
@@ -932,6 +1014,9 @@ export const FileCleanerView: React.FC = () => {
                               ))}
                               {item.report.hasCustomProps && (
                                 <div className="px-2.5 py-1.5 text-amber-700">Tiene propiedades personalizadas adicionales</div>
+                              )}
+                              {item.report.commentAuthorCount > 0 && (
+                                <div className="px-2.5 py-1.5 text-amber-700">{item.report.commentAuthorCount} nombre(s) de autor en comentarios de celda</div>
                               )}
                             </div>
                           )}
