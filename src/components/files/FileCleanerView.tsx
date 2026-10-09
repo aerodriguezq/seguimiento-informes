@@ -209,6 +209,7 @@ export const FileCleanerView: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [isBulkWorking, setIsBulkWorking] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
+  const [selectionNote, setSelectionNote] = useState('');
   const dragCounterRef = React.useRef(0);
 
   const updateItem = (id: string, patch: Partial<FileItem>) => {
@@ -229,6 +230,15 @@ export const FileCleanerView: React.FC = () => {
 
   const addFiles = (incoming: { file: File; relativePath: string }[]) => {
     const pdfs = incoming.filter((f) => f.file.type === 'application/pdf' || f.file.name.toLowerCase().endsWith('.pdf'));
+    if (incoming.length === 0) {
+      setSelectionNote('No se detectó ningún archivo en lo que seleccionaste o arrastraste.');
+      return;
+    }
+    if (pdfs.length === 0) {
+      setSelectionNote(`Se revisaron ${incoming.length} elemento(s), pero ninguno es un PDF -- esta herramienta por ahora solo procesa PDF.`);
+      return;
+    }
+    setSelectionNote('');
     const newItems: FileItem[] = pdfs.map((f) => ({
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       file: f.file,
@@ -429,15 +439,14 @@ export const FileCleanerView: React.FC = () => {
               type="file"
               className="hidden"
               onChange={handleFileInputChange}
-              ref={(el) => {
-                if (el) {
-                  el.setAttribute('webkitdirectory', '');
-                  el.setAttribute('directory', '');
-                }
-              }}
+              {...({ webkitdirectory: '', directory: '', mozdirectory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
             />
           </label>
         </div>
+
+        {selectionNote && (
+          <p className="mt-3 text-[11px] text-rose-600">{selectionNote}</p>
+        )}
       </div>
 
       {items.length > 0 && (
