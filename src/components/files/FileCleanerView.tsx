@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Upload, FileText, AlertTriangle, ShieldAlert, CheckCircle2, Download,
-  XCircle, Info, Lock,
+  XCircle, Info, Lock, FolderOpen, ChevronDown, ChevronRight, Archive, Trash2,
 } from 'lucide-react';
 
 type PdfInfo = {
@@ -125,6 +125,56 @@ function fmtBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+// Camina recursivamente las entradas que entrega el drag-and-drop (incluye
+// carpetas completas) -- la API nativa del navegador solo da acceso a esto
+// vía DataTransferItem.webkitGetAsEntry(), con lectura de directorios
+// paginada (readEntries devuelve como mucho ~100 por llamada).
+async function readDroppedEntries(items: DataTransferItemList): Promise<{ file: File; relativePath: string }[]> {
+  const results: { file: File; relativePath: string }[] = [];
+  const topEntries: any[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const entry = (items[i] as any).webkitGetAsEntry?.();
+    if (entry) topEntries.push(entry);
+  }
+
+  const walk = async (entry: any, prefix: string): Promise<void> => {
+    if (entry.isFile) {
+      const file = await new Promise<File>((resolve, reject) => entry.file(resolve, reject));
+      results.push({ file, relativePath: `${prefix}${entry.name}` });
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const readBatch = (): Promise<any[]> => new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+      let batch = await readBatch();
+      while (batch.length > 0) {
+        for (const child of batch) await walk(child, `${prefix}${entry.name}/`);
+        batch = await readBatch();
+      }
+    }
+  };
+
+  for (const entry of topEntries) await walk(entry, '');
+  return results;
+}
+
+type ItemStatus = 'pending' | 'analyzing' | 'analyzed' | 'cleaning' | 'cleaned' | 'error' | 'skipped';
+
+type FileItem = {
+  id: string;
+  file: File;
+  relativePath: string;
+  status: ItemStatus;
+  report: PdfReport | null;
+  cleanedReport: PdfReport | null;
+  cleanedBytes: Uint8Array | null;
+  sigConfirmed: boolean;
+  error: string | null;
+};
+
+function countTraces(report: PdfReport): number {
+  return [report.hasXMP, report.hasJavaScript, report.hasEmbeddedFiles, report.hasOpenAction, report.hasOutlines, report.hasStructTree, report.hasLang]
+    .filter(Boolean).length + (Object.values(report.info).some((v) => v) ? 1 : 0);
+}
+
 const FlagRow: React.FC<{ label: string; present: boolean; detail?: string }> = ({ label, present, detail }) => (
   <div className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0">
     <span className="text-slate-600">{label}</span>
@@ -135,51 +185,70 @@ const FlagRow: React.FC<{ label: string; present: boolean; detail?: string }> = 
   </div>
 );
 
+function downloadBytes(bytes: Uint8Array, fileName: string) {
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
+function cleanedFileName(relativePath: string): string {
+  const parts = relativePath.split('/');
+  const base = parts.pop() || relativePath;
+  return [...parts, base.replace(/\.pdf$/i, '') + '_limpio.pdf'].join('/');
+}
+
 export const FileCleanerView: React.FC = () => {
-  const [fileName, setFileName] = useState('');
-  const [originalBytes, setOriginalBytes] = useState<Uint8Array | null>(null);
-  const [report, setReport] = useState<PdfReport | null>(null);
-  const [cleanedReport, setCleanedReport] = useState<PdfReport | null>(null);
-  const [cleanedSize, setCleanedSize] = useState<number | null>(null);
-  const [sigConfirmed, setSigConfirmed] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isCleaning, setIsCleaning] = useState(false);
-  const [error, setError] = useState('');
-  const [cleanedReady, setCleanedReady] = useState(false);
+  const [items, setItems] = useState<FileItem[]>([]);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [isDragging, setIsDragging] = useState(false);
+  const [isBulkWorking, setIsBulkWorking] = useState(false);
+  const [isZipping, setIsZipping] = useState(false);
   const dragCounterRef = React.useRef(0);
 
-  const reset = () => {
-    setFileName(''); setOriginalBytes(null); setReport(null); setCleanedReport(null);
-    setCleanedSize(null); setSigConfirmed(false); setError(''); setCleanedReady(false);
+  const updateItem = (id: string, patch: Partial<FileItem>) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
   };
 
-  const processFile = async (file: File) => {
-    reset();
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      setError('Por ahora esta herramienta solo procesa archivos PDF.');
-      return;
-    }
-    setFileName(file.name);
-    setIsAnalyzing(true);
+  const analyzeOne = async (id: string, file: File) => {
+    updateItem(id, { status: 'analyzing' });
     try {
       const buffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
-      setOriginalBytes(bytes);
-      const analyzed = await analyzePdf(bytes);
-      setReport(analyzed);
+      const report = await analyzePdf(bytes);
+      updateItem(id, { status: 'analyzed', report });
     } catch (err) {
-      setError(err instanceof Error ? `No fue posible leer el archivo: ${err.message}` : 'No fue posible leer el archivo.');
-    } finally {
-      setIsAnalyzing(false);
+      updateItem(id, { status: 'error', error: err instanceof Error ? err.message : 'No fue posible leer el archivo.' });
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const addFiles = (incoming: { file: File; relativePath: string }[]) => {
+    const pdfs = incoming.filter((f) => f.file.type === 'application/pdf' || f.file.name.toLowerCase().endsWith('.pdf'));
+    const newItems: FileItem[] = pdfs.map((f) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      file: f.file,
+      relativePath: f.relativePath || f.file.name,
+      status: 'pending',
+      report: null,
+      cleanedReport: null,
+      cleanedBytes: null,
+      sigConfirmed: false,
+      error: null,
+    }));
+    setItems((prev) => [...prev, ...newItems]);
+    newItems.forEach((it) => void analyzeOne(it.id, it.file));
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!file) return;
-    void processFile(file);
+    if (files.length === 0) return;
+    addFiles(files.map((file: File) => ({ file, relativePath: (file as any).webkitRelativePath || file.name })));
   };
 
   const handleDragEnter = (e: React.DragEvent<HTMLLabelElement>) => {
@@ -200,47 +269,119 @@ export const FileCleanerView: React.FC = () => {
     if (dragCounterRef.current === 0) setIsDragging(false);
   };
 
-  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+  const handleDrop = async (e: React.DragEvent<HTMLLabelElement>) => {
     e.preventDefault();
     dragCounterRef.current = 0;
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) void processFile(file);
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0 && (e.dataTransfer.items[0] as any).webkitGetAsEntry) {
+      const entries = await readDroppedEntries(e.dataTransfer.items);
+      addFiles(entries);
+    } else {
+      const files = Array.from(e.dataTransfer.files || []);
+      addFiles(files.map((file: File) => ({ file, relativePath: file.name })));
+    }
   };
 
-  const handleClean = async () => {
-    if (!originalBytes || !fileName) return;
-    if (report?.possibleSignature && !sigConfirmed) return;
-    setIsCleaning(true);
-    setError('');
-    try {
-      const cleaned = await cleanPdf(originalBytes);
-      const verified = await analyzePdf(cleaned);
-      setCleanedReport(verified);
-      setCleanedSize(cleaned.length);
-      setCleanedReady(true);
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
-      const baseName = fileName.replace(/\.pdf$/i, '');
-      const blob = new Blob([cleaned], { type: 'application/pdf' });
+  const handleCleanOne = async (item: FileItem) => {
+    if (!item.report) return;
+    if (item.report.possibleSignature && !item.sigConfirmed) return;
+    updateItem(item.id, { status: 'cleaning' });
+    try {
+      const buffer = await item.file.arrayBuffer();
+      const cleaned = await cleanPdf(new Uint8Array(buffer));
+      const verified = await analyzePdf(cleaned);
+      updateItem(item.id, { status: 'cleaned', cleanedBytes: cleaned, cleanedReport: verified });
+      downloadBytes(cleaned, cleanedFileName(item.relativePath).split('/').pop()!);
+    } catch (err) {
+      updateItem(item.id, { status: 'error', error: err instanceof Error ? err.message : 'No fue posible limpiar el archivo.' });
+    }
+  };
+
+  const handleCleanAllPending = async () => {
+    setIsBulkWorking(true);
+    try {
+      for (const item of items) {
+        if (item.status !== 'analyzed') continue;
+        if (item.report?.possibleSignature && !item.sigConfirmed) continue;
+        updateItem(item.id, { status: 'cleaning' });
+        try {
+          const buffer = await item.file.arrayBuffer();
+          const cleaned = await cleanPdf(new Uint8Array(buffer));
+          const verified = await analyzePdf(cleaned);
+          updateItem(item.id, { status: 'cleaned', cleanedBytes: cleaned, cleanedReport: verified });
+        } catch (err) {
+          updateItem(item.id, { status: 'error', error: err instanceof Error ? err.message : 'No fue posible limpiar el archivo.' });
+        }
+      }
+    } finally {
+      setIsBulkWorking(false);
+    }
+  };
+
+  const handleDownloadZip = async () => {
+    const cleanedItems = items.filter((it) => it.status === 'cleaned' && it.cleanedBytes);
+    if (cleanedItems.length === 0) return;
+    setIsZipping(true);
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      cleanedItems.forEach((it) => {
+        zip.file(cleanedFileName(it.relativePath), it.cleanedBytes as Uint8Array);
+      });
+      const blob = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `${baseName}_limpio.pdf`;
+      anchor.download = `documentos_limpios_${new Date().toISOString().slice(0, 10)}.zip`;
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
       URL.revokeObjectURL(url);
-    } catch (err) {
-      setError(err instanceof Error ? `No fue posible limpiar el archivo: ${err.message}` : 'No fue posible limpiar el archivo.');
     } finally {
-      setIsCleaning(false);
+      setIsZipping(false);
     }
+  };
+
+  const handleRemoveItem = (id: string) => {
+    setItems((prev) => prev.filter((it) => it.id !== id));
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  const handleClearAll = () => {
+    setItems([]);
+    setExpandedIds(new Set());
   };
 
   const infoIsEmpty = (info: PdfInfo) => Object.values(info).every((v) => !v);
 
+  const pendingCount = items.filter((it) => it.status === 'analyzed').length;
+  const cleanedCount = items.filter((it) => it.status === 'cleaned').length;
+
+  const STATUS_BADGE: Record<ItemStatus, { label: string; className: string }> = {
+    pending: { label: 'En cola', className: 'bg-slate-100 text-slate-500' },
+    analyzing: { label: 'Analizando...', className: 'bg-indigo-50 text-indigo-700' },
+    analyzed: { label: 'Analizado', className: 'bg-slate-100 text-slate-600' },
+    cleaning: { label: 'Limpiando...', className: 'bg-indigo-50 text-indigo-700' },
+    cleaned: { label: 'Limpio', className: 'bg-emerald-50 text-emerald-700' },
+    error: { label: 'Error', className: 'bg-rose-50 text-rose-700' },
+    skipped: { label: 'Omitido', className: 'bg-slate-100 text-slate-400' },
+  };
+
   return (
-    <div className="mx-auto max-w-4xl space-y-5 pb-10">
+    <div className="mx-auto max-w-5xl space-y-5 pb-10">
       <div className="bg-white rounded-xl border border-slate-200 p-5">
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg shrink-0 bg-slate-100 text-slate-700">
@@ -249,7 +390,7 @@ export const FileCleanerView: React.FC = () => {
           <div>
             <h2 className="text-sm font-bold text-slate-900">Limpieza de Metadatos de Archivos</h2>
             <p className="text-[11px] text-slate-500">
-              Sube un PDF, revisa qué metadatos trae y descarga una copia limpia. Todo corre en tu navegador -- el archivo nunca se sube a ningún servidor.
+              Sube uno o varios PDF (o una carpeta completa), revisa qué metadatos traen y descarga copias limpias. Todo corre en tu navegador -- los archivos nunca se suben a ningún servidor.
             </p>
           </div>
         </div>
@@ -271,134 +412,206 @@ export const FileCleanerView: React.FC = () => {
           }`}
         >
           <Upload className={`h-6 w-6 ${isDragging ? 'text-indigo-500' : 'text-slate-400'}`} />
-          <span className="text-xs font-semibold text-slate-700">{fileName || 'Elegir archivo PDF'}</span>
-          <span className="text-[10.5px] text-slate-400">{isDragging ? 'Suelta el archivo aquí' : 'Arrastra el archivo aquí, o haz clic para seleccionar'}</span>
-          <input type="file" accept="application/pdf,.pdf" className="hidden" onChange={handleFileChange} />
+          <span className="text-xs font-semibold text-slate-700">
+            {items.length > 0 ? `${items.length} archivo(s) agregado(s)` : 'Elegir archivos PDF'}
+          </span>
+          <span className="text-[10.5px] text-slate-400">
+            {isDragging ? 'Suelta aquí (archivos o carpetas completas)' : 'Arrastra archivos o una carpeta completa, o haz clic para elegir'}
+          </span>
+          <input type="file" accept="application/pdf,.pdf" multiple className="hidden" onChange={handleFileInputChange} />
         </label>
 
-        {isAnalyzing && <p className="mt-3 text-xs text-slate-500">Analizando archivo...</p>}
-        {error && <p className="mt-3 text-xs text-rose-600">{error}</p>}
+        <div className="mt-2.5 flex items-center justify-center">
+          <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-indigo-700 hover:text-indigo-800 cursor-pointer">
+            <FolderOpen className="h-3.5 w-3.5" />
+            O elegir una carpeta completa
+            <input
+              type="file"
+              className="hidden"
+              onChange={handleFileInputChange}
+              ref={(el) => {
+                if (el) {
+                  el.setAttribute('webkitdirectory', '');
+                  el.setAttribute('directory', '');
+                }
+              }}
+            />
+          </label>
+        </div>
       </div>
 
-      {report && (
-        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Diagnóstico del archivo original</h3>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-            <div className="rounded-lg bg-slate-50 border border-slate-100 p-2.5">
-              <span className="block text-slate-400 text-[10.5px]">Páginas</span>
-              <span className="font-bold text-slate-900">{report.pageCount}</span>
-            </div>
-            <div className="rounded-lg bg-slate-50 border border-slate-100 p-2.5">
-              <span className="block text-slate-400 text-[10.5px]">Versión PDF</span>
-              <span className="font-bold text-slate-900">{report.version}</span>
-            </div>
-            <div className="rounded-lg bg-slate-50 border border-slate-100 p-2.5">
-              <span className="block text-slate-400 text-[10.5px]">Tamaño</span>
-              <span className="font-bold text-slate-900">{fmtBytes(report.sizeBytes)}</span>
-            </div>
-            <div className="rounded-lg bg-slate-50 border border-slate-100 p-2.5">
-              <span className="block text-slate-400 text-[10.5px]">Revisiones (%%EOF)</span>
-              <span className="font-bold text-slate-900">{report.revisionCount}</span>
+      {items.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Archivos ({items.length})
+            </h3>
+            <div className="flex items-center gap-2">
+              {pendingCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleCleanAllPending}
+                  disabled={isBulkWorking}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {isBulkWorking ? 'Limpiando...' : `Limpiar ${pendingCount} pendiente(s)`}
+                </button>
+              )}
+              {cleanedCount > 1 && (
+                <button
+                  type="button"
+                  onClick={handleDownloadZip}
+                  disabled={isZipping}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-indigo-700 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 rounded-lg disabled:opacity-50"
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                  {isZipping ? 'Comprimiendo...' : `Descargar ${cleanedCount} en ZIP`}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleClearAll}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-slate-500 hover:text-rose-600 rounded-lg"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Limpiar lista
+              </button>
             </div>
           </div>
 
-          {report.encrypted && (
-            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[11px] text-amber-800 flex items-start gap-1.5">
-              <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              <span>Este PDF parece estar cifrado/protegido. La limpieza puede no funcionar de forma confiable sobre contenido cifrado.</span>
-            </div>
-          )}
-
-          {report.possibleSignature && (
-            <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2.5 text-[11px] text-rose-800 space-y-2">
-              <div className="flex items-start gap-1.5 font-semibold">
-                <ShieldAlert className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                <span>Se detectó un posible rastro de firma digital (/Type /Sig o /ByteRange). Limpiar este archivo probablemente invalide esa firma.</span>
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer pl-5">
-                <input type="checkbox" checked={sigConfirmed} onChange={(e) => setSigConfirmed(e.target.checked)} className="rounded" />
-                <span>Entiendo el riesgo y quiero limpiar el archivo de todas formas.</span>
-              </label>
-            </div>
-          )}
-
-          <div>
-            <p className="text-[11px] font-semibold text-slate-600 mb-1.5">Metadatos encontrados (diccionario /Info)</p>
-            {infoIsEmpty(report.info) ? (
-              <p className="text-[11px] italic text-slate-400">Ninguno.</p>
-            ) : (
-              <div className="rounded-lg border border-slate-200 divide-y divide-slate-100 text-[11px]">
-                {Object.entries(report.info).filter(([, v]) => v).map(([k, v]) => (
-                  <div key={k} className="flex items-start justify-between gap-3 px-2.5 py-1.5">
-                    <span className="text-slate-500 shrink-0">{k}</span>
-                    <span className="text-slate-800 text-right break-all">{v}</span>
+          <div className="divide-y divide-slate-100">
+            {items.map((item) => {
+              const isExpanded = expandedIds.has(item.id);
+              const badge = STATUS_BADGE[item.status];
+              return (
+                <div key={item.id} className="py-2.5">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleExpanded(item.id)}
+                      disabled={!item.report}
+                      className="shrink-0 text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-default"
+                    >
+                      {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-slate-800 truncate" title={item.relativePath}>{item.relativePath}</p>
+                      {item.report && (
+                        <p className="text-[10.5px] text-slate-400">
+                          {item.report.pageCount} pág. · {fmtBytes(item.report.sizeBytes)}
+                          {countTraces(item.report) > 0 && ` · ${countTraces(item.report)} rastro(s)`}
+                          {item.report.possibleSignature && ' · posible firma digital'}
+                        </p>
+                      )}
+                      {item.error && <p className="text-[10.5px] text-rose-600">{item.error}</p>}
+                    </div>
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold ${badge.className}`}>{badge.label}</span>
+                    {item.status === 'cleaned' && item.cleanedBytes && (
+                      <button
+                        type="button"
+                        onClick={() => downloadBytes(item.cleanedBytes as Uint8Array, cleanedFileName(item.relativePath).split('/').pop()!)}
+                        className="shrink-0 text-indigo-600 hover:text-indigo-800"
+                        title="Descargar de nuevo"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveItem(item.id)}
+                      className="shrink-0 text-slate-300 hover:text-rose-600"
+                      title="Quitar de la lista"
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                ))}
-              </div>
-            )}
+
+                  {isExpanded && item.report && (
+                    <div className="mt-3 ml-5 space-y-3 rounded-lg bg-slate-50 border border-slate-100 p-3">
+                      {item.report.encrypted && (
+                        <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[11px] text-amber-800 flex items-start gap-1.5">
+                          <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                          <span>Este PDF parece estar cifrado/protegido. La limpieza puede no funcionar de forma confiable sobre contenido cifrado.</span>
+                        </div>
+                      )}
+
+                      {item.report.possibleSignature && (
+                        <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2.5 text-[11px] text-rose-800 space-y-2">
+                          <div className="flex items-start gap-1.5 font-semibold">
+                            <ShieldAlert className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                            <span>Se detectó un posible rastro de firma digital (/Type /Sig o /ByteRange). Limpiar este archivo probablemente invalide esa firma.</span>
+                          </div>
+                          <label className="flex items-center gap-2 cursor-pointer pl-5">
+                            <input
+                              type="checkbox"
+                              checked={item.sigConfirmed}
+                              onChange={(e) => updateItem(item.id, { sigConfirmed: e.target.checked })}
+                              className="rounded"
+                            />
+                            <span>Entiendo el riesgo y quiero limpiar este archivo de todas formas.</span>
+                          </label>
+                        </div>
+                      )}
+
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-600 mb-1.5">Metadatos encontrados (diccionario /Info)</p>
+                        {infoIsEmpty(item.report.info) ? (
+                          <p className="text-[11px] italic text-slate-400">Ninguno.</p>
+                        ) : (
+                          <div className="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100 text-[11px]">
+                            {Object.entries(item.report.info).filter(([, v]) => v).map(([k, v]) => (
+                              <div key={k} className="flex items-start justify-between gap-3 px-2.5 py-1.5">
+                                <span className="text-slate-500 shrink-0">{k}</span>
+                                <span className="text-slate-800 text-right break-all">{v}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="bg-white rounded-lg border border-slate-200 px-2.5">
+                        <FlagRow label="Metadatos XMP" present={item.report.hasXMP} />
+                        <FlagRow label="JavaScript embebido" present={item.report.hasJavaScript} />
+                        <FlagRow label="Archivos adjuntos incrustados" present={item.report.hasEmbeddedFiles} />
+                        <FlagRow label="Acción automática al abrir (OpenAction)" present={item.report.hasOpenAction} />
+                        <FlagRow label="Marcadores (Outlines)" present={item.report.hasOutlines} />
+                        <FlagRow label="Idioma declarado (/Lang)" present={item.report.hasLang} />
+                        <FlagRow label="Etiquetado de accesibilidad (StructTree)" present={item.report.hasStructTree} />
+                        <FlagRow label="Campos de formulario" present={item.report.hasForm} detail={item.report.hasForm ? `${item.report.formFieldCount} campo(s)` : undefined} />
+                      </div>
+
+                      {item.status === 'cleaned' && item.cleanedReport ? (
+                        <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-[11px] text-emerald-800 flex items-center gap-1.5">
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            Limpio: {item.cleanedReport.pageCount} pág. · {fmtBytes(item.cleanedReport.sizeBytes)}
+                            {infoIsEmpty(item.cleanedReport.info) && !item.cleanedReport.hasXMP ? ' · sin rastros de metadatos' : ''}
+                          </span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void handleCleanOne(item)}
+                          disabled={item.status === 'cleaning' || (item.report.possibleSignature && !item.sigConfirmed)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Download className="h-3 w-3" />
+                          {item.status === 'cleaning' ? 'Limpiando...' : 'Limpiar y descargar este archivo'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
-          <div>
-            <p className="text-[11px] font-semibold text-slate-600 mb-1.5">Otros rastros</p>
-            <div className="text-[11px]">
-              <FlagRow label="Metadatos XMP" present={report.hasXMP} />
-              <FlagRow label="JavaScript embebido" present={report.hasJavaScript} />
-              <FlagRow label="Archivos adjuntos incrustados" present={report.hasEmbeddedFiles} />
-              <FlagRow label="Acción automática al abrir (OpenAction)" present={report.hasOpenAction} />
-              <FlagRow label="Marcadores (Outlines)" present={report.hasOutlines} />
-              <FlagRow label="Idioma declarado (/Lang)" present={report.hasLang} />
-              <FlagRow label="Etiquetado de accesibilidad (StructTree)" present={report.hasStructTree} />
-              <FlagRow label="Campos de formulario" present={report.hasForm} detail={report.hasForm ? `${report.formFieldCount} campo(s)` : undefined} />
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleClean}
-            disabled={isCleaning || (report.possibleSignature && !sigConfirmed)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Download className="h-3.5 w-3.5" />
-            {isCleaning ? 'Limpiando...' : 'Limpiar y descargar'}
-          </button>
-        </div>
-      )}
-
-      {cleanedReady && cleanedReport && report && cleanedSize !== null && (
-        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-            Verificación del archivo limpio
-          </h3>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-[11px] border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-slate-500 text-left">
-                  <th className="px-2.5 py-1.5 font-semibold">Campo</th>
-                  <th className="px-2.5 py-1.5 font-semibold">Original</th>
-                  <th className="px-2.5 py-1.5 font-semibold">Limpio</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                <tr><td className="px-2.5 py-1.5 text-slate-500">Páginas</td><td className="px-2.5 py-1.5">{report.pageCount}</td><td className="px-2.5 py-1.5">{cleanedReport.pageCount} {cleanedReport.pageCount === report.pageCount ? <CheckCircle2 className="inline h-3 w-3 text-emerald-600 ml-1" /> : <XCircle className="inline h-3 w-3 text-rose-600 ml-1" />}</td></tr>
-                <tr><td className="px-2.5 py-1.5 text-slate-500">Tamaño</td><td className="px-2.5 py-1.5">{fmtBytes(report.sizeBytes)}</td><td className="px-2.5 py-1.5">{fmtBytes(cleanedSize)}</td></tr>
-                <tr><td className="px-2.5 py-1.5 text-slate-500">Metadatos /Info</td><td className="px-2.5 py-1.5">{infoIsEmpty(report.info) ? 'Ninguno' : 'Presentes'}</td><td className="px-2.5 py-1.5">{infoIsEmpty(cleanedReport.info) ? <span className="text-emerald-700 font-semibold">Ninguno ✓</span> : <span className="text-rose-600 font-semibold">Aún presentes</span>}</td></tr>
-                <tr><td className="px-2.5 py-1.5 text-slate-500">XMP</td><td className="px-2.5 py-1.5">{report.hasXMP ? 'Sí' : 'No'}</td><td className="px-2.5 py-1.5">{cleanedReport.hasXMP ? <span className="text-rose-600 font-semibold">Aún presente</span> : <span className="text-emerald-700 font-semibold">Eliminado ✓</span>}</td></tr>
-                <tr><td className="px-2.5 py-1.5 text-slate-500">JavaScript / adjuntos</td><td className="px-2.5 py-1.5">{report.hasJavaScript || report.hasEmbeddedFiles ? 'Sí' : 'No'}</td><td className="px-2.5 py-1.5">{cleanedReport.hasJavaScript || cleanedReport.hasEmbeddedFiles ? <span className="text-rose-600 font-semibold">Aún presente</span> : <span className="text-emerald-700 font-semibold">Eliminado ✓</span>}</td></tr>
-                <tr><td className="px-2.5 py-1.5 text-slate-500">Revisiones (%%EOF)</td><td className="px-2.5 py-1.5">{report.revisionCount}</td><td className="px-2.5 py-1.5">{cleanedReport.revisionCount}</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-[11px] text-slate-600 space-y-1.5">
-            <p className="font-semibold text-slate-700">Qué se eliminó</p>
-            <p>Diccionario /Info completo (autor, título, productor, fechas...), metadatos XMP, JavaScript embebido, adjuntos incrustados, acción automática al abrir, marcadores, idioma declarado y el árbol de etiquetado de accesibilidad.</p>
-            <p className="font-semibold text-slate-700 pt-1">Qué se pierde</p>
-            <p>El etiquetado de accesibilidad (lectores de pantalla) y los marcadores de navegación, si el PDF los tenía. El contenido visible y el texto de cada página no se tocan.</p>
+          <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-[11px] text-slate-600 space-y-1">
+            <p className="font-semibold text-slate-700">Qué se elimina de cada archivo</p>
+            <p>Diccionario /Info completo (autor, título, productor, fechas...), metadatos XMP, JavaScript embebido, adjuntos incrustados, acción automática al abrir, marcadores, idioma declarado y el árbol de etiquetado de accesibilidad. El contenido visible y el texto de cada página no se tocan.</p>
             <p className="font-semibold text-slate-700 pt-1">Rastros que esto NO elimina</p>
-            <p>El nombre del archivo, los atributos del sistema operativo (fecha de creación/modificación en el Finder, no dentro del PDF), ni copias que ya hayas enviado por correo o subido a otro lado. Tampoco se verificó render píxel a píxel entre el original y el limpio, ni se linealizó o se le fijó un /ID determinístico al archivo -- esas partes del proceso no se replicaron aquí.</p>
+            <p>El nombre del archivo, los atributos del sistema operativo, ni copias ya enviadas por correo o subidas a otro lado. No se verifica render píxel a píxel entre el original y el limpio, ni se linealiza o se fija un /ID determinístico.</p>
           </div>
         </div>
       )}
