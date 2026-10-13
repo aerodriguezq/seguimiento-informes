@@ -84,7 +84,7 @@ async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
   `) as any[];
 
   const historyRows = (await sql`
-    SELECT informe_id AS "reportId", estado AS status, fecha_evento AS date, usuario_nombre AS "userName", comentario AS comment
+    SELECT informe_id AS "reportId", estado AS status, fecha_evento AS date, usuario_nombre AS "userName", comentario AS comment, correo_link AS "emailLink"
     FROM seguimiento_informe
     WHERE informe_id = ANY(${ids})
     ORDER BY fecha_evento ASC
@@ -105,15 +105,19 @@ async function fetchReportsByIds(sql: SqlClient, ids: number[]) {
 
   // Fase 1 del motor de etapas: fechas calculadas + estado por paso (no
   // solo el paso actual), para poder ver la cadena completa de un informe.
-  const stageInstanceRows = (await sql`
+  const stageInstanceRows = ((await sql`
     SELECT ipi.informe_id AS "reportId", ipi.paso_id AS "stepId", wp.nombre AS "stepName", wp.orden AS "order",
       TO_CHAR(ipi.fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(ipi.fecha_limite, 'YYYY-MM-DD') AS "dueDate",
-      ipi.estado_etapa AS status, ipi.fecha_recepcion_real AS "receivedAt", ipi.correo_remitente AS "fromEmail"
+      ipi.estado_etapa AS status, ipi.fecha_recepcion_real AS "receivedAt", ipi.correo_remitente AS "fromEmail",
+      ipi.correo_gmail_id AS "messageId"
     FROM informe_pasos_instancia ipi
     JOIN tipo_informe_pasos wp ON wp.paso_id = ipi.paso_id
     WHERE ipi.informe_id = ANY(${ids})
     ORDER BY wp.orden ASC
-  `) as any[];
+  `) as any[]).map((row: any) => ({
+    ...row,
+    emailLink: row.messageId ? `https://mail.google.com/mail/u/0/#all/${row.messageId}` : null,
+  }));
 
   return reportRows.map((report: any) => {
     const contacts = contactRows.filter((c: any) => c.reportId === report.id);
@@ -588,7 +592,7 @@ async function advanceReportStep(
 ): Promise<void> {
   const [current] = (await sql`
     SELECT i.proyecto_id AS "projectId", i.tipo_informe_id AS "typeId", i.paso_actual_id AS "currentStepId",
-           i.mes_nombre AS "monthName", i.anio AS "year",
+           i.mes_nombre AS "monthName", i.anio AS "year", p.nombre AS "currentStepName",
            p.orden AS "currentOrder", p.es_final AS "isFinal", p.proyecto_id AS "stepScope"
     FROM informes i
     LEFT JOIN tipo_informe_pasos p ON p.paso_id = i.paso_actual_id
@@ -603,6 +607,24 @@ async function advanceReportStep(
 
   await sql`UPDATE alertas SET activa = FALSE, updated_at = NOW() WHERE informe_id = ${reportId} AND paso_id = ${current.currentStepId}`;
   await finalizeStepInstance(sql, reportId, current.currentStepId, resolvedDelivery);
+
+  // Deja rastro en el Historial de Trazabilidad de cada correo que el
+  // barrido de detección usó para avanzar un paso, con el link directo al
+  // correo en Gmail -- así se puede auditar/abrir cualquier entrega
+  // detectada automáticamente sin tener que buscarla a mano en la bandeja.
+  if (resolvedDelivery.messageId) {
+    const emailLink = `https://mail.google.com/mail/u/0/#all/${resolvedDelivery.messageId}`;
+    const fromNote = resolvedDelivery.fromEmail ? ` de ${resolvedDelivery.fromEmail}` : '';
+    await sql`
+      INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario, correo_link)
+      VALUES (
+        COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+        ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), ${resolvedDelivery.receivedAt.toISOString()},
+        'Sistema (detección automática)',
+        ${`Correo detectado para "${current.currentStepName}"${fromNote}.`}, ${emailLink}
+      )
+    `;
+  }
 
   if (current.isFinal) {
     await sql`UPDATE informes SET flujo_completado = TRUE, estado = 'Enviado', updated_at = NOW() WHERE informe_id = ${reportId}`;

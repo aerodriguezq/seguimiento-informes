@@ -49,6 +49,7 @@ export interface ReportStageInstance {
   status: string;
   receivedAt: string | null;
   fromEmail: string | null;
+  emailLink: string | null;
 }
 
 export interface Contact {
@@ -101,6 +102,7 @@ export interface StatusTransition {
   date: string;
   userName: string;
   comment: string;
+  emailLink?: string | null;
 }
 
 export interface ReportAttachment {

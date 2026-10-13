@@ -547,6 +547,17 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                           </td>
                           <td className="py-2.5 px-3 text-slate-600">
                             {stage.receivedAt ? new Date(stage.receivedAt).toLocaleString('es-CO') : '—'}
+                            {stage.emailLink && (
+                              <a
+                                href={stage.emailLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Ver correo en Gmail"
+                                className="ml-1.5 inline-flex items-center text-indigo-600 hover:text-indigo-800"
+                              >
+                                <Send className="h-3 w-3" />
+                              </a>
+                            )}
                           </td>
                           {user.isAdmin && (
                             <td className="py-2.5 px-3 text-right">
@@ -962,6 +973,17 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                     <p className="text-slate-600 mt-0.5 text-xs bg-white p-2 rounded border border-slate-100">
                       "{hist.comment}"
                     </p>
+                    {hist.emailLink && (
+                      <a
+                        href={hist.emailLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+                      >
+                        <Send className="h-3 w-3" />
+                        Ver correo en Gmail
+                      </a>
+                    )}
                   </div>
                 ))}
               </div>
