@@ -477,6 +477,18 @@ export default function App() {
     showToast('Fechas de la etapa actualizadas.', 'success');
   };
 
+  const handleDeleteReportStageProgress = async (reportId: string, stepId: string) => {
+    const response = await fetch('/api/reports', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'deleteStageProgress', reportId, stepId: Number(stepId) }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el avance de la etapa.');
+    setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+    showToast('Avance de la etapa eliminado. Queda pendiente de nuevo.', 'success');
+  };
+
   const handleSetCurrentStep = async (reportId: string, stepId: string, comment: string) => {
     const response = await fetch('/api/reports', {
       method: 'PATCH',
@@ -1231,6 +1243,7 @@ export default function App() {
           onConfirmCandidateEmail={handleConfirmCandidateEmail}
           onEditReport={handleEditReport}
           onEditReportStage={handleEditReportStage}
+          onDeleteReportStageProgress={handleDeleteReportStageProgress}
           onDeleteReport={handleDeleteReport}
           onToggleContactAlarm={handleToggleContactAlarm}
           onSetPrimaryContact={handleSetPrimaryContact}

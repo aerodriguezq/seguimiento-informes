@@ -1094,6 +1094,34 @@ export default async function handler(request: VercelRequest, response: VercelRe
         UPDATE informe_pasos_instancia SET fecha_inicio = ${nextStart}, fecha_limite = ${nextDue}, updated_at = NOW()
         WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
       `;
+    } else if (action === 'deleteStageProgress') {
+      // Deja una etapa que ya se había marcado como recibida (a tiempo,
+      // tarde, no recibida, o en revisión) de vuelta en "pendiente" -- para
+      // cuando se confirmó el correo equivocado o se avanzó por error. No
+      // toca el paso actual del informe ni mueve el flujo: solo borra el
+      // registro de avance de ESTA etapa puntual. No borra el Historial de
+      // Trazabilidad ni las evidencias ya adjuntas (eso es un registro de
+      // auditoría, no se elimina).
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede eliminar el avance de una etapa.'] });
+      }
+      const { stepId } = request.body ?? {};
+      const stepIdNum = Number(stepId);
+      if (!Number.isInteger(stepIdNum) || stepIdNum <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Falta el id del paso.'] });
+      }
+      const existingStage = (await sql`
+        SELECT 1 FROM informe_pasos_instancia WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
+      `) as any[];
+      if (!existingStage[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Esta etapa todavía no tiene una instancia generada para este informe.'] });
+      }
+      await sql`
+        UPDATE informe_pasos_instancia
+        SET estado_etapa = 'ALERTA_GENERADA', fecha_recepcion_real = NULL, correo_gmail_id = NULL,
+          correo_remitente = NULL, ultimo_recordatorio_en = NULL, updated_at = NOW()
+        WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
+      `;
     } else if (action === 'setCurrentStep') {
       // Reemplaza el viejo "cambiar estado manualmente" (que movía un estado
       // administrativo genérico de 4 valores, desconectado del flujo real):

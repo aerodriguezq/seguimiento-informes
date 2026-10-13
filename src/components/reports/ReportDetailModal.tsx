@@ -56,6 +56,7 @@ interface ReportDetailModalProps {
   onConfirmCandidateEmail: (reportId: string, messageId: string) => Promise<void>;
   onEditReport: (reportId: string, updates: { month?: string; dueDate?: string; contactIds?: string[]; primaryContactId?: string; observations?: string }) => Promise<void>;
   onEditReportStage: (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null }) => Promise<void>;
+  onDeleteReportStageProgress: (reportId: string, stepId: string) => Promise<void>;
   onDeleteReport: (reportId: string) => Promise<void>;
   onToggleContactAlarm: (contactId: string, enabled: boolean) => Promise<void>;
   onSimulateTrigger: (alert: ScheduledAlert) => Promise<void>;
@@ -76,6 +77,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   onConfirmCandidateEmail,
   onEditReport,
   onEditReportStage,
+  onDeleteReportStageProgress,
   onDeleteReport,
   onToggleContactAlarm,
   onSimulateTrigger,
@@ -91,6 +93,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [stageStartInput, setStageStartInput] = useState('');
   const [stageDueInput, setStageDueInput] = useState('');
   const [isSavingStage, setIsSavingStage] = useState(false);
+  const [deletingStageId, setDeletingStageId] = useState<string | null>(null);
   const [togglingAlarmId, setTogglingAlarmId] = useState<string | null>(null);
   const [settingPrimaryId, setSettingPrimaryId] = useState<string | null>(null);
   const [sendingAlertId, setSendingAlertId] = useState<string | null>(null);
@@ -212,6 +215,16 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
       setEditingStageId(null);
     } finally {
       setIsSavingStage(false);
+    }
+  };
+
+  const handleDeleteStageProgress = async (stepId: string, stepName: string) => {
+    if (!window.confirm(`¿Eliminar el avance registrado de "${stepName}"? Vuelve a quedar como pendiente, sin fecha de recepción ni correo asociado. Esto no borra el historial de trazabilidad ni las evidencias ya adjuntas.`)) return;
+    setDeletingStageId(stepId);
+    try {
+      await onDeleteReportStageProgress(report.id, stepId);
+    } finally {
+      setDeletingStageId(null);
     }
   };
 
@@ -678,14 +691,27 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                                   </button>
                                 </div>
                               ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => openEditStage(stage.stepId, stage.startDate, stage.dueDate)}
-                                  className="text-slate-400 hover:text-teal-700"
-                                  title="Editar fechas de la etapa"
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </button>
+                                <div className="flex items-center justify-end gap-2">
+                                  {['RECIBIDA_A_TIEMPO', 'RECIBIDA_TARDE', 'NO_RECIBIDA', 'EN_REVISION'].includes(stage.status) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleDeleteStageProgress(stage.stepId, stage.stepName)}
+                                      disabled={deletingStageId === stage.stepId}
+                                      className="text-slate-400 hover:text-rose-600 disabled:opacity-50"
+                                      title="Eliminar el avance de esta etapa (vuelve a quedar pendiente)"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditStage(stage.stepId, stage.startDate, stage.dueDate)}
+                                    className="text-slate-400 hover:text-teal-700"
+                                    title="Editar fechas de la etapa"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
                               )}
                             </td>
                           )}
