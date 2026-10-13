@@ -687,7 +687,9 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
 
                 <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
                   <span className="text-slate-500 block">Fecha de Registro:</span>
-                  <span className="font-bold text-slate-900 mt-1 block">{report.createdAt}</span>
+                  <span className="font-bold text-slate-900 mt-1 block" title={report.createdAt}>
+                    {new Date(report.createdAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}
+                  </span>
                   <span className="text-[11px] text-slate-500">Sistema centralizado</span>
                 </div>
 
@@ -942,8 +944,8 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                         <FileText className="w-5 h-5 text-indigo-600 shrink-0" />
                         <div className="min-w-0">
                           <div className="font-semibold text-slate-900 truncate">{att.name}</div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            Subido por {att.uploadedBy} el {att.uploadedAt}
+                          <div className="text-[10px] text-slate-400 mt-0.5" title={att.uploadedAt}>
+                            Subido por {att.uploadedBy} el {new Date(att.uploadedAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}
                           </div>
                         </div>
                       </div>
