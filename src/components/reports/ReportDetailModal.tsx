@@ -967,7 +967,9 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                     <div className="absolute -left-8 top-3 w-3 h-3 rounded-full bg-indigo-600 border-2 border-white ring-2 ring-slate-200" />
                     <div className="flex items-center justify-between">
                       <StatusBadge status={hist.status} size="sm" />
-                      <span className="text-[10px] font-mono text-slate-400">{hist.date}</span>
+                      <span className="text-[10.5px] text-slate-400" title={hist.date}>
+                        {new Date(hist.date).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}
+                      </span>
                     </div>
                     <p className="font-semibold text-slate-800 mt-1.5">{hist.userName}</p>
                     <p className="text-slate-600 mt-0.5 text-xs bg-white p-2 rounded border border-slate-100">
