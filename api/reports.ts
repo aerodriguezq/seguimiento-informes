@@ -1,12 +1,20 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../server/google-drive.js';
-import { findDeliveryEmail } from '../server/google-gmail.js';
+import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery } from '../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
 import { isAdminRequest, canEditModuleRequest } from '../server/admin-auth.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
-const MONTHS_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
+  const session = (await sql`
+    SELECT token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
+  `) as any[];
+  if (!session[0]) return null;
+  return getDriveAccessToken(session[0].token_json);
+}
+
+const MONTHS_ES =['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 function nextMonthYear(monthName: string, year: number) {
   const idx = MONTHS_ES.indexOf(monthName);
@@ -1142,6 +1150,61 @@ export default async function handler(request: VercelRequest, response: VercelRe
         return response.status(400).json({ data: null, meta: {}, errors: ['Ese contacto no está entre los responsables de este informe.'] });
       }
       await sql`UPDATE informe_contacto SET es_principal = (contacto_id = ${contactIdNum}) WHERE informe_id = ${reportId}`;
+    } else if (action === 'searchCandidateEmails') {
+      // Cuando el asunto exacto no calzó (ej. alguien reenvió con "Fwd: ..."
+      // en vez del asunto codificado), esto ofrece correos parecidos de los
+      // mismos responsables para que una persona revise y confirme cuál,
+      // si alguno, es la entrega real -- nunca avanza el flujo solo.
+      const [current] = (await sql`
+        SELECT i.paso_actual_id AS "stepId", i.updated_at AS "stepStartedAt"
+        FROM informes i WHERE i.informe_id = ${reportId}
+      `) as any[];
+      if (!current?.stepId) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Este informe no tiene un paso de flujo activo.'] });
+      }
+      const accessToken = await getConnectedAccessToken(sql);
+      if (!accessToken) {
+        return response.status(503).json({ data: null, meta: {}, errors: ['Conecta una cuenta de Google (Fuentes Drive) para poder buscar correos.'] });
+      }
+      const contactRows = (await sql`
+        SELECT c.email FROM tipo_informe_paso_contacto tpc
+        JOIN contactos c ON c.contacto_id = tpc.contacto_id
+        WHERE tpc.paso_id = ${current.stepId} AND c.email IS NOT NULL AND c.email <> ''
+      `) as any[];
+      const candidates = await findCandidateEmails(accessToken, contactRows.map((c: any) => c.email), new Date(current.stepStartedAt));
+      return response.status(200).json({ data: { candidates }, meta: {}, errors: [] });
+    } else if (action === 'confirmCandidateEmail') {
+      const { messageId } = request.body ?? {};
+      if (!messageId || typeof messageId !== 'string') {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Falta el id del correo a confirmar.'] });
+      }
+      const accessToken = await getConnectedAccessToken(sql);
+      if (!accessToken) {
+        return response.status(503).json({ data: null, meta: {}, errors: ['Conecta una cuenta de Google (Fuentes Drive) para poder confirmar el correo.'] });
+      }
+      const delivery = await fetchMessageAsDelivery(accessToken, messageId);
+      if (delivery.driveUrl) {
+        await sql`
+          INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
+          VALUES (
+            COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
+            ${reportId}, 'Evidencia confirmada manualmente desde correo', ${delivery.driveUrl},
+            ${delivery.fromEmail || 'Confirmación manual'}, NOW()
+          )
+        `;
+      }
+      try {
+        await advanceReportStep(sql, reportId, {
+          receivedAt: delivery.receivedAt ? new Date(delivery.receivedAt) : new Date(),
+          messageId,
+          fromEmail: delivery.fromEmail,
+        });
+      } catch (error) {
+        if (error instanceof NoWorkflowStepError) {
+          return response.status(400).json({ data: null, meta: {}, errors: [error.message] });
+        }
+        throw error;
+      }
     } else if (action === 'attachment') {
       const { attachment, userName } = request.body ?? {};
       if (!attachment?.name || !attachment?.driveUrl) {

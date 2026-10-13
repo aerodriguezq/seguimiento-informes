@@ -14,6 +14,7 @@ import {
   Empresa,
   AreaConsolida,
   PeticionesConfig,
+  EmailCandidate,
 } from './types';
 import {
   getSemaforoStatus,
@@ -525,6 +526,30 @@ export default function App() {
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'No fue posible avanzar el paso.', 'info');
     }
+  };
+
+  const handleSearchCandidateEmails = async (reportId: string): Promise<EmailCandidate[]> => {
+    const response = await fetch('/api/reports', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'searchCandidateEmails', reportId }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible buscar correos.');
+    return payload.data.candidates || [];
+  };
+
+  const handleConfirmCandidateEmail = async (reportId: string, messageId: string) => {
+    const response = await fetch('/api/reports', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'confirmCandidateEmail', reportId, messageId }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible confirmar el correo.');
+    setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+    await refetchAlerts();
+    showToast('Correo confirmado. El paso del flujo avanzó.', 'success');
   };
 
   // Project settings
@@ -1202,6 +1227,8 @@ export default function App() {
           onSetCurrentStep={handleSetCurrentStep}
           onAddAttachment={handleAddReportAttachment}
           onAdvanceStep={handleAdvanceReportStep}
+          onSearchCandidateEmails={handleSearchCandidateEmails}
+          onConfirmCandidateEmail={handleConfirmCandidateEmail}
           onEditReport={handleEditReport}
           onEditReportStage={handleEditReportStage}
           onDeleteReport={handleDeleteReport}

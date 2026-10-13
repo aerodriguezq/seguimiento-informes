@@ -391,3 +391,76 @@ export async function findDeliveryEmail(
 
   return { found: true, driveUrl, fromEmail, messageId, receivedAt, ambiguous, matchCount };
 }
+
+export type EmailCandidate = {
+  messageId: string;
+  subject: string;
+  from: string;
+  receivedAt: string | null;
+  snippet: string;
+};
+
+// Cuando la búsqueda exacta por asunto no encuentra nada (ej. el remitente
+// reenvió con un asunto distinto al esperado, como "Fwd: ..."), esto sirve
+// de respaldo: lista los últimos correos de los contactos responsables
+// desde que empezó el paso, SIN asumir que alguno es el correcto. Queda en
+// manos de quien lo revise confirmar cuál (si alguno) es la entrega real.
+export async function findCandidateEmails(
+  accessToken: string,
+  fromEmails: string[],
+  afterDate: Date,
+  maxResults = 8,
+): Promise<EmailCandidate[]> {
+  if (fromEmails.length === 0) return [];
+  const afterSeconds = Math.floor(afterDate.getTime() / 1000);
+  const senderQuery = `(${fromEmails.map((email) => `from:${email}`).join(' OR ')})`;
+  const query = `${senderQuery} after:${afterSeconds}`;
+  const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`;
+  const listResponse = await fetch(listUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!listResponse.ok) {
+    const payload = await listResponse.json().catch(() => null);
+    const detail = payload?.error?.message || payload?.error?.status || JSON.stringify(payload);
+    throw new Error(`Gmail respondió ${listResponse.status} al buscar correos: ${detail}`);
+  }
+  const listPayload = await listResponse.json();
+  const messages = listPayload.messages ?? [];
+
+  const candidates: EmailCandidate[] = [];
+  for (const m of messages) {
+    const detailUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From`;
+    const detailResponse = await fetch(detailUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!detailResponse.ok) continue;
+    const detail = await detailResponse.json();
+    const headers = detail.payload?.headers ?? [];
+    const subject = headers.find((h: any) => h.name === 'Subject')?.value || '(sin asunto)';
+    const fromHeader = headers.find((h: any) => h.name === 'From')?.value || '';
+    const from = fromHeader.match(/<([^>]+)>/)?.[1] || fromHeader;
+    const receivedAt = detail.internalDate ? new Date(Number(detail.internalDate)).toISOString() : null;
+    candidates.push({ messageId: m.id, subject, from, receivedAt, snippet: detail.snippet || '' });
+  }
+  return candidates;
+}
+
+// Para cuando alguien confirma a mano cuál de los candidatos es la entrega
+// real -- reconstruye los mismos datos que findDeliveryEmail hubiera
+// devuelto si el asunto hubiera calzado exacto (link de Drive, remitente,
+// fecha real de recepción).
+export async function fetchMessageAsDelivery(
+  accessToken: string,
+  messageId: string,
+): Promise<{ driveUrl: string | null; fromEmail: string | null; receivedAt: string | null }> {
+  const detailUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`;
+  const detailResponse = await fetch(detailUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!detailResponse.ok) {
+    const payload = await detailResponse.json().catch(() => null);
+    const detail = payload?.error?.message || payload?.error?.status || JSON.stringify(payload);
+    throw new Error(`Gmail respondió ${detailResponse.status} al leer el correo: ${detail}`);
+  }
+  const detail = await detailResponse.json();
+  const fromHeader = detail.payload?.headers?.find((h: any) => h.name === 'From')?.value || '';
+  const fromEmail = fromHeader.match(/<([^>]+)>/)?.[1] || fromHeader || null;
+  const bodyText = extractPlainText(detail.payload);
+  const driveUrl = bodyText.match(DRIVE_URL_PATTERN)?.[0] || null;
+  const receivedAt = detail.internalDate ? new Date(Number(detail.internalDate)).toISOString() : null;
+  return { driveUrl, fromEmail, receivedAt };
+}

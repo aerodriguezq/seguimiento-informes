@@ -228,3 +228,14 @@ export interface PeticionesConfig {
   driveRootFolderId: string | null;
   driveRootFolderUrl: string | null;
 }
+
+// Correo "parecido" que la búsqueda de respaldo ofrece cuando el asunto
+// exacto esperado no calzó con nada -- queda en manos de la persona
+// confirmar si alguno de estos sí corresponde a la entrega real.
+export interface EmailCandidate {
+  messageId: string;
+  subject: string;
+  from: string;
+  receivedAt: string | null;
+  snippet: string;
+}

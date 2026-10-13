@@ -6,6 +6,7 @@ import {
   ScheduledAlert,
   ReportAttachment,
   ReportTypeStep,
+  EmailCandidate,
 } from '../../types';
 import {
   calculateDaysRemaining,
@@ -23,6 +24,7 @@ import {
   Building2,
   FileText,
   Clock,
+  Search,
   CheckCircle,
   Users,
   Bell,
@@ -50,6 +52,8 @@ interface ReportDetailModalProps {
   onSetCurrentStep: (reportId: string, stepId: string, comment: string) => Promise<void>;
   onAddAttachment: (reportId: string, attachment: ReportAttachment) => void;
   onAdvanceStep: (reportId: string) => Promise<void>;
+  onSearchCandidateEmails: (reportId: string) => Promise<EmailCandidate[]>;
+  onConfirmCandidateEmail: (reportId: string, messageId: string) => Promise<void>;
   onEditReport: (reportId: string, updates: { month?: string; dueDate?: string; contactIds?: string[]; primaryContactId?: string; observations?: string }) => Promise<void>;
   onEditReportStage: (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null }) => Promise<void>;
   onDeleteReport: (reportId: string) => Promise<void>;
@@ -68,6 +72,8 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   onSetCurrentStep,
   onAddAttachment,
   onAdvanceStep,
+  onSearchCandidateEmails,
+  onConfirmCandidateEmail,
   onEditReport,
   onEditReportStage,
   onDeleteReport,
@@ -77,6 +83,10 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
 }) => {
   const { user, canEdit } = useAuth();
   const [isAdvancingStep, setIsAdvancingStep] = useState(false);
+  const [isSearchingCandidates, setIsSearchingCandidates] = useState(false);
+  const [candidateEmails, setCandidateEmails] = useState<EmailCandidate[] | null>(null);
+  const [candidateSearchError, setCandidateSearchError] = useState('');
+  const [confirmingMessageId, setConfirmingMessageId] = useState<string | null>(null);
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
   const [stageStartInput, setStageStartInput] = useState('');
   const [stageDueInput, setStageDueInput] = useState('');
@@ -132,6 +142,31 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
       await onAdvanceStep(report.id);
     } finally {
       setIsAdvancingStep(false);
+    }
+  };
+
+  const handleSearchCandidates = async () => {
+    setIsSearchingCandidates(true);
+    setCandidateSearchError('');
+    try {
+      const results = await onSearchCandidateEmails(report.id);
+      setCandidateEmails(results);
+    } catch (err) {
+      setCandidateSearchError(err instanceof Error ? err.message : 'No fue posible buscar correos.');
+    } finally {
+      setIsSearchingCandidates(false);
+    }
+  };
+
+  const handleConfirmCandidate = async (messageId: string) => {
+    setConfirmingMessageId(messageId);
+    try {
+      await onConfirmCandidateEmail(report.id, messageId);
+      setCandidateEmails(null);
+    } catch (err) {
+      setCandidateSearchError(err instanceof Error ? err.message : 'No fue posible confirmar ese correo.');
+    } finally {
+      setConfirmingMessageId(null);
     }
   };
   const [showTransitionModal, setShowTransitionModal] = useState(false);
@@ -458,36 +493,96 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
 
           {/* Flujo de entrega por correo (pasos configurados en el tipo de informe) */}
           {(report.currentStepId || report.isWorkflowCompleted) && (
-            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">Flujo de entrega por correo</span>
-                {report.isWorkflowCompleted ? (
-                  <p className="mt-1 text-sm font-bold text-emerald-700">Flujo completado — se entregó al contacto final.</p>
-                ) : (
-                  <>
-                    <p className="mt-1 text-sm font-bold text-indigo-950">
-                      Paso actual: {report.currentStepName}
-                      {report.currentStepIsFinal && <span className="ml-2 text-[11px] font-semibold text-emerald-700">(paso final)</span>}
-                    </p>
-                    {report.currentStepEmailSubject && (
-                      <p className="mt-1 text-xs text-indigo-800">
-                        Asunto de correo esperado: <span className="font-mono font-bold">"{report.currentStepEmailSubject}"</span>
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">Flujo de entrega por correo</span>
+                  {report.isWorkflowCompleted ? (
+                    <p className="mt-1 text-sm font-bold text-emerald-700">Flujo completado — se entregó al contacto final.</p>
+                  ) : (
+                    <>
+                      <p className="mt-1 text-sm font-bold text-indigo-950">
+                        Paso actual: {report.currentStepName}
+                        {report.currentStepIsFinal && <span className="ml-2 text-[11px] font-semibold text-emerald-700">(paso final)</span>}
                       </p>
-                    )}
-                  </>
+                      {report.currentStepEmailSubject && (
+                        <p className="mt-1 text-xs text-indigo-800">
+                          Asunto de correo esperado: <span className="font-mono font-bold">"{report.currentStepEmailSubject}"</span>
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+                {!report.isWorkflowCompleted && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSearchCandidates}
+                      disabled={isSearchingCandidates}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-indigo-300 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Busca correos parecidos de los responsables, por si el asunto exacto no calzó (ej. un reenvío)"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      <span>{isSearchingCandidates ? 'Buscando...' : 'Buscar posibles correos'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAdvanceStep}
+                      disabled={isAdvancingStep}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Marca este paso como entregado manualmente"
+                    >
+                      <span>{isAdvancingStep ? 'Actualizando...' : report.currentStepIsFinal ? 'Confirmar entrega final' : 'Confirmar entrega y avanzar'}</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
               </div>
-              {!report.isWorkflowCompleted && (
-                <button
-                  type="button"
-                  onClick={handleAdvanceStep}
-                  disabled={isAdvancingStep}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                  title="Marca este paso como entregado manualmente (hasta que la detección automática de correo esté lista)"
-                >
-                  <span>{isAdvancingStep ? 'Actualizando...' : report.currentStepIsFinal ? 'Confirmar entrega final' : 'Confirmar entrega y avanzar'}</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
+
+              {candidateSearchError && (
+                <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">{candidateSearchError}</p>
+              )}
+
+              {candidateEmails && (
+                <div className="space-y-2">
+                  {candidateEmails.length === 0 ? (
+                    <p className="text-xs text-indigo-800 bg-white border border-indigo-200 rounded-lg px-3 py-2">
+                      No se encontró ningún correo reciente de los responsables de este paso.
+                    </p>
+                  ) : (
+                    candidateEmails.map((candidate) => (
+                      <div key={candidate.messageId} className="bg-white border border-indigo-200 rounded-lg p-3 text-xs space-y-1.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="font-semibold text-slate-900 truncate" title={candidate.subject}>{candidate.subject}</p>
+                          <span className="text-[10.5px] text-slate-400 shrink-0">
+                            {candidate.receivedAt ? new Date(candidate.receivedAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : ''}
+                          </span>
+                        </div>
+                        <p className="text-slate-500">De: {candidate.from}</p>
+                        {candidate.snippet && <p className="text-slate-500 italic truncate">"{candidate.snippet}"</p>}
+                        <div className="flex items-center gap-3 pt-1">
+                          <a
+                            href={`https://mail.google.com/mail/u/0/#all/${candidate.messageId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-semibold"
+                          >
+                            <Send className="w-3 h-3" />
+                            Ver correo
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => void handleConfirmCandidate(candidate.messageId)}
+                            disabled={confirmingMessageId !== null}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {confirmingMessageId === candidate.messageId ? 'Confirmando...' : 'Confirmar y avanzar con este correo'}
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               )}
             </div>
           )}
