@@ -135,64 +135,37 @@ export function emptyDriveCopySummary(): DriveCopySummary {
   return { copiedFiles: 0, skippedFiles: 0, createdFolders: 0, reusedFolders: 0, errors: 0 };
 }
 
-// En vez de acumular cada archivo/carpeta en un arreglo compartido que
-// crece sin límite y se reenvía entero en cada invocación (lo que colapsaba
-// con una sola carpeta de origen que tuviera miles de archivos directos),
-// cada item de origen queda como su propia fila en drive_copy_items. La
-// cola entre invocaciones solo necesita guardar qué CARPETAS faltan por
-// listar (fase de escaneo) -- mucho más liviano.
-export type DriveScanQueueItem = { sourceId: string; parentItemId: number | null; relativePath: string };
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
-export function initialDriveScanQueue(sourceRootId: string): DriveScanQueueItem[] {
-  return [{ sourceId: sourceRootId, parentItemId: null, relativePath: '' }];
+// Trae metadatos de un solo archivo/carpeta de origen -- se usa una vez,
+// para sembrar la fila raíz del job antes de arrancar a copiar.
+export async function getDriveFileMeta(accessToken: string, fileId: string): Promise<DriveFile> {
+  return driveRequest<DriveFile>(accessToken, `/files/${fileId}?fields=id,name,mimeType&supportsAllDrives=true`);
 }
 
-// Fase 1 (barrido inicial): solo lista el árbol de origen y lo vuelca como
-// filas "pending" en drive_copy_items -- no copia nada todavía. Mucho más
-// rápido que la copia real, pero igual se trocea por si el árbol tiene
-// muchísimas carpetas.
-export async function scanDriveTreeChunk(
-  sql: SqlClient,
-  accessToken: string,
-  jobId: string,
-  scanQueue: DriveScanQueueItem[],
-  deadline: number,
-): Promise<{ scanQueue: DriveScanQueueItem[]; done: boolean }> {
-  while (scanQueue.length) {
-    if (Date.now() > deadline) return { scanQueue, done: false };
-    const current = scanQueue.shift()!;
-
-    const source = await driveRequest<DriveFile>(accessToken, `/files/${current.sourceId}?fields=id,name,mimeType&supportsAllDrives=true`);
-    const relativePath = current.relativePath ? `${current.relativePath}/${source.name}` : source.name;
-    const isFolder = source.mimeType === 'application/vnd.google-apps.folder';
-
-    const [row] = (await sql`
-      INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
-      VALUES (${jobId}, ${current.sourceId}, ${current.parentItemId}, ${isFolder}, ${source.name}, ${source.mimeType}, ${relativePath})
-      RETURNING item_id AS id
-    `) as any[];
-    const itemId = Number(row.id);
-
-    if (isFolder) {
-      const children = await listDriveChildren(accessToken, current.sourceId);
-      for (const child of children) {
-        scanQueue.push({ sourceId: child.id, parentItemId: itemId, relativePath });
-      }
-    }
-  }
-  return { scanQueue, done: true };
+// Siembra la fila raíz (sin padre) de la que arranca todo el copiado.
+export async function seedDriveCopyRoot(sql: SqlClient, jobId: string, accessToken: string, sourceRootId: string): Promise<void> {
+  const source = await getDriveFileMeta(accessToken, sourceRootId);
+  const isFolder = source.mimeType === FOLDER_MIME;
+  await sql`
+    INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
+    VALUES (${jobId}, ${sourceRootId}, NULL, ${isFolder}, ${source.name}, ${source.mimeType}, ${source.name})
+  `;
 }
 
 const COPY_BATCH_SELECT_SIZE = 25;
 
-// Fase 2 (copia por lotes): toma filas "pending" cuyo padre ya se resolvió
-// en destino (o que son la raíz), las procesa, y repite hasta vaciar lo
-// disponible o toparse con `deadline`/cancelación. Si algo se rompe a
-// mitad de camino, lo único que se pierde es el lote en curso -- la
-// siguiente invocación retoma consultando qué filas siguen "pending", sin
-// necesidad de reconstruir ni reenviar nada.
 export type DriveCopyRecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'copied' | 'skipped' | 'error' };
 
+// Copia Y descubre en el mismo paso -- nunca lee el árbol completo de
+// origen por adelantado. Cada vez que resuelve una carpeta, de una vez
+// lista y encola sus hijos directos, así que el primer archivo se copia
+// apenas se conoce, sin esperar a saber cuántos hay en total. Toma filas
+// "pending" cuyo padre ya se resolvió en destino (o que son la raíz), las
+// procesa, y repite hasta vaciar lo disponible o toparse con
+// `deadline`/cancelación. Si algo se rompe a mitad de camino, lo único que
+// se pierde es el lote en curso -- la siguiente invocación retoma
+// consultando qué filas siguen "pending", sin reconstruir ni reenviar nada.
 export async function copyDriveItemsBatch(
   sql: SqlClient,
   accessToken: string,
@@ -259,15 +232,28 @@ export async function copyDriveItemsBatch(
       try {
         if (item.isFolder) {
           const siblings = await getDestChildren(destParentId);
-          const existing = siblings.find((f) => f.name === item.name && f.mimeType === 'application/vnd.google-apps.folder');
+          const existing = siblings.find((f) => f.name === item.name && f.mimeType === FOLDER_MIME);
           const destFolder = existing ?? (await driveRequest<DriveFile>(accessToken, '/files?supportsAllDrives=true', {
             method: 'POST',
-            body: JSON.stringify({ name: item.name, mimeType: 'application/vnd.google-apps.folder', parents: [destParentId] }),
+            body: JSON.stringify({ name: item.name, mimeType: FOLDER_MIME, parents: [destParentId] }),
           }));
           if (existing) summary.reusedFolders++;
           else summary.createdFolders++;
           await sql`UPDATE drive_copy_items SET status = 'copied', dest_id = ${destFolder.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
           recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'copied' });
+
+          // Recién ahora que la carpeta quedó resuelta en destino se listan
+          // sus hijos y se encolan como filas "pending" -- el descubrimiento
+          // avanza al mismo ritmo que la copia, nunca por adelantado.
+          const sourceChildren = await listDriveChildren(accessToken, item.sourceId);
+          for (const child of sourceChildren) {
+            const childPath = `${item.relativePath}/${child.name}`;
+            const childIsFolder = child.mimeType === FOLDER_MIME;
+            await sql`
+              INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
+              VALUES (${jobId}, ${child.id}, ${item.id}, ${childIsFolder}, ${child.name}, ${child.mimeType}, ${childPath})
+            `;
+          }
         } else {
           const siblings = await getDestChildren(destParentId);
           const existing = siblings.find((f) => f.name === item.name && f.mimeType === item.mimeType);

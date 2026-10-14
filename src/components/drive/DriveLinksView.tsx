@@ -204,14 +204,10 @@ export const DriveLinksView: React.FC = () => {
           setLiveLog((prev) => [...prev, ...result.recentItems]);
         }
 
-        if (result.phase === 'scanning') {
-          setCopyProgress({
-            percent: 3,
-            processed: 0,
-            total: 0,
-            phase: `Haciendo un barrido inicial del origen... ${result.itemsFound ?? 0} elemento(s) encontrados`,
-          });
-        } else {
+        {
+          // El total crece a medida que se descubren más carpetas -- no se
+          // conoce de antemano, así que el porcentaje es solo una
+          // referencia aproximada mientras la copia sigue en curso.
           const processed = result.copiedFiles + result.skippedFiles + (result.errors ?? 0);
           const total = result.total ?? processed;
           setCopyProgress({
@@ -272,7 +268,7 @@ export const DriveLinksView: React.FC = () => {
           percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
           processed,
           total,
-          phase: result.phase === 'scanning' ? 'Retomando el barrido inicial...' : `Retomando... ${processed} de ${total} elemento(s) procesados`,
+          phase: `Retomando... ${processed} de ${total} elemento(s) procesados`,
         });
         if (result.done || result.cancelled) {
           clearSavedCopyJob();
