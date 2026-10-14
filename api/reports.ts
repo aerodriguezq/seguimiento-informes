@@ -1138,8 +1138,12 @@ export default async function handler(request: VercelRequest, response: VercelRe
       // devuelve queda limpio (vuelve a "pendiente", como si no se hubiera
       // recibido nada) y se le avisa por correo a sus responsables, con la
       // observación escrita, para que sepan qué corregir.
-      if (!(await isAdminRequest(request, sql))) {
-        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede cambiar el paso actual manualmente.'] });
+      // Cualquier persona con permiso de edición en Informes puede devolver
+      // un paso con observación (es la acción que más se usa día a día);
+      // mover el paso hacia ADELANTE o a uno sin relación sigue reservado a
+      // administradores, porque eso puede saltarse o descuadrar el flujo.
+      if (!(await canEditModuleRequest(request, sql, 'reports'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Informes.'] });
       }
       const { stepId, comment, userName } = request.body ?? {};
       const stepIdNum = Number(stepId);
@@ -1169,7 +1173,10 @@ export default async function handler(request: VercelRequest, response: VercelRe
       const [currentStep] = report.currentStepId
         ? ((await sql`SELECT nombre AS name, orden AS "order" FROM tipo_informe_pasos WHERE paso_id = ${report.currentStepId}`) as any[])
         : [];
-      const isReturning = currentStep?.order != null && Number(currentStep.order) < Number(step.order);
+      const isReturning = currentStep?.order != null && Number(step.order) < Number(currentStep.order);
+      if (!isReturning && !(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede mover el paso actual a uno que no sea una devolución al paso anterior.'] });
+      }
       if (isReturning && !(comment || '').trim()) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Escribe la observación por la cual se devuelve al paso anterior.'] });
       }

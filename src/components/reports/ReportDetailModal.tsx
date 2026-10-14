@@ -815,22 +815,36 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                 </div>
 
                 {scopedFlowSteps.length > 0 && report.currentStepId ? (
-                  user.isAdmin && (
-                    <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
-                      <span className="text-slate-500 block">Cambiar paso actual manualmente:</span>
-                      <select
-                        value={report.currentStepId}
-                        onChange={(e) => handleOpenStepTransition(e.target.value)}
-                        className="w-full mt-1 px-2 py-1 border border-slate-200 rounded text-xs bg-slate-50 font-semibold"
-                      >
-                        {[...scopedFlowSteps].sort((a, b) => a.order - b.order).map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.order}. {s.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )
+                  (user.isAdmin || canEdit('reports')) && (() => {
+                    // Quien no es admin solo puede DEVOLVER a un paso anterior
+                    // con observación -- mover hacia adelante o a un paso sin
+                    // relación queda reservado a administradores (el backend
+                    // aplica la misma regla, esto evita un 403 confuso).
+                    const currentOrder = scopedFlowSteps.find((s) => s.id === report.currentStepId)?.order;
+                    const selectableSteps = user.isAdmin
+                      ? scopedFlowSteps
+                      : scopedFlowSteps.filter((s) => currentOrder != null && s.order < currentOrder);
+                    if (selectableSteps.length === 0) return null;
+                    return (
+                      <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
+                        <span className="text-slate-500 block">
+                          {user.isAdmin ? 'Cambiar paso actual manualmente:' : 'Devolver a un paso anterior con observación:'}
+                        </span>
+                        <select
+                          value={user.isAdmin ? report.currentStepId : ''}
+                          onChange={(e) => { if (e.target.value) handleOpenStepTransition(e.target.value); }}
+                          className="w-full mt-1 px-2 py-1 border border-slate-200 rounded text-xs bg-slate-50 font-semibold"
+                        >
+                          {!user.isAdmin && <option value="">Seleccionar paso...</option>}
+                          {[...selectableSteps].sort((a, b) => a.order - b.order).map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.order}. {s.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })()
                 ) : (
                   <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
                     <span className="text-slate-500 block">Cambiar estado manualmente:</span>
