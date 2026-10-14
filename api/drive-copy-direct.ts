@@ -4,9 +4,12 @@ import { getSql } from '../server/db.js';
 import {
   getDriveAccessToken,
   copyDriveItemsBatch,
+  validateDriveItemsBatch,
   seedDriveCopyRoot,
   emptyDriveCopySummary,
+  emptyDriveValidateSummary,
   type DriveCopySummary,
+  type DriveValidateSummary,
   type DriveCopyLogEntry,
 } from '../server/google-drive.js';
 
@@ -79,14 +82,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
         return response.status(400).json({ data: null, meta: {}, errors: ['Los enlaces de origen y destino no son carpetas Drive válidas.'] });
       }
       jobId = crypto.randomUUID();
+      const isValidate = action === 'validate';
       // Solo se siembra la fila raíz -- nunca se lee el árbol completo por
       // adelantado. El resto se va descubriendo lote a lote a medida que se
-      // copia, en server/google-drive.ts.
+      // copia (o se valida), en server/google-drive.ts.
       await sql`
         INSERT INTO drive_copy_jobs (job_id, status, phase, scan_queue, summary, log, source_root_id, destination_root_id)
         VALUES (
-          ${jobId}, 'running', 'copying', '[]'::jsonb,
-          ${JSON.stringify(emptyDriveCopySummary())}::jsonb, '[]'::jsonb, ${sourceId}, ${destinationId}
+          ${jobId}, 'running', ${isValidate ? 'validating' : 'copying'}, '[]'::jsonb,
+          ${JSON.stringify(isValidate ? emptyDriveValidateSummary() : emptyDriveCopySummary())}::jsonb, '[]'::jsonb, ${sourceId}, ${destinationId}
         )
       `;
       await seedDriveCopyRoot(sql, jobId, accessToken, sourceId);
@@ -102,8 +106,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
     }
 
     const deadline = Date.now() + CHUNK_BUDGET_MS;
-    const summary: DriveCopySummary = job.summary;
-    const result = await copyDriveItemsBatch(sql, accessToken, jobId, job.destinationRootId, summary, deadline, () => connectionClosed);
+    const isValidate = job.phase === 'validating';
+    const nextPhase = isValidate ? 'validating' : 'copying';
+    const result = isValidate
+      ? await validateDriveItemsBatch(sql, accessToken, jobId, job.destinationRootId, job.summary as DriveValidateSummary, deadline, () => connectionClosed)
+      : await copyDriveItemsBatch(sql, accessToken, jobId, job.destinationRootId, job.summary as DriveCopySummary, deadline, () => connectionClosed);
 
     if (result.cancelled) {
       await sql`
@@ -135,7 +142,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
     await sql`UPDATE drive_copy_jobs SET summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW() WHERE job_id = ${jobId}`;
     return response.status(200).json({
-      data: { jobId, done: false, cancelled: false, phase: 'copying', total: Number(total), ...result.summary, recentItems: result.recentItems },
+      data: { jobId, done: false, cancelled: false, phase: nextPhase, total: Number(total), ...result.summary, recentItems: result.recentItems },
       meta: {}, errors: [],
     });
   } catch (error) {

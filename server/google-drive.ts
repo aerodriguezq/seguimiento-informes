@@ -313,3 +313,155 @@ export async function copyDriveItemsBatch(
     }
   }
 }
+
+// Descubre y encola los hijos de ORIGEN de una carpeta -- compartido entre
+// copia real y validación: en ambas hace falta ver qué hay adentro, la
+// única diferencia es si después se escribe algo en destino o no.
+async function discoverSourceChildren(
+  sql: SqlClient,
+  accessToken: string,
+  jobId: string,
+  item: { id: number; sourceId: string; relativePath: string },
+): Promise<void> {
+  const sourceChildren = await listDriveChildren(accessToken, item.sourceId);
+  if (sourceChildren.length === 0) return;
+  const rows = sourceChildren.map((child) => ({
+    source_id: child.id,
+    parent_item_id: item.id,
+    is_folder: child.mimeType === FOLDER_MIME,
+    name: child.name,
+    mime_type: child.mimeType,
+    relative_path: `${item.relativePath}/${child.name}`,
+  }));
+  await sql`
+    INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
+    SELECT ${jobId}, r.source_id, r.parent_item_id, r.is_folder, r.name, r.mime_type, r.relative_path
+    FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
+      AS r(source_id text, parent_item_id bigint, is_folder boolean, name text, mime_type text, relative_path text)
+  `;
+}
+
+export type DriveValidateSummary = { missingFiles: number; missingFolders: number; existingFiles: number; existingFolders: number; errors: number };
+
+export function emptyDriveValidateSummary(): DriveValidateSummary {
+  return { missingFiles: 0, missingFolders: 0, existingFiles: 0, existingFolders: 0, errors: 0 };
+}
+
+export type DriveValidateRecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'missing' | 'exists' | 'error'; errorMessage?: string };
+
+const VALIDATE_BATCH_SELECT_SIZE = 25;
+
+// Recorrido de solo lectura: nunca crea ni copia nada en destino, solo
+// compara contra lo que ya hay y clasifica cada archivo/carpeta de origen
+// como "exists" (ya está) o "missing" (falta por copiar). Si una carpeta
+// falta, todo lo de adentro también falta por definición -- se marca en
+// cascada sin gastar una consulta a Drive por cada hijo (no hay una carpeta
+// real en destino de la que listar contenido).
+export async function validateDriveItemsBatch(
+  sql: SqlClient,
+  accessToken: string,
+  jobId: string,
+  destinationRootId: string,
+  summary: DriveValidateSummary,
+  deadline: number,
+  isCancelled: () => boolean = () => false,
+): Promise<{ summary: DriveValidateSummary; done: boolean; cancelled: boolean; recentItems: DriveValidateRecentItem[] }> {
+  const destChildrenCache = new Map<string, DriveFile[]>();
+  const getDestChildren = async (destFolderId: string): Promise<DriveFile[]> => {
+    const cached = destChildrenCache.get(destFolderId);
+    if (cached) return cached;
+    const children = await listDriveChildren(accessToken, destFolderId);
+    destChildrenCache.set(destFolderId, children);
+    return children;
+  };
+
+  const recentItems: DriveValidateRecentItem[] = [];
+
+  while (true) {
+    if (isCancelled()) return { summary, done: false, cancelled: true, recentItems };
+    if (Date.now() > deadline) return { summary, done: false, cancelled: false, recentItems };
+
+    const items = (await sql`
+      SELECT ci.item_id AS id, ci.source_id AS "sourceId", ci.parent_item_id AS "parentItemId",
+        ci.is_folder AS "isFolder", ci.name, ci.mime_type AS "mimeType", ci.relative_path AS "relativePath",
+        parent.dest_id AS "parentDestId", parent.status AS "parentStatus"
+      FROM drive_copy_items ci
+      LEFT JOIN drive_copy_items parent ON parent.item_id = ci.parent_item_id
+      WHERE ci.job_id = ${jobId} AND ci.status = 'pending'
+        AND (ci.parent_item_id IS NULL OR parent.status IN ('exists', 'missing'))
+      ORDER BY ci.is_folder DESC, ci.item_id ASC
+      LIMIT ${VALIDATE_BATCH_SELECT_SIZE}
+    `) as any[];
+
+    if (items.length === 0) {
+      const [{ pendingCount }] = (await sql`
+        SELECT COUNT(*) AS "pendingCount" FROM drive_copy_items WHERE job_id = ${jobId} AND status = 'pending'
+      `) as any[];
+      if (Number(pendingCount) > 0) {
+        const blocked = (await sql`
+          UPDATE drive_copy_items SET status = 'error', error_message = 'No se pudo validar la carpeta superior.', updated_at = NOW()
+          WHERE job_id = ${jobId} AND status = 'pending'
+          RETURNING item_id, name, relative_path AS "relativePath", is_folder AS "isFolder"
+        `) as any[];
+        summary.errors += blocked.length;
+        for (const row of blocked) {
+          recentItems.push({ name: row.name, relativePath: row.relativePath, isFolder: !!row.isFolder, status: 'error', errorMessage: 'No se pudo validar la carpeta superior.' });
+        }
+      }
+      return { summary, done: true, cancelled: false, recentItems };
+    }
+
+    for (const item of items) {
+      if (isCancelled()) return { summary, done: false, cancelled: true, recentItems };
+      if (Date.now() > deadline) return { summary, done: false, cancelled: false, recentItems };
+
+      const parentIsMissing = item.parentItemId !== null && item.parentStatus === 'missing';
+      const destParentId: string | null = item.parentItemId === null ? destinationRootId : item.parentDestId;
+
+      try {
+        if (parentIsMissing) {
+          if (item.isFolder) summary.missingFolders++; else summary.missingFiles++;
+          await sql`UPDATE drive_copy_items SET status = 'missing', updated_at = NOW() WHERE item_id = ${item.id}`;
+          recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: !!item.isFolder, status: 'missing' });
+          if (item.isFolder) await discoverSourceChildren(sql, accessToken, jobId, item);
+          continue;
+        }
+
+        if (item.isFolder) {
+          const siblings = await getDestChildren(destParentId!);
+          const existing = siblings.find((f) => f.name === item.name && f.mimeType === FOLDER_MIME);
+          if (existing) {
+            summary.existingFolders++;
+            await sql`UPDATE drive_copy_items SET status = 'exists', dest_id = ${existing.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
+            recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'exists' });
+          } else {
+            summary.missingFolders++;
+            await sql`UPDATE drive_copy_items SET status = 'missing', updated_at = NOW() WHERE item_id = ${item.id}`;
+            recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'missing' });
+          }
+          await discoverSourceChildren(sql, accessToken, jobId, item);
+        } else {
+          const siblings = await getDestChildren(destParentId!);
+          const existing = siblings.find((f) => f.name === item.name && f.mimeType === item.mimeType);
+          if (existing) {
+            summary.existingFiles++;
+            await sql`UPDATE drive_copy_items SET status = 'exists', dest_id = ${existing.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
+            recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: false, status: 'exists' });
+          } else {
+            summary.missingFiles++;
+            await sql`UPDATE drive_copy_items SET status = 'missing', updated_at = NOW() WHERE item_id = ${item.id}`;
+            recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: false, status: 'missing' });
+          }
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        summary.errors++;
+        await sql`
+          UPDATE drive_copy_items SET status = 'error', error_message = ${errorMessage}, updated_at = NOW()
+          WHERE item_id = ${item.id}
+        `;
+        recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: !!item.isFolder, status: 'error', errorMessage });
+      }
+    }
+  }
+}
