@@ -8,9 +8,10 @@ type DriveCopyLogEntry = {
   type: 'folder' | 'file';
   mimeType: string;
   status: 'copied' | 'skipped' | 'error';
+  errorMessage?: string | null;
 };
 
-type RecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'copied' | 'skipped' | 'error' };
+type RecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'copied' | 'skipped' | 'error'; errorMessage?: string | null };
 
 const STATUS_LABELS: Record<DriveCopyLogEntry['status'], string> = {
   copied: 'Copiado',
@@ -78,8 +79,8 @@ const csvCell = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
 const downloadCopyReportCsv = (log: DriveCopyLogEntry[]) => {
   const rows = [
-    ['Ruta', 'Nombre', 'Tipo', 'Estado'],
-    ...log.map((entry) => [entry.path, entry.name, entry.type === 'folder' ? 'Carpeta' : 'Archivo', STATUS_LABELS[entry.status]]),
+    ['Ruta', 'Nombre', 'Tipo', 'Estado', 'Detalle del error'],
+    ...log.map((entry) => [entry.path, entry.name, entry.type === 'folder' ? 'Carpeta' : 'Archivo', STATUS_LABELS[entry.status], entry.errorMessage ?? '']),
   ];
   const csvContent = rows.map((row) => row.map(csvCell).join(',')).join('\n');
   const blob = new Blob([`﻿${csvContent}`], { type: 'text/csv;charset=utf-8;' });
@@ -453,7 +454,7 @@ export const DriveLinksView: React.FC = () => {
                         <span className={`shrink-0 font-bold ${item.status === 'error' ? 'text-rose-600' : item.status === 'skipped' ? 'text-slate-400' : 'text-emerald-700'}`}>
                           {item.status === 'error' ? '✕' : item.status === 'skipped' ? '·' : '✓'}
                         </span>
-                        <span className="truncate text-slate-700" title={item.relativePath}>{item.name}{item.isFolder ? '/' : ''}</span>
+                        <span className="truncate text-slate-700" title={item.errorMessage ?? item.relativePath}>{item.name}{item.isFolder ? '/' : ''}</span>
                       </div>
                     ))}
                   </div>

@@ -127,6 +127,7 @@ export type DriveCopyLogEntry = {
   type: 'folder' | 'file';
   mimeType: string;
   status: 'copied' | 'skipped' | 'error';
+  errorMessage?: string | null;
 };
 
 export type DriveCopySummary = { copiedFiles: number; skippedFiles: number; createdFolders: number; reusedFolders: number; errors: number };
@@ -155,7 +156,7 @@ export async function seedDriveCopyRoot(sql: SqlClient, jobId: string, accessTok
 
 const COPY_BATCH_SELECT_SIZE = 25;
 
-export type DriveCopyRecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'copied' | 'skipped' | 'error' };
+export type DriveCopyRecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'copied' | 'skipped' | 'error'; errorMessage?: string };
 
 // Copia Y descubre en el mismo paso -- nunca lee el árbol completo de
 // origen por adelantado. Cada vez que resuelve una carpeta, de una vez
@@ -217,9 +218,12 @@ export async function copyDriveItemsBatch(
         const blocked = (await sql`
           UPDATE drive_copy_items SET status = 'error', error_message = 'La carpeta superior no se pudo copiar.', updated_at = NOW()
           WHERE job_id = ${jobId} AND status = 'pending'
-          RETURNING item_id
+          RETURNING item_id, name, relative_path AS "relativePath", is_folder AS "isFolder"
         `) as any[];
         summary.errors += blocked.length;
+        for (const row of blocked) {
+          recentItems.push({ name: row.name, relativePath: row.relativePath, isFolder: !!row.isFolder, status: 'error', errorMessage: 'La carpeta superior no se pudo copiar.' });
+        }
       }
       return { summary, done: true, cancelled: false, recentItems };
     }
@@ -244,15 +248,29 @@ export async function copyDriveItemsBatch(
 
           // Recién ahora que la carpeta quedó resuelta en destino se listan
           // sus hijos y se encolan como filas "pending" -- el descubrimiento
-          // avanza al mismo ritmo que la copia, nunca por adelantado.
-          const sourceChildren = await listDriveChildren(accessToken, item.sourceId);
-          for (const child of sourceChildren) {
-            const childPath = `${item.relativePath}/${child.name}`;
-            const childIsFolder = child.mimeType === FOLDER_MIME;
+          // avanza al mismo ritmo que la copia, nunca por adelantado. Esto va
+          // en su propio try/catch: si falla, la carpeta YA quedó copiada (no
+          // hay que deshacer eso) -- solo se deja constancia de que no se
+          // pudo ver su contenido, sin tocar el estado 'copied' de la fila
+          // original.
+          try {
+            const sourceChildren = await listDriveChildren(accessToken, item.sourceId);
+            for (const child of sourceChildren) {
+              const childPath = `${item.relativePath}/${child.name}`;
+              const childIsFolder = child.mimeType === FOLDER_MIME;
+              await sql`
+                INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
+                VALUES (${jobId}, ${child.id}, ${item.id}, ${childIsFolder}, ${child.name}, ${child.mimeType}, ${childPath})
+              `;
+            }
+          } catch (discoveryError) {
+            const errorMessage = discoveryError instanceof Error ? discoveryError.message : String(discoveryError);
+            summary.errors++;
             await sql`
-              INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
-              VALUES (${jobId}, ${child.id}, ${item.id}, ${childIsFolder}, ${child.name}, ${child.mimeType}, ${childPath})
+              INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path, status, error_message)
+              VALUES (${jobId}, ${item.sourceId}, ${item.parentItemId}, true, ${item.name}, ${item.mimeType}, ${item.relativePath}, 'error', ${`No se pudo listar su contenido: ${errorMessage}`})
             `;
+            recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'error', errorMessage: `No se pudo listar su contenido: ${errorMessage}` });
           }
         } else {
           const siblings = await getDestChildren(destParentId);
@@ -272,12 +290,13 @@ export async function copyDriveItemsBatch(
           }
         }
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         summary.errors++;
         await sql`
-          UPDATE drive_copy_items SET status = 'error', error_message = ${error instanceof Error ? error.message : String(error)}, updated_at = NOW()
+          UPDATE drive_copy_items SET status = 'error', error_message = ${errorMessage}, updated_at = NOW()
           WHERE item_id = ${item.id}
         `;
-        recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: !!item.isFolder, status: 'error' });
+        recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: !!item.isFolder, status: 'error', errorMessage });
       }
     }
   }

@@ -58,7 +58,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       if (!statusJob) return response.status(404).json({ data: null, meta: {}, errors: ['Esta copia ya no existe (puede haber expirado).'] });
       const [{ total }] = (await sql`SELECT COUNT(*) AS total FROM drive_copy_items WHERE job_id = ${jobId}`) as any[];
       const doneRows = (await sql`
-        SELECT name, relative_path AS "relativePath", is_folder AS "isFolder", status
+        SELECT name, relative_path AS "relativePath", is_folder AS "isFolder", status, error_message AS "errorMessage"
         FROM drive_copy_items WHERE job_id = ${jobId} AND status <> 'pending' ORDER BY item_id ASC
       `) as any[];
       return response.status(200).json({
@@ -121,11 +121,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
         WHERE job_id = ${jobId}
       `;
       const logRows = (await sql`
-        SELECT relative_path AS path, name, is_folder AS "isFolder", mime_type AS "mimeType", status
+        SELECT relative_path AS path, name, is_folder AS "isFolder", mime_type AS "mimeType", status, error_message AS "errorMessage"
         FROM drive_copy_items WHERE job_id = ${jobId} ORDER BY item_id ASC
       `) as any[];
       const log: DriveCopyLogEntry[] = logRows.map((r) => ({
-        path: r.path, name: r.name, type: r.isFolder ? 'folder' : 'file', mimeType: r.mimeType, status: r.status,
+        path: r.path, name: r.name, type: r.isFolder ? 'folder' : 'file', mimeType: r.mimeType, status: r.status, errorMessage: r.errorMessage,
       }));
       return response.status(200).json({
         data: { jobId, done: true, cancelled: false, phase: 'done', total: Number(total), ...result.summary, log, recentItems: result.recentItems },
