@@ -51,6 +51,27 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return response.status(200).json({ data: { cancelled: true }, meta: {}, errors: [] });
     }
 
+    // Solo lectura -- no avanza nada. Sirve para reconstruir el progreso y
+    // el log completo de un job en curso al recargar la página, en vez de
+    // arrancar en blanco hasta el próximo poll.
+    if (action === 'status') {
+      if (!jobId) return response.status(400).json({ data: null, meta: {}, errors: ['Falta jobId.'] });
+      const [statusJob] = (await sql`SELECT status, phase, summary FROM drive_copy_jobs WHERE job_id = ${jobId}`) as any[];
+      if (!statusJob) return response.status(404).json({ data: null, meta: {}, errors: ['Esta copia ya no existe (puede haber expirado).'] });
+      const [{ total }] = (await sql`SELECT COUNT(*) AS total FROM drive_copy_items WHERE job_id = ${jobId}`) as any[];
+      const doneRows = (await sql`
+        SELECT name, relative_path AS "relativePath", is_folder AS "isFolder", status
+        FROM drive_copy_items WHERE job_id = ${jobId} AND status <> 'pending' ORDER BY item_id ASC
+      `) as any[];
+      return response.status(200).json({
+        data: {
+          jobId, phase: statusJob.phase, cancelled: statusJob.status === 'cancelled', done: statusJob.status === 'done',
+          total: Number(total), ...statusJob.summary, recentItems: doneRows,
+        },
+        meta: {}, errors: [],
+      });
+    }
+
     if (!jobId) {
       const sourceId = folderIdFromUrl(request.body?.sourceUrl);
       const destinationId = folderIdFromUrl(request.body?.destinationUrl);
@@ -114,7 +135,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
         UPDATE drive_copy_jobs SET status = 'cancelled', phase = 'cancelled', summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW()
         WHERE job_id = ${jobId}
       `;
-      return response.status(200).json({ data: { jobId, done: true, cancelled: true, ...result.summary }, meta: {}, errors: [] });
+      return response.status(200).json({ data: { jobId, done: true, cancelled: true, ...result.summary, recentItems: result.recentItems }, meta: {}, errors: [] });
     }
 
     const [{ total }] = (await sql`SELECT COUNT(*) AS total FROM drive_copy_items WHERE job_id = ${jobId}`) as any[];
@@ -132,14 +153,14 @@ export default async function handler(request: VercelRequest, response: VercelRe
         path: r.path, name: r.name, type: r.isFolder ? 'folder' : 'file', mimeType: r.mimeType, status: r.status,
       }));
       return response.status(200).json({
-        data: { jobId, done: true, cancelled: false, phase: 'done', total: Number(total), ...result.summary, log },
+        data: { jobId, done: true, cancelled: false, phase: 'done', total: Number(total), ...result.summary, log, recentItems: result.recentItems },
         meta: {}, errors: [],
       });
     }
 
     await sql`UPDATE drive_copy_jobs SET summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW() WHERE job_id = ${jobId}`;
     return response.status(200).json({
-      data: { jobId, done: false, cancelled: false, phase: 'copying', total: Number(total), ...result.summary },
+      data: { jobId, done: false, cancelled: false, phase: 'copying', total: Number(total), ...result.summary, recentItems: result.recentItems },
       meta: {}, errors: [],
     });
   } catch (error) {

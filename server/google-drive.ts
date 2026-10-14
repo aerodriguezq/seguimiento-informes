@@ -191,6 +191,8 @@ const COPY_BATCH_SELECT_SIZE = 25;
 // mitad de camino, lo único que se pierde es el lote en curso -- la
 // siguiente invocación retoma consultando qué filas siguen "pending", sin
 // necesidad de reconstruir ni reenviar nada.
+export type DriveCopyRecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'copied' | 'skipped' | 'error' };
+
 export async function copyDriveItemsBatch(
   sql: SqlClient,
   accessToken: string,
@@ -199,7 +201,7 @@ export async function copyDriveItemsBatch(
   summary: DriveCopySummary,
   deadline: number,
   isCancelled: () => boolean = () => false,
-): Promise<{ summary: DriveCopySummary; done: boolean; cancelled: boolean }> {
+): Promise<{ summary: DriveCopySummary; done: boolean; cancelled: boolean; recentItems: DriveCopyRecentItem[] }> {
   const destChildrenCache = new Map<string, DriveFile[]>();
   const getDestChildren = async (destFolderId: string): Promise<DriveFile[]> => {
     const cached = destChildrenCache.get(destFolderId);
@@ -209,13 +211,19 @@ export async function copyDriveItemsBatch(
     return children;
   };
 
+  // Los items que esta invocación procesó -- el llamador los agrega a un
+  // log en vivo que se ve crecer en pantalla a medida que corre, en vez de
+  // solo un contador que avanza sin explicar qué está copiando.
+  const recentItems: DriveCopyRecentItem[] = [];
+
   while (true) {
-    if (isCancelled()) return { summary, done: false, cancelled: true };
-    if (Date.now() > deadline) return { summary, done: false, cancelled: false };
+    if (isCancelled()) return { summary, done: false, cancelled: true, recentItems };
+    if (Date.now() > deadline) return { summary, done: false, cancelled: false, recentItems };
 
     const items = (await sql`
       SELECT ci.item_id AS id, ci.source_id AS "sourceId", ci.parent_item_id AS "parentItemId",
-        ci.is_folder AS "isFolder", ci.name, ci.mime_type AS "mimeType", parent.dest_id AS "parentDestId"
+        ci.is_folder AS "isFolder", ci.name, ci.mime_type AS "mimeType", ci.relative_path AS "relativePath",
+        parent.dest_id AS "parentDestId"
       FROM drive_copy_items ci
       LEFT JOIN drive_copy_items parent ON parent.item_id = ci.parent_item_id
       WHERE ci.job_id = ${jobId} AND ci.status = 'pending'
@@ -240,12 +248,12 @@ export async function copyDriveItemsBatch(
         `) as any[];
         summary.errors += blocked.length;
       }
-      return { summary, done: true, cancelled: false };
+      return { summary, done: true, cancelled: false, recentItems };
     }
 
     for (const item of items) {
-      if (isCancelled()) return { summary, done: false, cancelled: true };
-      if (Date.now() > deadline) return { summary, done: false, cancelled: false };
+      if (isCancelled()) return { summary, done: false, cancelled: true, recentItems };
+      if (Date.now() > deadline) return { summary, done: false, cancelled: false, recentItems };
 
       const destParentId: string = item.parentItemId === null ? destinationRootId : item.parentDestId;
       try {
@@ -259,12 +267,14 @@ export async function copyDriveItemsBatch(
           if (existing) summary.reusedFolders++;
           else summary.createdFolders++;
           await sql`UPDATE drive_copy_items SET status = 'copied', dest_id = ${destFolder.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
+          recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'copied' });
         } else {
           const siblings = await getDestChildren(destParentId);
           const existing = siblings.find((f) => f.name === item.name && f.mimeType === item.mimeType);
           if (existing) {
             summary.skippedFiles++;
             await sql`UPDATE drive_copy_items SET status = 'skipped', dest_id = ${existing.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
+            recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: false, status: 'skipped' });
           } else {
             const copied = await driveRequest<DriveFile>(accessToken, `/files/${item.sourceId}/copy?supportsAllDrives=true`, {
               method: 'POST',
@@ -272,6 +282,7 @@ export async function copyDriveItemsBatch(
             });
             summary.copiedFiles++;
             await sql`UPDATE drive_copy_items SET status = 'copied', dest_id = ${copied.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
+            recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: false, status: 'copied' });
           }
         }
       } catch (error) {
@@ -280,6 +291,7 @@ export async function copyDriveItemsBatch(
           UPDATE drive_copy_items SET status = 'error', error_message = ${error instanceof Error ? error.message : String(error)}, updated_at = NOW()
           WHERE item_id = ${item.id}
         `;
+        recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: !!item.isFolder, status: 'error' });
       }
     }
   }

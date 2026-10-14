@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Cloud, Copy, Download, ExternalLink, FolderInput, LogIn, LogOut, Save, Square } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, ChevronUp, Cloud, Copy, Download, ExternalLink, FolderInput, LogIn, LogOut, Save, Square } from 'lucide-react';
 import { DriveLinks } from '../../types';
 
 type DriveCopyLogEntry = {
@@ -10,11 +10,15 @@ type DriveCopyLogEntry = {
   status: 'copied' | 'skipped' | 'error';
 };
 
+type RecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'copied' | 'skipped' | 'error' };
+
 const STATUS_LABELS: Record<DriveCopyLogEntry['status'], string> = {
   copied: 'Copiado',
   skipped: 'Omitido (ya existía)',
   error: 'Error',
 };
+
+const LIVE_LOG_COLLAPSED_COUNT = 8;
 
 // Si Vercel mata la función por exceder el tiempo máximo (60s en el plan
 // actual), la respuesta no es JSON sino una página de error — sin esto,
@@ -98,6 +102,8 @@ export const DriveLinksView: React.FC = () => {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [driveSession, setDriveSession] = useState<{ connected: boolean; email: string | null }>({ connected: false, email: null });
   const [copyLog, setCopyLog] = useState<DriveCopyLogEntry[] | null>(null);
+  const [liveLog, setLiveLog] = useState<RecentItem[]>([]);
+  const [isLogExpanded, setIsLogExpanded] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
   const pollingRef = useRef(false);
@@ -110,7 +116,14 @@ export const DriveLinksView: React.FC = () => {
         const response = await fetch('/api/drive-links');
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible cargar los enlaces.');
-        setLinks(payload.data || { sourceUrl: '', destinationUrl: '' });
+        const loaded: DriveLinks = payload.data || { sourceUrl: '', destinationUrl: '' };
+        setLinks(loaded);
+        // Si quedó una copia en curso de un refresco o cierre anterior (no
+        // un "Detener" explícito, eso borra el job guardado), se retoma
+        // sola -- no hace falta darle clic a "Copiar" de nuevo para seguir
+        // viendo el progreso.
+        const savedJobId = readSavedCopyJob(loaded.sourceUrl, loaded.destinationUrl);
+        if (savedJobId) void resumeSavedCopy(savedJobId);
       } catch (error) {
         setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible cargar los enlaces.' });
       } finally {
@@ -157,87 +170,135 @@ export const DriveLinksView: React.FC = () => {
     }
   };
 
+  // Compartido entre "Copiar carpeta completa" y la reanudación automática
+  // al recargar la página -- ambos simplemente siguen llamando al mismo
+  // endpoint con el jobId hasta que "done" sea true.
+  const runDirectCopyLoop = async (initialJobId: string | null) => {
+    directCancelRequestedRef.current = false;
+    directJobIdRef.current = null;
+    let jobId: string | null = initialJobId;
+    let done = false;
+    try {
+      while (!done) {
+        if (directCancelRequestedRef.current) {
+          setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
+          break;
+        }
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+        const response = await fetch('/api/drive-copy-direct', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(jobId ? { jobId } : links),
+          signal: controller.signal,
+        });
+        abortControllerRef.current = null;
+        const payload = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible copiar desde Google Drive.');
+        const result = payload.data;
+        jobId = result.jobId;
+        directJobIdRef.current = jobId;
+        saveCopyJob(jobId, links.sourceUrl, links.destinationUrl);
+
+        if (Array.isArray(result.recentItems) && result.recentItems.length > 0) {
+          setLiveLog((prev) => [...prev, ...result.recentItems]);
+        }
+
+        if (result.phase === 'scanning') {
+          setCopyProgress({
+            percent: 3,
+            processed: 0,
+            total: 0,
+            phase: `Haciendo un barrido inicial del origen... ${result.itemsFound ?? 0} elemento(s) encontrados`,
+          });
+        } else {
+          const processed = result.copiedFiles + result.skippedFiles + (result.errors ?? 0);
+          const total = result.total ?? processed;
+          setCopyProgress({
+            percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
+            processed,
+            total,
+            phase: result.done ? 'Copia completada' : `Copiando... ${processed} de ${total} elemento(s) procesados`,
+          });
+        }
+
+        if (result.cancelled) {
+          clearSavedCopyJob();
+          setCopyLog(result.log || []);
+          setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
+          done = true;
+        } else if (result.done) {
+          clearSavedCopyJob();
+          setCopyLog(result.log || []);
+          const errorNote = result.errors > 0 ? ` (${result.errors} con error -- revisa el reporte CSV)` : '';
+          setMessage({ type: 'success', text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} omitidos${errorNote}.` });
+          done = true;
+        }
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
+      } else {
+        setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible copiar desde Google Drive.' });
+      }
+    } finally {
+      abortControllerRef.current = null;
+      directJobIdRef.current = null;
+      setIsCopying(false);
+    }
+  };
+
+  // Al recargar la página con una copia en curso guardada: primero pide el
+  // estado actual SIN avanzar nada (action: 'status'), para que el log y
+  // la barra de progreso aparezcan de inmediato con todo lo ya hecho --
+  // recién después sigue el loop normal para continuar procesando.
+  const resumeSavedCopy = async (jobId: string) => {
+    setIsCopying(true);
+    setMessage({ type: 'success', text: 'Retomando una copia interrumpida anteriormente...' });
+    setLiveLog([]);
+    try {
+      const response = await fetch('/api/drive-copy-direct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'status', jobId }),
+      });
+      const payload = await parseJsonResponse(response);
+      if (response.ok) {
+        const result = payload.data;
+        if (Array.isArray(result.recentItems)) setLiveLog(result.recentItems);
+        const processed = (result.copiedFiles ?? 0) + (result.skippedFiles ?? 0) + (result.errors ?? 0);
+        const total = result.total ?? processed;
+        setCopyProgress({
+          percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
+          processed,
+          total,
+          phase: result.phase === 'scanning' ? 'Retomando el barrido inicial...' : `Retomando... ${processed} de ${total} elemento(s) procesados`,
+        });
+        if (result.done || result.cancelled) {
+          clearSavedCopyJob();
+          setIsCopying(false);
+          return;
+        }
+      }
+    } catch {
+      // Si la consulta de estado falla, igual se intenta continuar abajo.
+    }
+    await runDirectCopyLoop(jobId);
+  };
+
   const copyFolder = async () => {
     setIsCopying(true);
     setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando copia...' });
     setMessage(null);
     setCopyLog(null);
     if (driveSession.connected) {
-      // La copia se corta en trozos del lado del servidor (cada invocación
-      // tiene como mucho ~60s en el plan actual) -- aquí se vuelve a llamar
-      // al mismo endpoint pasando el jobId hasta que "done" sea true, para
-      // poder copiar carpetas grandes sin toparse con ese límite.
-      directCancelRequestedRef.current = false;
-      directJobIdRef.current = null;
-      let jobId: string | null = readSavedCopyJob(links.sourceUrl, links.destinationUrl);
-      if (jobId) {
+      const savedJobId = readSavedCopyJob(links.sourceUrl, links.destinationUrl);
+      if (savedJobId) {
         setMessage({ type: 'success', text: 'Retomando una copia interrumpida anteriormente...' });
+      } else {
+        setLiveLog([]);
       }
-      let done = false;
-      try {
-        while (!done) {
-          if (directCancelRequestedRef.current) {
-            setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
-            break;
-          }
-          const controller = new AbortController();
-          abortControllerRef.current = controller;
-          const response = await fetch('/api/drive-copy-direct', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(jobId ? { jobId } : links),
-            signal: controller.signal,
-          });
-          abortControllerRef.current = null;
-          const payload = await parseJsonResponse(response);
-          if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible copiar desde Google Drive.');
-          const result = payload.data;
-          jobId = result.jobId;
-          directJobIdRef.current = jobId;
-          saveCopyJob(jobId, links.sourceUrl, links.destinationUrl);
-
-          if (result.phase === 'scanning') {
-            setCopyProgress({
-              percent: 3,
-              processed: 0,
-              total: 0,
-              phase: `Haciendo un barrido inicial del origen... ${result.itemsFound ?? 0} elemento(s) encontrados`,
-            });
-          } else {
-            const processed = result.copiedFiles + result.skippedFiles + (result.errors ?? 0);
-            const total = result.total ?? processed;
-            setCopyProgress({
-              percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
-              processed,
-              total,
-              phase: result.done ? 'Copia completada' : `Copiando... ${processed} de ${total} elemento(s) procesados`,
-            });
-          }
-
-          if (result.cancelled) {
-            clearSavedCopyJob();
-            setCopyLog(result.log || []);
-            setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
-            done = true;
-          } else if (result.done) {
-            clearSavedCopyJob();
-            setCopyLog(result.log || []);
-            const errorNote = result.errors > 0 ? ` (${result.errors} con error -- revisa el reporte CSV)` : '';
-            setMessage({ type: 'success', text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} omitidos${errorNote}.` });
-            done = true;
-          }
-        }
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
-        } else {
-          setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible copiar desde Google Drive.' });
-        }
-      } finally {
-        abortControllerRef.current = null;
-        directJobIdRef.current = null;
-        setIsCopying(false);
-      }
+      await runDirectCopyLoop(savedJobId);
       return;
     }
 
@@ -377,7 +438,43 @@ export const DriveLinksView: React.FC = () => {
               )}
             </div>
           </div>
-          {isCopying && <div className="mt-4 rounded-lg border border-teal-100 bg-teal-50 p-3" role="status"><div className="flex items-center justify-between text-[11px] font-bold text-teal-900"><span>{copyProgress.phase}</span><span>{copyProgress.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-teal-600 transition-all duration-500" style={{ width: `${Math.max(copyProgress.percent, 3)}%` }} /></div><p className="mt-2 text-[11px] text-teal-800">{copyProgress.processed} de {copyProgress.total || '...'} elementos procesados</p></div>}
+          {isCopying && (
+            <div className="mt-4 rounded-lg border border-teal-100 bg-teal-50 p-3" role="status">
+              <div className="flex items-center justify-between text-[11px] font-bold text-teal-900">
+                <span>{copyProgress.phase}</span>
+                <span>{copyProgress.percent}%</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+                <div className="h-full rounded-full bg-teal-600 transition-all duration-500" style={{ width: `${Math.max(copyProgress.percent, 3)}%` }} />
+              </div>
+              <p className="mt-2 text-[11px] text-teal-800">{copyProgress.processed} de {copyProgress.total || '...'} elementos procesados</p>
+
+              {liveLog.length > 0 && (
+                <div className="mt-3 border-t border-teal-100 pt-2.5">
+                  <div className="max-h-56 space-y-1 overflow-y-auto rounded-md bg-white/70 p-2">
+                    {(isLogExpanded ? liveLog : liveLog.slice(-LIVE_LOG_COLLAPSED_COUNT)).slice().reverse().map((item, idx) => (
+                      <div key={`${item.relativePath}-${idx}`} className="flex items-center gap-1.5 text-[11px]">
+                        <span className={`shrink-0 font-bold ${item.status === 'error' ? 'text-rose-600' : item.status === 'skipped' ? 'text-slate-400' : 'text-emerald-700'}`}>
+                          {item.status === 'error' ? '✕' : item.status === 'skipped' ? '·' : '✓'}
+                        </span>
+                        <span className="truncate text-slate-700" title={item.relativePath}>{item.name}{item.isFolder ? '/' : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {liveLog.length > LIVE_LOG_COLLAPSED_COUNT && (
+                    <button
+                      type="button"
+                      onClick={() => setIsLogExpanded((prev) => !prev)}
+                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-teal-700 hover:text-teal-900"
+                    >
+                      {isLogExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                      {isLogExpanded ? 'Mostrar menos' : `Mostrar más (${liveLog.length} en total)`}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </form>}
       </section>
 
