@@ -316,6 +316,8 @@ export function buildStepReturnEmailHtml(options: {
   fromStepName: string;
   observation: string;
   returnedBy: string;
+  expectedSubject?: string | null;
+  expectedFromEmails?: string[];
 }): string {
   const escape = (value: string) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -356,8 +358,16 @@ export function buildStepReturnEmailHtml(options: {
     <p style="margin: 0; font-size: 13.5px; color: #334155; white-space: pre-wrap; background-color: #ffffff; border: 1px dashed #fbbf24; border-radius: 4px; padding: 10px;">${escape(options.observation)}</p>
   </div>
 
+  ${options.expectedSubject ? `<div style="padding: 16px 20px; background-color: #eff6ff; border-top: 1px solid #e2e8f0;">
+    <p style="margin: 0 0 8px 0; font-size: 12.5px; font-weight: bold; color: #1e3a8a;">📧 Para reenviar la corrección y que el sistema la detecte sola:</p>
+    <p style="margin: 0 0 4px 0; font-size: 12.5px; color: #334155;">Corrige lo que indica la observación y envía el correo con el documento adjunto usando el <strong>mismo asunto de siempre</strong> (no hace falta cambiarlo -- el sistema solo tiene en cuenta los correos enviados después de esta devolución, así que no se confunde con el envío anterior):</p>
+    <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: bold; color: #1e3a8a; background-color: #ffffff; border: 1px dashed #93c5fd; border-radius: 4px; padding: 8px 10px;">${escape(options.expectedSubject)}</p>
+    ${options.expectedFromEmails && options.expectedFromEmails.length > 0 ? `<p style="margin: 0 0 4px 0; font-size: 11.5px; color: #64748b;">Debe enviarse desde: <strong>${escape(options.expectedFromEmails.join(', '))}</strong></p>` : ''}
+    <p style="margin: 0; font-size: 11.5px; color: #64748b;">Debe ir en copia (CC): <strong>${escape(MANDATORY_CC_EMAIL)}</strong></p>
+  </div>` : ''}
+
   <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">
-    <p style="font-size: 11px; color: #64748b; margin: 0;">Corrige y reenvía según corresponda a esta etapa. Este mensaje fue enviado automáticamente desde <strong>Seguimiento de Informes</strong>.</p>
+    <p style="font-size: 11px; color: #64748b; margin: 0;">Esta corrección queda bajo tu responsabilidad hasta que se reenvíe. Este mensaje fue enviado automáticamente desde <strong>Seguimiento de Informes</strong>.</p>
   </div>
 </div>`;
 }

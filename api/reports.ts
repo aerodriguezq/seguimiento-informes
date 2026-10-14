@@ -1192,14 +1192,14 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
       const [report] = (await sql`
         SELECT i.proyecto_id AS "projectId", i.tipo_informe_id AS "typeId", i.mes_nombre AS "monthName", i.anio AS "year",
-          i.paso_actual_id AS "currentStepId", COALESCE(p.nombre, 'Sin proyecto') AS "projectName"
+          i.paso_actual_id AS "currentStepId", i.numero_secuencia AS "sequenceNumber", COALESCE(p.nombre, 'Sin proyecto') AS "projectName"
         FROM informes i LEFT JOIN proyectos p ON p.proyecto_id = i.proyecto_id
         WHERE i.informe_id = ${reportId}
       `) as any[];
       if (!report) return response.status(404).json({ data: null, meta: {}, errors: ['Informe no encontrado.'] });
 
       const [step] = (await sql`
-        SELECT paso_id AS id, nombre AS name, proyecto_id AS "projectId", orden AS "order"
+        SELECT paso_id AS id, nombre AS name, proyecto_id AS "projectId", orden AS "order", asunto_correo AS "emailSubjectBase"
         FROM tipo_informe_pasos WHERE paso_id = ${stepIdNum} AND tipo_informe_id = ${report.typeId}
       `) as any[];
       if (!step) {
@@ -1243,12 +1243,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
             const accessToken = await getConnectedAccessToken(sql);
             if (!accessToken) throw new Error('No hay una cuenta de Google conectada para enviar el correo de devolución.');
             const toEmails = recipientRows.map((r: any) => r.email);
+            const expectedSubject = step.emailSubjectBase ? composeStepEmailSubject(step.emailSubjectBase, report.sequenceNumber) : null;
             const html = buildStepReturnEmailHtml({
               projectName: report.projectName,
               periodLabel: `${report.monthName} ${report.year}`,
               stepName: step.name,
               fromStepName: currentStep?.name || 'Paso anterior',
               observation: comment,
+              expectedSubject,
+              expectedFromEmails: toEmails,
               returnedBy: userName || 'Usuario',
             });
             const subject = `[Seguimiento] Devuelto para corrección: ${step.name}`;
