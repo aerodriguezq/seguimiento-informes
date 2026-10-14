@@ -19,20 +19,67 @@ function toBase64Url(value: string) {
 // cuenta equivocada.
 const FIXED_SENDER_EMAIL = 'a.rodriguez@gdm.com.co';
 
-export async function sendEmail(
-  accessToken: string,
-  options: { to: string[]; cc?: string[]; subject: string; body: string; html?: boolean },
-): Promise<void> {
-  const rawMessage = [
+export type EmailAttachment = { filename: string; mimeType: string; contentBase64: string };
+
+// MIME exige líneas de a lo sumo 76 caracteres en contenido base64 -- Gmail
+// es tolerante con líneas más largas, pero partirlas bien evita sorpresas.
+function chunkBase64(value: string): string {
+  return value.replace(/(.{76})/g, '$1\r\n');
+}
+
+// El nombre del archivo va dentro de un header MIME entre comillas -- sin
+// esto, un nombre con comillas o salto de línea rompería el mensaje entero.
+function sanitizeFilename(name: string): string {
+  return name.replace(/["\r\n]/g, '').slice(0, 200) || 'adjunto';
+}
+
+function buildRawMessage(options: {
+  to: string[]; cc?: string[]; subject: string; body: string; html?: boolean; attachments?: EmailAttachment[];
+}): string {
+  const headers = [
     `From: ${FIXED_SENDER_EMAIL}`,
     `To: ${options.to.join(', ')}`,
     ...(options.cc && options.cc.length > 0 ? [`Cc: ${options.cc.join(', ')}`] : []),
-    `Content-Type: text/${options.html ? 'html' : 'plain'}; charset="UTF-8"`,
     'MIME-Version: 1.0',
     `Subject: =?UTF-8?B?${Buffer.from(options.subject, 'utf-8').toString('base64')}?=`,
+  ];
+  const bodyContentType = `text/${options.html ? 'html' : 'plain'}; charset="UTF-8"`;
+
+  if (!options.attachments || options.attachments.length === 0) {
+    return [...headers, `Content-Type: ${bodyContentType}`, '', options.body].join('\r\n');
+  }
+
+  const boundary = `mixbndry${Math.random().toString(16).slice(2)}`;
+  const lines = [
+    ...headers,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    `Content-Type: ${bodyContentType}`,
     '',
     options.body,
-  ].join('\r\n');
+    '',
+  ];
+  for (const attachment of options.attachments) {
+    lines.push(
+      `--${boundary}`,
+      `Content-Type: ${attachment.mimeType}; name="${sanitizeFilename(attachment.filename)}"`,
+      `Content-Disposition: attachment; filename="${sanitizeFilename(attachment.filename)}"`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      chunkBase64(attachment.contentBase64),
+      '',
+    );
+  }
+  lines.push(`--${boundary}--`);
+  return lines.join('\r\n');
+}
+
+export async function sendEmail(
+  accessToken: string,
+  options: { to: string[]; cc?: string[]; subject: string; body: string; html?: boolean; attachments?: EmailAttachment[] },
+): Promise<void> {
+  const rawMessage = buildRawMessage(options);
 
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',

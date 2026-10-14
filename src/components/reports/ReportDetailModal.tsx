@@ -7,6 +7,7 @@ import {
   ReportAttachment,
   ReportTypeStep,
   EmailCandidate,
+  ReturnAttachmentInput,
 } from '../../types';
 import {
   calculateDaysRemaining,
@@ -49,7 +50,7 @@ interface ReportDetailModalProps {
   reportTypeSteps: ReportTypeStep[];
   onClose: () => void;
   onUpdateStatus: (reportId: string, newStatus: ReportStatus, comment: string) => void;
-  onSetCurrentStep: (reportId: string, stepId: string, comment: string) => Promise<void>;
+  onSetCurrentStep: (reportId: string, stepId: string, comment: string, attachments?: ReturnAttachmentInput[]) => Promise<void>;
   onUndoStep: (reportId: string, stepId: string) => Promise<void>;
   onAddAttachment: (reportId: string, attachment: ReportAttachment) => void;
   onAdvanceStep: (reportId: string) => Promise<void>;
@@ -182,6 +183,8 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [stepTransitionComment, setStepTransitionComment] = useState('');
   const [isSavingStepTransition, setIsSavingStepTransition] = useState(false);
   const [isUndoingStep, setIsUndoingStep] = useState(false);
+  const [returnAttachments, setReturnAttachments] = useState<File[]>([]);
+  const [returnAttachmentsError, setReturnAttachmentsError] = useState('');
   const [activeTab, setActiveTab] = useState<'timeline' | 'contacts' | 'alerts' | 'attachments' | 'history'>('timeline');
 
   const daysRemaining = calculateDaysRemaining(report.dueDate, report.status);
@@ -269,8 +272,41 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const handleOpenStepTransition = (stepId: string) => {
     setTargetStepId(stepId);
     setStepTransitionComment('');
+    setReturnAttachments([]);
+    setReturnAttachmentsError('');
     setShowStepTransitionModal(true);
   };
+
+  const RETURN_ATTACHMENTS_MAX_BYTES = 3 * 1024 * 1024;
+
+  const handleAddReturnAttachments = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const incoming = Array.from(files);
+    const combined = [...returnAttachments, ...incoming];
+    const totalBytes = combined.reduce((sum, f) => sum + f.size, 0);
+    if (totalBytes > RETURN_ATTACHMENTS_MAX_BYTES) {
+      setReturnAttachmentsError('Los archivos adjuntos no pueden superar 3 MB en total.');
+      return;
+    }
+    setReturnAttachmentsError('');
+    setReturnAttachments(combined);
+  };
+
+  const handleRemoveReturnAttachment = (index: number) => {
+    setReturnAttachments((prev) => prev.filter((_, i) => i !== index));
+    setReturnAttachmentsError('');
+  };
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.slice(result.indexOf(',') + 1));
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
 
   const handleConfirmStepTransition = async () => {
     if (!stepTransitionComment.trim()) {
@@ -279,7 +315,14 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
     }
     setIsSavingStepTransition(true);
     try {
-      await onSetCurrentStep(report.id, targetStepId, stepTransitionComment.trim());
+      const attachments: ReturnAttachmentInput[] = await Promise.all(
+        returnAttachments.map(async (file) => ({
+          filename: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          contentBase64: await fileToBase64(file),
+        })),
+      );
+      await onSetCurrentStep(report.id, targetStepId, stepTransitionComment.trim(), attachments);
       setShowStepTransitionModal(false);
     } finally {
       setIsSavingStepTransition(false);
@@ -1219,6 +1262,33 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                 placeholder={isReturning ? 'Ejemplo: El informe tiene un error en la tabla de avance, corregir y reenviar...' : 'Ejemplo: Se corrigió un salto de paso hecho por error...'}
                 className="w-full p-2.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
               />
+              {isReturning && (
+                <div className="space-y-1.5 -mt-1">
+                  <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-indigo-700 cursor-pointer hover:text-indigo-900">
+                    <Paperclip className="h-3.5 w-3.5" />
+                    Adjuntar capturas o documentos (van en el correo, máx. 3 MB en total)
+                    <input
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => { handleAddReturnAttachments(e.target.files); e.target.value = ''; }}
+                    />
+                  </label>
+                  {returnAttachments.length > 0 && (
+                    <ul className="space-y-1">
+                      {returnAttachments.map((file, index) => (
+                        <li key={`${file.name}-${index}`} className="flex items-center justify-between gap-2 rounded-md bg-slate-50 border border-slate-200 px-2 py-1 text-[11px] text-slate-600">
+                          <span className="truncate">{file.name} <span className="text-slate-400">({(file.size / 1024).toFixed(0)} KB)</span></span>
+                          <button type="button" onClick={() => handleRemoveReturnAttachment(index)} className="shrink-0 text-slate-400 hover:text-rose-600">
+                            <X className="h-3 w-3" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {returnAttachmentsError && <p className="text-[11px] text-rose-600">{returnAttachmentsError}</p>}
+                </div>
+              )}
               {isReturning && (
                 <p className="text-[11px] text-slate-400 -mt-2">
                   ¿Fue un error (ej. pruebas, un clic de más) y no hay nada real que corregir? Usa "Fue un error" -- no pide observación ni avisa a nadie por correo.

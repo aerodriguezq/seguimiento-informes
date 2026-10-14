@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../server/google-drive.js';
-import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEmail, buildStepReturnEmailHtml } from '../server/google-gmail.js';
+import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEmail, buildStepReturnEmailHtml, type EmailAttachment } from '../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
 import { isAdminRequest, canEditModuleRequest } from '../server/admin-auth.js';
 import { logEmailSend } from '../server/email-log.js';
@@ -1184,10 +1184,22 @@ export default async function handler(request: VercelRequest, response: VercelRe
       if (!(await canEditModuleRequest(request, sql, 'reports'))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Informes.'] });
       }
-      const { stepId, comment, userName } = request.body ?? {};
+      const { stepId, comment, userName, attachments: rawAttachments } = request.body ?? {};
       const stepIdNum = Number(stepId);
       if (!Number.isInteger(stepIdNum) || stepIdNum <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Falta el paso.'] });
+      }
+      // Las imágenes/documentos que muestran qué quedó mal van directo como
+      // adjuntos del correo (no a Drive) -- límite conservador para no
+      // reventar el límite de tamaño de solicitud de la función serverless.
+      const attachments: EmailAttachment[] = Array.isArray(rawAttachments)
+        ? rawAttachments
+            .filter((a: any) => a && typeof a.contentBase64 === 'string' && typeof a.filename === 'string')
+            .map((a: any) => ({ filename: a.filename, mimeType: typeof a.mimeType === 'string' ? a.mimeType : 'application/octet-stream', contentBase64: a.contentBase64 }))
+        : [];
+      const attachmentsBytes = attachments.reduce((sum, a) => sum + Math.ceil((a.contentBase64.length * 3) / 4), 0);
+      if (attachmentsBytes > 3 * 1024 * 1024) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Los archivos adjuntos no pueden superar 3 MB en total.'] });
       }
 
       const [report] = (await sql`
@@ -1255,7 +1267,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
               returnedBy: userName || 'Usuario',
             });
             const subject = `[Seguimiento] Devuelto para corrección: ${step.name}`;
-            await sendEmail(accessToken, { to: toEmails, subject, body: html, html: true });
+            await sendEmail(accessToken, { to: toEmails, subject, body: html, html: true, attachments });
             await logEmailSend(sql, { to: toEmails, subject, kind: 'devolucion_paso', reportId, success: true });
             emailSent = true;
           }
@@ -1274,7 +1286,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
           COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
           ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), ${userName || 'Usuario'},
           ${isReturning
-            ? `Devuelto al paso "${step.name}" por observación: "${comment.trim()}"${emailSent ? ' (correo enviado a los responsables)' : ' (no se pudo enviar el correo)'}${clearedStepNames.length > 0 ? ` — también se reinician (quedan pendientes de nuevo): ${clearedStepNames.join(', ')}.` : ''}`
+            ? `Devuelto al paso "${step.name}" por observación: "${comment.trim()}"${attachments.length > 0 ? ` (${attachments.length} archivo(s) adjunto(s))` : ''}${emailSent ? ' (correo enviado a los responsables)' : ' (no se pudo enviar el correo)'}${clearedStepNames.length > 0 ? ` — también se reinician (quedan pendientes de nuevo): ${clearedStepNames.join(', ')}.` : ''}`
             : `Cambio manual de paso a: "${step.name}".${comment ? ` ${comment}` : ''}`}
         )
       `;

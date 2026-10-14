@@ -239,3 +239,12 @@ export interface EmailCandidate {
   receivedAt: string | null;
   snippet: string;
 }
+
+// Archivo que acompaña la observación de una devolución -- se manda directo
+// como adjunto del correo (no se sube a Drive), para mostrar visualmente
+// qué quedó mal (captura de pantalla, el documento marcado, etc.).
+export interface ReturnAttachmentInput {
+  filename: string;
+  mimeType: string;
+  contentBase64: string;
+}

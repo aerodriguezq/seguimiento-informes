@@ -15,6 +15,7 @@ import {
   AreaConsolida,
   PeticionesConfig,
   EmailCandidate,
+  ReturnAttachmentInput,
 } from './types';
 import {
   getSemaforoStatus,
@@ -489,11 +490,11 @@ export default function App() {
     showToast('Avance de la etapa eliminado. Queda pendiente de nuevo.', 'success');
   };
 
-  const handleSetCurrentStep = async (reportId: string, stepId: string, comment: string) => {
+  const handleSetCurrentStep = async (reportId: string, stepId: string, comment: string, attachments?: ReturnAttachmentInput[]) => {
     const response = await fetch('/api/reports', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'setCurrentStep', reportId, stepId: Number(stepId), comment, userName: user.name || user.email }),
+      body: JSON.stringify({ action: 'setCurrentStep', reportId, stepId: Number(stepId), comment, attachments, userName: user.name || user.email }),
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible cambiar el paso actual.');
