@@ -36,8 +36,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
     if (!response.writableEnded) connectionClosed = true;
   });
 
+  let session: Awaited<ReturnType<typeof getDriveSession>> = null;
   try {
-    const session = await getDriveSession(request);
+    session = await getDriveSession(request);
     if (!session) return response.status(401).json({ data: null, meta: {}, errors: ['Conecta Google Drive antes de copiar.'] });
 
     const sql = await getSql();
@@ -143,6 +144,19 @@ export default async function handler(request: VercelRequest, response: VercelRe
     });
   } catch (error) {
     console.error('Direct Drive copy failed', error);
-    return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible copiar la carpeta desde Google Drive.'] });
+    const message = error instanceof Error ? error.message : 'No fue posible copiar la carpeta desde Google Drive.';
+    // Si la conexión quedó inválida (invalid_grant), se borra la sesión
+    // guardada -- si no, "Fuentes Drive" seguiría mostrando "conectado"
+    // aunque cada operación real falle, sin ninguna señal de que hay que
+    // reconectar.
+    if (session && message.includes('ya no es válida')) {
+      try {
+        const sql = await getSql();
+        await sql`DELETE FROM google_drive_sessions WHERE session_id = ${session.session_id}`;
+      } catch (cleanupError) {
+        console.error('No fue posible limpiar la sesión inválida', cleanupError);
+      }
+    }
+    return response.status(502).json({ data: null, meta: {}, errors: [message] });
   }
 }

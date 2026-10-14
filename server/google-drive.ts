@@ -14,9 +14,21 @@ export function extractDriveFolderId(input: string): string | null {
 export async function getDriveAccessToken(tokenJson: string) {
   const client = await getGoogleOAuthClient();
   client.setCredentials(JSON.parse(tokenJson));
-  const token = await client.getAccessToken();
-  if (!token.token) throw new Error('La sesión de Google Drive expiró.');
-  return token.token;
+  try {
+    const token = await client.getAccessToken();
+    if (!token.token) throw new Error('La sesión de Google Drive expiró.');
+    return token.token;
+  } catch (error) {
+    // invalid_grant es el error estándar de OAuth cuando el refresh token ya
+    // no sirve -- se revocó el acceso, se cambió la contraseña de esa
+    // cuenta, o Google lo invalidó por inactividad. No hay nada que
+    // reintentar: hay que reconectar la cuenta desde Fuentes Drive.
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('invalid_grant')) {
+      throw new Error('La conexión con esa cuenta de Google ya no es válida (se revocó el acceso o cambió la contraseña). Vuelve a conectarla desde Fuentes Drive.');
+    }
+    throw error;
+  }
 }
 
 const MAX_RATE_LIMIT_RETRIES = 6;
