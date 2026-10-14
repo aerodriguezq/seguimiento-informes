@@ -305,6 +305,63 @@ export function buildPeticionAssignedEmailHtml(options: {
 </div>`;
 }
 
+// Cuando un revisor devuelve un paso a una etapa anterior con una
+// observación (ej. el informe tiene un error y hay que corregirlo y
+// reenviarlo) -- los responsables de la etapa a la que se devuelve deben
+// enterarse de inmediato y ver exactamente qué hay que corregir.
+export function buildStepReturnEmailHtml(options: {
+  projectName: string;
+  periodLabel: string;
+  stepName: string;
+  fromStepName: string;
+  observation: string;
+  returnedBy: string;
+}): string {
+  const escape = (value: string) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c] as string));
+  const bg = '#b45309';
+  const accent = '#fde68a';
+
+  return `<div style="max-width: 480px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dce4ec; border-radius: 8px; font-family: Arial, sans-serif; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+  <div style="background-color: ${bg}; color: #ffffff; padding: 20px; text-align: center;">
+    <div style="font-size: 24px; margin-bottom: 5px;">↩️</div>
+    <h2 style="margin: 0; font-size: 18px; font-weight: bold; color: #ffffff;">Entrega devuelta para corrección</h2>
+    <p style="margin: 5px 0 0 0; font-size: 16px; font-weight: 600; color: ${accent};">${escape(options.stepName)}</p>
+  </div>
+
+  <div style="padding: 20px; background-color: #f8fafc;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #334155;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold; width: 45%;">🏢 Proyecto:</td>
+        <td style="padding: 10px 0;">${escape(options.projectName)}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">🗓️ Período:</td>
+        <td style="padding: 10px 0;">${escape(options.periodLabel)}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">↩️ Devuelto desde:</td>
+        <td style="padding: 10px 0;">${escape(options.fromStepName)}</td>
+      </tr>
+      <tr>
+        <td style="padding: 10px 0; font-weight: bold;">🙋 Devuelto por:</td>
+        <td style="padding: 10px 0;">${escape(options.returnedBy)}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div style="padding: 16px 20px; background-color: #fffbeb; border-top: 1px solid #e2e8f0;">
+    <p style="margin: 0 0 8px 0; font-size: 12.5px; font-weight: bold; color: #92400e;">📝 Observación:</p>
+    <p style="margin: 0; font-size: 13.5px; color: #334155; white-space: pre-wrap; background-color: #ffffff; border: 1px dashed #fbbf24; border-radius: 4px; padding: 10px;">${escape(options.observation)}</p>
+  </div>
+
+  <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">
+    <p style="font-size: 11px; color: #64748b; margin: 0;">Corrige y reenvía según corresponda a esta etapa. Este mensaje fue enviado automáticamente desde <strong>Seguimiento de Informes</strong>.</p>
+  </div>
+</div>`;
+}
+
 const DRIVE_URL_PATTERN = /https:\/\/(?:drive|docs)\.google\.com\/[^\s"'<>)\]]+/;
 
 function fromBase64Url(value: string) {

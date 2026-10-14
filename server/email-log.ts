@@ -6,6 +6,7 @@ export type EmailLogKind =
   | 'recordatorio_general'
   | 'peticion_recordatorio'
   | 'peticion_asignacion'
+  | 'devolucion_paso'
   | 'prueba';
 
 // Deja un rastro de cada correo que el sistema intenta enviar (haya salido

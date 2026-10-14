@@ -499,7 +499,16 @@ export default function App() {
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible cambiar el paso actual.');
     setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
     await refetchAlerts();
-    showToast('Paso actual del informe actualizado.', 'success');
+    if (payload.meta?.isReturning) {
+      showToast(
+        payload.meta.emailSent
+          ? 'Devuelto al paso anterior: se avisó por correo a los responsables con la observación.'
+          : 'Devuelto al paso anterior, pero no se pudo enviar el correo de aviso (revisa la conexión de Google).',
+        payload.meta.emailSent ? 'success' : 'info',
+      );
+    } else {
+      showToast('Paso actual del informe actualizado.', 'success');
+    }
   };
 
   const handleSetPrimaryContact = async (reportId: string, contactId: string) => {

@@ -1,8 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../server/google-drive.js';
-import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery } from '../server/google-gmail.js';
+import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEmail, buildStepReturnEmailHtml } from '../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
 import { isAdminRequest, canEditModuleRequest } from '../server/admin-auth.js';
+import { logEmailSend } from '../server/email-log.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -987,6 +988,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return response.status(400).json({ data: null, meta: {}, errors: ['Falta reportId.'] });
     }
 
+    // Algunas acciones necesitan devolver algo más que el informe actualizado
+    // (ej. si una devolución logró enviar el correo) sin saltarse el
+    // fetch+return compartido de abajo, que siempre manda el informe fresco.
+    let responseMeta: Record<string, unknown> = {};
+
     if (action === 'status') {
       const { status, comment, userName } = request.body ?? {};
       if (!status) return response.status(400).json({ data: null, meta: {}, errors: ['Falta el nuevo estado.'] });
@@ -1095,13 +1101,13 @@ export default async function handler(request: VercelRequest, response: VercelRe
         WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
       `;
     } else if (action === 'deleteStageProgress') {
-      // Deja una etapa que ya se había marcado como recibida (a tiempo,
-      // tarde, no recibida, o en revisión) de vuelta en "pendiente" -- para
-      // cuando se confirmó el correo equivocado o se avanzó por error. No
-      // toca el paso actual del informe ni mueve el flujo: solo borra el
-      // registro de avance de ESTA etapa puntual. No borra el Historial de
-      // Trazabilidad ni las evidencias ya adjuntas (eso es un registro de
-      // auditoría, no se elimina).
+      // Deja una etapa (recibida o solo en alerta) completamente de vuelta
+      // en "pendiente" -- para cuando se confirmó el correo equivocado, se
+      // avanzó por error, o la alerta misma se generó por error (ej. fechas
+      // mal configuradas). No toca el paso actual del informe ni mueve el
+      // flujo: solo borra el registro de avance de ESTA etapa puntual. No
+      // borra el Historial de Trazabilidad ni las evidencias ya adjuntas
+      // (eso es un registro de auditoría, no se elimina).
       if (!(await isAdminRequest(request, sql))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede eliminar el avance de una etapa.'] });
       }
@@ -1118,7 +1124,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       }
       await sql`
         UPDATE informe_pasos_instancia
-        SET estado_etapa = 'ALERTA_GENERADA', fecha_recepcion_real = NULL, correo_gmail_id = NULL,
+        SET estado_etapa = 'PENDIENTE', fecha_recepcion_real = NULL, correo_gmail_id = NULL,
           correo_remitente = NULL, ultimo_recordatorio_en = NULL, updated_at = NOW()
         WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
       `;
@@ -1127,6 +1133,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
       // administrativo genérico de 4 valores, desconectado del flujo real):
       // esto mueve el informe a cualquier paso configurado de su propio
       // flujo -- para corregir un salto mal hecho o retroceder un paso.
+      // Cuando el paso destino queda ANTES del paso actual (orden menor), se
+      // trata como una devolución por observación: el paso al que se
+      // devuelve queda limpio (vuelve a "pendiente", como si no se hubiera
+      // recibido nada) y se le avisa por correo a sus responsables, con la
+      // observación escrita, para que sepan qué corregir.
       if (!(await isAdminRequest(request, sql))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede cambiar el paso actual manualmente.'] });
       }
@@ -1137,13 +1148,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
       }
 
       const [report] = (await sql`
-        SELECT proyecto_id AS "projectId", tipo_informe_id AS "typeId", mes_nombre AS "monthName", anio AS "year"
-        FROM informes WHERE informe_id = ${reportId}
+        SELECT i.proyecto_id AS "projectId", i.tipo_informe_id AS "typeId", i.mes_nombre AS "monthName", i.anio AS "year",
+          i.paso_actual_id AS "currentStepId", COALESCE(p.nombre, 'Sin proyecto') AS "projectName"
+        FROM informes i LEFT JOIN proyectos p ON p.proyecto_id = i.proyecto_id
+        WHERE i.informe_id = ${reportId}
       `) as any[];
       if (!report) return response.status(404).json({ data: null, meta: {}, errors: ['Informe no encontrado.'] });
 
       const [step] = (await sql`
-        SELECT paso_id AS id, nombre AS name, proyecto_id AS "projectId"
+        SELECT paso_id AS id, nombre AS name, proyecto_id AS "projectId", orden AS "order"
         FROM tipo_informe_pasos WHERE paso_id = ${stepIdNum} AND tipo_informe_id = ${report.typeId}
       `) as any[];
       if (!step) {
@@ -1153,18 +1166,76 @@ export default async function handler(request: VercelRequest, response: VercelRe
         return response.status(400).json({ data: null, meta: {}, errors: ['Ese paso pertenece al flujo propio de otro proyecto.'] });
       }
 
+      const [currentStep] = report.currentStepId
+        ? ((await sql`SELECT nombre AS name, orden AS "order" FROM tipo_informe_pasos WHERE paso_id = ${report.currentStepId}`) as any[])
+        : [];
+      const isReturning = currentStep?.order != null && Number(currentStep.order) < Number(step.order);
+      if (isReturning && !(comment || '').trim()) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Escribe la observación por la cual se devuelve al paso anterior.'] });
+      }
+
+      if (isReturning) {
+        // El paso al que se devuelve queda exactamente como si nunca se
+        // hubiera recibido nada -- el createStepAlert de abajo no toca estos
+        // campos en un UPSERT sobre una fila existente, así que hay que
+        // limpiarlos aparte.
+        await sql`
+          UPDATE informe_pasos_instancia
+          SET estado_etapa = 'PENDIENTE', fecha_recepcion_real = NULL, correo_gmail_id = NULL,
+            correo_remitente = NULL, ultimo_recordatorio_en = NULL, updated_at = NOW()
+          WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
+        `;
+      }
+
       await sql`UPDATE alertas SET activa = FALSE, updated_at = NOW() WHERE informe_id = ${reportId}`;
       await sql`UPDATE informes SET paso_actual_id = ${stepIdNum}, flujo_completado = FALSE, updated_at = NOW() WHERE informe_id = ${reportId}`;
       await createStepAlert(sql, reportId, report.projectId, stepIdNum, step.name, report.year, report.monthName);
+
+      let emailSent = false;
+      if (isReturning) {
+        try {
+          const recipientRows = (await sql`
+            SELECT c.email FROM tipo_informe_paso_contacto tpc
+            JOIN contactos c ON c.contacto_id = tpc.contacto_id
+            WHERE tpc.paso_id = ${stepIdNum} AND c.email IS NOT NULL AND c.email <> ''
+          `) as any[];
+          if (recipientRows.length > 0) {
+            const accessToken = await getConnectedAccessToken(sql);
+            if (!accessToken) throw new Error('No hay una cuenta de Google conectada para enviar el correo de devolución.');
+            const toEmails = recipientRows.map((r: any) => r.email);
+            const html = buildStepReturnEmailHtml({
+              projectName: report.projectName,
+              periodLabel: `${report.monthName} ${report.year}`,
+              stepName: step.name,
+              fromStepName: currentStep?.name || 'Paso anterior',
+              observation: comment,
+              returnedBy: userName || 'Usuario',
+            });
+            const subject = `[Seguimiento] Devuelto para corrección: ${step.name}`;
+            await sendEmail(accessToken, { to: toEmails, subject, body: html, html: true });
+            await logEmailSend(sql, { to: toEmails, subject, kind: 'devolucion_paso', reportId, success: true });
+            emailSent = true;
+          }
+        } catch (error) {
+          console.error('No fue posible enviar el correo de devolución', error);
+          await logEmailSend(sql, {
+            to: [], subject: `[Seguimiento] Devuelto para corrección: ${step.name}`, kind: 'devolucion_paso',
+            reportId, success: false, errorMessage: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
 
       await sql`
         INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
         VALUES (
           COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
           ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), ${userName || 'Usuario'},
-          ${`Cambio manual de paso a: "${step.name}".${comment ? ` ${comment}` : ''}`}
+          ${isReturning
+            ? `Devuelto al paso "${step.name}" por observación: "${comment.trim()}"${emailSent ? ' (correo enviado a los responsables)' : ' (no se pudo enviar el correo)'}`
+            : `Cambio manual de paso a: "${step.name}".${comment ? ` ${comment}` : ''}`}
         )
       `;
+      responseMeta = { isReturning, emailSent };
     } else if (action === 'setPrimaryContact') {
       const { contactId } = request.body ?? {};
       const contactIdNum = Number(contactId);
@@ -1255,7 +1326,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
     const [report] = await fetchReportsByIds(sql, [reportId]);
     if (!report) return response.status(404).json({ data: null, meta: {}, errors: ['Informe no encontrado.'] });
-    return response.status(200).json({ data: report, meta: {}, errors: [] });
+    return response.status(200).json({ data: report, meta: responseMeta, errors: [] });
   } catch (error) {
     console.error('Reports query failed', error);
     return response.status(503).json({ data: null, meta: {}, errors: ['No fue posible consultar o guardar los informes.'] });

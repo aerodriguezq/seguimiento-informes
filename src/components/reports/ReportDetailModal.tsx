@@ -692,7 +692,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                                 </div>
                               ) : (
                                 <div className="flex items-center justify-end gap-2">
-                                  {['RECIBIDA_A_TIEMPO', 'RECIBIDA_TARDE', 'NO_RECIBIDA', 'EN_REVISION'].includes(stage.status) && (
+                                  {['ALERTA_GENERADA', 'RECIBIDA_A_TIEMPO', 'RECIBIDA_TARDE', 'NO_RECIBIDA', 'EN_REVISION'].includes(stage.status) && (
                                     <button
                                       type="button"
                                       onClick={() => void handleDeleteStageProgress(stage.stepId, stage.stepName)}
@@ -1169,44 +1169,51 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
         </div>
       )}
 
-      {showStepTransitionModal && (
-        <div className="fixed inset-0 z-60 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4 animate-in zoom-in-95">
-            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-indigo-600" />
-              Cambiar paso a: {scopedFlowSteps.find((s) => s.id === targetStepId)?.name || targetStepId}
-            </h3>
-            <p className="text-xs text-slate-600">
-              Esto mueve el informe directamente a este paso del flujo (reabre el flujo si estaba completado y reactiva su alerta). Indique el motivo para la trazabilidad:
-            </p>
-            <textarea
-              rows={3}
-              value={stepTransitionComment}
-              onChange={(e) => setStepTransitionComment(e.target.value)}
-              placeholder="Ejemplo: Se corrigió un salto de paso hecho por error..."
-              className="w-full p-2.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-            />
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowStepTransitionModal(false)}
-                disabled={isSavingStepTransition}
-                className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmStepTransition}
-                disabled={isSavingStepTransition}
-                className="px-4 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50"
-              >
-                {isSavingStepTransition ? 'Guardando...' : 'Confirmar Cambio de Paso'}
-              </button>
+      {showStepTransitionModal && (() => {
+        const targetStepInfo = scopedFlowSteps.find((s) => s.id === targetStepId);
+        const currentStepInfo = scopedFlowSteps.find((s) => s.id === report.currentStepId);
+        const isReturning = currentStepInfo != null && targetStepInfo != null && targetStepInfo.order < currentStepInfo.order;
+        return (
+          <div className="fixed inset-0 z-60 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4 animate-in zoom-in-95">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-indigo-600" />
+                {isReturning ? 'Devolver al paso: ' : 'Cambiar paso a: '}{targetStepInfo?.name || targetStepId}
+              </h3>
+              <p className="text-xs text-slate-600">
+                {isReturning
+                  ? 'Esto devuelve el informe a este paso anterior y lo deja como pendiente (borra lo que tenía recibido). Se les avisa por correo a sus responsables con la observación que escribas. Es obligatoria:'
+                  : 'Esto mueve el informe directamente a este paso del flujo (reabre el flujo si estaba completado y reactiva su alerta). Indique el motivo para la trazabilidad:'}
+              </p>
+              <textarea
+                rows={3}
+                value={stepTransitionComment}
+                onChange={(e) => setStepTransitionComment(e.target.value)}
+                placeholder={isReturning ? 'Ejemplo: El informe tiene un error en la tabla de avance, corregir y reenviar...' : 'Ejemplo: Se corrigió un salto de paso hecho por error...'}
+                className="w-full p-2.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              />
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowStepTransitionModal(false)}
+                  disabled={isSavingStepTransition}
+                  className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmStepTransition}
+                  disabled={isSavingStepTransition}
+                  className="px-4 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {isSavingStepTransition ? 'Guardando...' : isReturning ? 'Confirmar Devolución' : 'Confirmar Cambio de Paso'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };
