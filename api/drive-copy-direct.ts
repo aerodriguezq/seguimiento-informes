@@ -73,6 +73,39 @@ export default async function handler(request: VercelRequest, response: VercelRe
       });
     }
 
+    // Convierte un job de validación YA terminado en uno de copia real: lo
+    // que la validación ya encontró que existe en destino queda resuelto
+    // tal cual (no hay que volver a listarlo ni compararlo), y solo lo que
+    // quedó marcado "missing" (o con error) se reinicia a "pending" para
+    // que la copia real lo procese -- así "Copiar lo que falta" no repite
+    // el recorrido completo que ya hizo Validar.
+    if (action === 'copyMissing') {
+      if (!jobId) return response.status(400).json({ data: null, meta: {}, errors: ['Falta jobId.'] });
+      const [sourceJob] = (await sql`SELECT status FROM drive_copy_jobs WHERE job_id = ${jobId}`) as any[];
+      if (!sourceJob) return response.status(404).json({ data: null, meta: {}, errors: ['Esa validación ya no existe (puede haber expirado).'] });
+      if (sourceJob.status !== 'done') {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Esa validación todavía no ha terminado.'] });
+      }
+      await sql`
+        UPDATE drive_copy_items SET status = 'copied', updated_at = NOW()
+        WHERE job_id = ${jobId} AND is_folder = TRUE AND status = 'exists'
+      `;
+      await sql`
+        UPDATE drive_copy_items SET status = 'skipped', updated_at = NOW()
+        WHERE job_id = ${jobId} AND is_folder = FALSE AND status = 'exists'
+      `;
+      await sql`
+        UPDATE drive_copy_items SET status = 'pending', error_message = NULL, dest_id = NULL, updated_at = NOW()
+        WHERE job_id = ${jobId} AND status IN ('missing', 'error')
+      `;
+      await sql`
+        UPDATE drive_copy_jobs SET status = 'running', phase = 'copying', summary = ${JSON.stringify(emptyDriveCopySummary())}::jsonb, updated_at = NOW()
+        WHERE job_id = ${jobId}
+      `;
+      // No retorna -- sigue abajo con el mismo camino que cualquier otro
+      // job en phase 'copying', que ya sabe continuar copiando.
+    }
+
     const accessToken = await getDriveAccessToken(session.token_json);
 
     if (!jobId) {

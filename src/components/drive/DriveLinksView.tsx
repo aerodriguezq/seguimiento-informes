@@ -176,6 +176,9 @@ export const DriveLinksView: React.FC = () => {
   const [validateLog, setValidateLog] = useState<ValidateRecentItem[] | null>(null);
   const [validateLiveLog, setValidateLiveLog] = useState<ValidateRecentItem[]>([]);
   const [isValidateLogExpanded, setIsValidateLogExpanded] = useState(false);
+  // Se guarda aparte del ref (que se limpia al terminar el loop) para poder
+  // ofrecer "Copiar lo que falta" después de que la validación ya terminó.
+  const [completedValidateJobId, setCompletedValidateJobId] = useState<string | null>(null);
   const validateAbortControllerRef = useRef<AbortController | null>(null);
   const validateJobIdRef = useRef<string | null>(null);
   const validateCancelRequestedRef = useRef(false);
@@ -245,11 +248,16 @@ export const DriveLinksView: React.FC = () => {
   // Compartido entre "Copiar carpeta completa" y la reanudación automática
   // al recargar la página -- ambos simplemente siguen llamando al mismo
   // endpoint con el jobId hasta que "done" sea true.
-  const runDirectCopyLoop = async (initialJobId: string | null) => {
+  // firstRequestBody: para arrancar el loop con una petición distinta de la
+  // normal (ej. "copyMissing", que primero convierte un job de validación
+  // ya terminado en uno de copia real) -- desde la segunda vuelta siempre
+  // sigue con el jobId normal, igual que cualquier otra copia.
+  const runDirectCopyLoop = async (initialJobId: string | null, firstRequestBody?: Record<string, unknown>) => {
     directCancelRequestedRef.current = false;
     directJobIdRef.current = null;
     let jobId: string | null = initialJobId;
     let done = false;
+    let isFirstRequest = true;
     try {
       while (!done) {
         if (directCancelRequestedRef.current) {
@@ -258,10 +266,12 @@ export const DriveLinksView: React.FC = () => {
         }
         const controller = new AbortController();
         abortControllerRef.current = controller;
+        const requestBody = isFirstRequest && firstRequestBody ? firstRequestBody : (jobId ? { jobId } : links);
+        isFirstRequest = false;
         const response = await fetch('/api/drive-copy-direct', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(jobId ? { jobId } : links),
+          body: JSON.stringify(requestBody),
           signal: controller.signal,
         });
         abortControllerRef.current = null;
@@ -358,6 +368,21 @@ export const DriveLinksView: React.FC = () => {
       // Si la consulta de estado falla, igual se intenta continuar abajo.
     }
     await runDirectCopyLoop(jobId);
+  };
+
+  // Copia solo lo que "Validar qué falta" encontró que falta -- convierte
+  // ese mismo job (lo que ya existía queda resuelto tal cual) en vez de
+  // volver a recorrer y comparar todo el árbol desde cero.
+  const copyMissingFromValidation = async () => {
+    if (!completedValidateJobId) return;
+    const jobId = completedValidateJobId;
+    setCompletedValidateJobId(null);
+    setIsCopying(true);
+    setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Copiando lo que falta...' });
+    setMessage(null);
+    setCopyLog(null);
+    setLiveLog([]);
+    await runDirectCopyLoop(jobId, { action: 'copyMissing', jobId });
   };
 
   const copyFolder = async () => {
@@ -527,6 +552,7 @@ export const DriveLinksView: React.FC = () => {
               ? `Faltan por copiar: ${result.missingFiles} archivo(s) y ${result.missingFolders} carpeta(s). Ya existen: ${result.existingFiles} archivo(s) y ${result.existingFolders} carpeta(s)${errorNote}.`
               : `Todo al día: no falta nada por copiar (${result.existingFiles} archivo(s) y ${result.existingFolders} carpeta(s) ya están en destino)${errorNote}.`,
           });
+          if (missingTotal > 0) setCompletedValidateJobId(jobId);
           done = true;
         }
       }
@@ -582,6 +608,7 @@ export const DriveLinksView: React.FC = () => {
     setValidateProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando validación...' });
     setValidateMessage(null);
     setValidateLog(null);
+    setCompletedValidateJobId(null);
     const savedJobId = readSavedValidateJob(links.sourceUrl, links.destinationUrl);
     if (savedJobId) {
       setValidateMessage({ type: 'success', text: 'Retomando una validación interrumpida anteriormente...' });
@@ -635,11 +662,23 @@ export const DriveLinksView: React.FC = () => {
           {validateMessage && (
             <div role="status" className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${validateMessage.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
               <span>{validateMessage.text}</span>
-              {validateLog && validateLog.length > 0 && (
-                <button type="button" onClick={() => downloadValidateReportCsv(validateLog)} className="inline-flex items-center gap-1.5 rounded-md border border-current px-2.5 py-1 text-[11px] font-bold hover:bg-white/60">
-                  <Download className="h-3.5 w-3.5" /> Descargar informe (CSV)
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {completedValidateJobId && (
+                  <button
+                    type="button"
+                    onClick={copyMissingFromValidation}
+                    disabled={isCopying || isValidating}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-current px-2.5 py-1 text-[11px] font-bold hover:bg-white/60 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Copy className="h-3.5 w-3.5" /> Copiar lo que falta
+                  </button>
+                )}
+                {validateLog && validateLog.length > 0 && (
+                  <button type="button" onClick={() => downloadValidateReportCsv(validateLog)} className="inline-flex items-center gap-1.5 rounded-md border border-current px-2.5 py-1 text-[11px] font-bold hover:bg-white/60">
+                    <Download className="h-3.5 w-3.5" /> Descargar informe (CSV)
+                  </button>
+                )}
+              </div>
             </div>
           )}
           {isValidating && (
