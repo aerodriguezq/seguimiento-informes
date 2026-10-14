@@ -255,12 +255,24 @@ export async function copyDriveItemsBatch(
           // original.
           try {
             const sourceChildren = await listDriveChildren(accessToken, item.sourceId);
-            for (const child of sourceChildren) {
-              const childPath = `${item.relativePath}/${child.name}`;
-              const childIsFolder = child.mimeType === FOLDER_MIME;
+            if (sourceChildren.length > 0) {
+              // Una sola ida y vuelta a la base para todos los hijos de esta
+              // carpeta -- antes era un INSERT por hijo, y una carpeta con
+              // cientos de archivos directos por sí sola podía agotar el
+              // tiempo de la invocación antes de terminar de encolarlos.
+              const rows = sourceChildren.map((child) => ({
+                source_id: child.id,
+                parent_item_id: item.id,
+                is_folder: child.mimeType === FOLDER_MIME,
+                name: child.name,
+                mime_type: child.mimeType,
+                relative_path: `${item.relativePath}/${child.name}`,
+              }));
               await sql`
                 INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
-                VALUES (${jobId}, ${child.id}, ${item.id}, ${childIsFolder}, ${child.name}, ${child.mimeType}, ${childPath})
+                SELECT ${jobId}, r.source_id, r.parent_item_id, r.is_folder, r.name, r.mime_type, r.relative_path
+                FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
+                  AS r(source_id text, parent_item_id bigint, is_folder boolean, name text, mime_type text, relative_path text)
               `;
             }
           } catch (discoveryError) {

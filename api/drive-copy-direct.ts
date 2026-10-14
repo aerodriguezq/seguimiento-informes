@@ -24,7 +24,7 @@ export const config = { maxDuration: 60 };
 
 // Por debajo del límite de la función: deja tiempo de sobra para guardar el
 // progreso en la base antes de que Vercel corte la ejecución.
-const CHUNK_BUDGET_MS = 45000;
+const CHUNK_BUDGET_MS = 40000;
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'POST') return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
