@@ -227,8 +227,14 @@ export const DriveLinksView: React.FC = () => {
         } else if (result.done) {
           clearSavedCopyJob();
           setCopyLog(result.log || []);
-          const errorNote = result.errors > 0 ? ` (${result.errors} con error -- revisa el reporte CSV)` : '';
-          setMessage({ type: 'success', text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} omitidos${errorNote}.` });
+          // El motivo del primer error se muestra directo en pantalla -- no
+          // hay que abrir el CSV para enterarse de qué falló.
+          const firstError = (result.log || []).find((entry: DriveCopyLogEntry) => entry.status === 'error' && entry.errorMessage);
+          const errorNote = result.errors > 0 ? ` (${result.errors} con error: ${firstError?.errorMessage ?? 'sin detalle'})` : '';
+          setMessage({
+            type: result.errors > 0 ? 'error' : 'success',
+            text: `Copia completada: ${result.copiedFiles} archivos, ${result.createdFolders} carpetas nuevas y ${result.skippedFiles} omitidos${errorNote}.`,
+          });
           done = true;
         }
       }
