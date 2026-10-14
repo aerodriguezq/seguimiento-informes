@@ -511,6 +511,19 @@ export default function App() {
     }
   };
 
+  const handleUndoStep = async (reportId: string, stepId: string) => {
+    const response = await fetch('/api/reports', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'undoStep', reportId, stepId: Number(stepId), userName: user.name || user.email }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible deshacer los pasos.');
+    setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+    await refetchAlerts();
+    showToast('Deshecho: queda como si esos pasos no hubieran pasado. No se notificó a nadie.', 'success');
+  };
+
   const handleSetPrimaryContact = async (reportId: string, contactId: string) => {
     const response = await fetch('/api/reports', {
       method: 'PATCH',
@@ -1246,6 +1259,7 @@ export default function App() {
           onClose={() => setSelectedReportId(null)}
           onUpdateStatus={handleUpdateReportStatus}
           onSetCurrentStep={handleSetCurrentStep}
+          onUndoStep={handleUndoStep}
           onAddAttachment={handleAddReportAttachment}
           onAdvanceStep={handleAdvanceReportStep}
           onSearchCandidateEmails={handleSearchCandidateEmails}

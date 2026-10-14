@@ -240,6 +240,41 @@ async function createStepAlert(
   }
 }
 
+// Compartido entre "devolver con observación" y "deshacer sin notificar":
+// deja el paso destino como si nunca se hubiera recibido nada, y borra los
+// pasos que quedan entre ese paso y el paso actual (sus filas quedaban con
+// fechas y estado de una pasada anterior aunque el flujo ya haya reiniciado
+// desde más atrás). Devuelve los nombres de los pasos borrados, para dejarlo
+// anotado en el Historial de Trazabilidad.
+async function resetStepAndDownstream(
+  sql: SqlClient,
+  reportId: number,
+  typeId: number,
+  projectId: number,
+  targetStepId: number,
+  targetOrder: number,
+  currentOrder: number,
+): Promise<string[]> {
+  await sql`
+    UPDATE informe_pasos_instancia
+    SET estado_etapa = 'PENDIENTE', fecha_recepcion_real = NULL, correo_gmail_id = NULL,
+      correo_remitente = NULL, ultimo_recordatorio_en = NULL, updated_at = NOW()
+    WHERE informe_id = ${reportId} AND paso_id = ${targetStepId}
+  `;
+  const clearedSteps = (await sql`
+    SELECT paso_id AS id, nombre AS name FROM tipo_informe_pasos
+    WHERE tipo_informe_id = ${typeId} AND orden > ${targetOrder} AND orden <= ${currentOrder}
+      AND (proyecto_id = ${projectId} OR proyecto_id IS NULL)
+  `) as any[];
+  if (clearedSteps.length > 0) {
+    await sql`
+      DELETE FROM informe_pasos_instancia
+      WHERE informe_id = ${reportId} AND paso_id = ANY(${clearedSteps.map((s: any) => s.id)})
+    `;
+  }
+  return clearedSteps.map((s: any) => s.name);
+}
+
 // Un proyecto puede tener su propio flujo completo para un tipo de informe
 // (proyecto_id específico) en vez de usar la plantilla general
 // (proyecto_id = NULL). Devuelve cuál de los dos aplica para ese proyecto.
@@ -1187,34 +1222,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
       let clearedStepNames: string[] = [];
       if (isReturning) {
-        // El paso al que se devuelve queda exactamente como si nunca se
-        // hubiera recibido nada -- el createStepAlert de abajo no toca estos
-        // campos en un UPSERT sobre una fila existente, así que hay que
-        // limpiarlos aparte.
-        await sql`
-          UPDATE informe_pasos_instancia
-          SET estado_etapa = 'PENDIENTE', fecha_recepcion_real = NULL, correo_gmail_id = NULL,
-            correo_remitente = NULL, ultimo_recordatorio_en = NULL, updated_at = NOW()
-          WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
-        `;
-
-        // Los pasos que quedan ENTRE el paso al que se devuelve y el paso
-        // actual (exclusive/inclusive) quedaban con su fila vieja (fechas y
-        // estado de una pasada anterior) aunque el flujo ya no los haya
-        // alcanzado de nuevo -- se borran para que no sigan apareciendo en
-        // "Etapas del proceso" hasta que el flujo los alcance de verdad.
-        const clearedSteps = (await sql`
-          SELECT paso_id AS id, nombre AS name FROM tipo_informe_pasos
-          WHERE tipo_informe_id = ${report.typeId} AND orden > ${step.order} AND orden <= ${currentStep.order}
-            AND (proyecto_id = ${report.projectId} OR proyecto_id IS NULL)
-        `) as any[];
-        clearedStepNames = clearedSteps.map((s: any) => s.name);
-        if (clearedSteps.length > 0) {
-          await sql`
-            DELETE FROM informe_pasos_instancia
-            WHERE informe_id = ${reportId} AND paso_id = ANY(${clearedSteps.map((s: any) => s.id)})
-          `;
-        }
+        clearedStepNames = await resetStepAndDownstream(
+          sql, reportId, report.typeId, report.projectId, stepIdNum, step.order, currentStep.order,
+        );
       }
 
       await sql`UPDATE alertas SET activa = FALSE, updated_at = NOW() WHERE informe_id = ${reportId}`;
@@ -1266,6 +1276,64 @@ export default async function handler(request: VercelRequest, response: VercelRe
         )
       `;
       responseMeta = { isReturning, emailSent };
+    } else if (action === 'undoStep') {
+      // Para cuando el flujo avanzó por error (ej. pruebas, un clic de más)
+      // y no hay ninguna observación real que comunicar -- a diferencia de
+      // "devolver con observación", esto NO pide comentario ni avisa por
+      // correo a nadie, solo deja una nota breve y neutra en el Historial.
+      // Mismo nivel de permiso que la devolución: cualquiera con edición en
+      // Informes puede corregir su propio error.
+      if (!(await canEditModuleRequest(request, sql, 'reports'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Informes.'] });
+      }
+      const { stepId: undoStepId, userName: undoUserName } = request.body ?? {};
+      const undoStepIdNum = Number(undoStepId);
+      if (!Number.isInteger(undoStepIdNum) || undoStepIdNum <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Falta el paso.'] });
+      }
+
+      const [undoReport] = (await sql`
+        SELECT proyecto_id AS "projectId", tipo_informe_id AS "typeId", mes_nombre AS "monthName", anio AS "year",
+          paso_actual_id AS "currentStepId"
+        FROM informes WHERE informe_id = ${reportId}
+      `) as any[];
+      if (!undoReport) return response.status(404).json({ data: null, meta: {}, errors: ['Informe no encontrado.'] });
+
+      const [undoStep] = (await sql`
+        SELECT paso_id AS id, nombre AS name, proyecto_id AS "projectId", orden AS "order"
+        FROM tipo_informe_pasos WHERE paso_id = ${undoStepIdNum} AND tipo_informe_id = ${undoReport.typeId}
+      `) as any[];
+      if (!undoStep) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Ese paso no pertenece al tipo de informe de este registro.'] });
+      }
+      if (undoStep.projectId !== null && Number(undoStep.projectId) !== Number(undoReport.projectId)) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Ese paso pertenece al flujo propio de otro proyecto.'] });
+      }
+
+      const [undoCurrentStep] = undoReport.currentStepId
+        ? ((await sql`SELECT nombre AS name, orden AS "order" FROM tipo_informe_pasos WHERE paso_id = ${undoReport.currentStepId}`) as any[])
+        : [];
+      if (!undoCurrentStep?.order || Number(undoStep.order) >= Number(undoCurrentStep.order)) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Deshacer solo aplica para volver a un paso anterior al actual.'] });
+      }
+
+      const undoClearedStepNames = await resetStepAndDownstream(
+        sql, reportId, undoReport.typeId, undoReport.projectId, undoStepIdNum, undoStep.order, undoCurrentStep.order,
+      );
+
+      await sql`UPDATE alertas SET activa = FALSE, updated_at = NOW() WHERE informe_id = ${reportId}`;
+      await sql`UPDATE informes SET paso_actual_id = ${undoStepIdNum}, flujo_completado = FALSE, updated_at = NOW() WHERE informe_id = ${reportId}`;
+      await createStepAlert(sql, reportId, undoReport.projectId, undoStepIdNum, undoStep.name, undoReport.year, undoReport.monthName);
+
+      await sql`
+        INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
+        VALUES (
+          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), ${undoUserName || 'Usuario'},
+          ${`Deshecho hasta el paso "${undoStep.name}" (corrección por error, sin notificar).${undoClearedStepNames.length > 0 ? ` También se reinician: ${undoClearedStepNames.join(', ')}.` : ''}`}
+        )
+      `;
+      responseMeta = { undone: true };
     } else if (action === 'setPrimaryContact') {
       const { contactId } = request.body ?? {};
       const contactIdNum = Number(contactId);

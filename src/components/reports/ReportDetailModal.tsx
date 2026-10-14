@@ -50,6 +50,7 @@ interface ReportDetailModalProps {
   onClose: () => void;
   onUpdateStatus: (reportId: string, newStatus: ReportStatus, comment: string) => void;
   onSetCurrentStep: (reportId: string, stepId: string, comment: string) => Promise<void>;
+  onUndoStep: (reportId: string, stepId: string) => Promise<void>;
   onAddAttachment: (reportId: string, attachment: ReportAttachment) => void;
   onAdvanceStep: (reportId: string) => Promise<void>;
   onSearchCandidateEmails: (reportId: string) => Promise<EmailCandidate[]>;
@@ -71,6 +72,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   onClose,
   onUpdateStatus,
   onSetCurrentStep,
+  onUndoStep,
   onAddAttachment,
   onAdvanceStep,
   onSearchCandidateEmails,
@@ -179,6 +181,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [targetStepId, setTargetStepId] = useState<string>(report.currentStepId ?? '');
   const [stepTransitionComment, setStepTransitionComment] = useState('');
   const [isSavingStepTransition, setIsSavingStepTransition] = useState(false);
+  const [isUndoingStep, setIsUndoingStep] = useState(false);
   const [activeTab, setActiveTab] = useState<'timeline' | 'contacts' | 'alerts' | 'attachments' | 'history'>('timeline');
 
   const daysRemaining = calculateDaysRemaining(report.dueDate, report.status);
@@ -280,6 +283,16 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
       setShowStepTransitionModal(false);
     } finally {
       setIsSavingStepTransition(false);
+    }
+  };
+
+  const handleConfirmUndoStep = async () => {
+    setIsUndoingStep(true);
+    try {
+      await onUndoStep(report.id, targetStepId);
+      setShowStepTransitionModal(false);
+    } finally {
+      setIsUndoingStep(false);
     }
   };
 
@@ -1206,23 +1219,40 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                 placeholder={isReturning ? 'Ejemplo: El informe tiene un error en la tabla de avance, corregir y reenviar...' : 'Ejemplo: Se corrigió un salto de paso hecho por error...'}
                 className="w-full p-2.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
               />
-              <div className="flex items-center justify-end gap-2 pt-2">
+              {isReturning && (
+                <p className="text-[11px] text-slate-400 -mt-2">
+                  ¿Fue un error (ej. pruebas, un clic de más) y no hay nada real que corregir? Usa "Fue un error" -- no pide observación ni avisa a nadie por correo.
+                </p>
+              )}
+              <div className="flex items-center justify-between gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowStepTransitionModal(false)}
-                  disabled={isSavingStepTransition}
+                  disabled={isSavingStepTransition || isUndoingStep}
                   className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50"
                 >
                   Cancelar
                 </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmStepTransition}
-                  disabled={isSavingStepTransition}
-                  className="px-4 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50"
-                >
-                  {isSavingStepTransition ? 'Guardando...' : isReturning ? 'Confirmar Devolución' : 'Confirmar Cambio de Paso'}
-                </button>
+                <div className="flex items-center gap-2">
+                  {isReturning && (
+                    <button
+                      type="button"
+                      onClick={handleConfirmUndoStep}
+                      disabled={isSavingStepTransition || isUndoingStep}
+                      className="px-3 py-1.5 text-xs font-semibold text-slate-600 border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      {isUndoingStep ? 'Deshaciendo...' : 'Fue un error: deshacer'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleConfirmStepTransition}
+                    disabled={isSavingStepTransition || isUndoingStep}
+                    className="px-4 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {isSavingStepTransition ? 'Guardando...' : isReturning ? 'Confirmar Devolución' : 'Confirmar Cambio de Paso'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
