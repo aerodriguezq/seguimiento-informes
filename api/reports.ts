@@ -598,6 +598,7 @@ async function advanceReportStep(
   sql: SqlClient,
   reportId: number,
   delivery?: { receivedAt: Date; messageId?: string | null; fromEmail?: string | null },
+  actorName?: string,
 ): Promise<void> {
   const [current] = (await sql`
     SELECT i.proyecto_id AS "projectId", i.tipo_informe_id AS "typeId", i.paso_actual_id AS "currentStepId",
@@ -617,23 +618,25 @@ async function advanceReportStep(
   await sql`UPDATE alertas SET activa = FALSE, updated_at = NOW() WHERE informe_id = ${reportId} AND paso_id = ${current.currentStepId}`;
   await finalizeStepInstance(sql, reportId, current.currentStepId, resolvedDelivery);
 
-  // Deja rastro en el Historial de Trazabilidad de cada correo que el
-  // barrido de detección usó para avanzar un paso, con el link directo al
-  // correo en Gmail -- así se puede auditar/abrir cualquier entrega
-  // detectada automáticamente sin tener que buscarla a mano en la bandeja.
-  if (resolvedDelivery.messageId) {
-    const emailLink = `https://mail.google.com/mail/u/0/#all/${resolvedDelivery.messageId}`;
-    const fromNote = resolvedDelivery.fromEmail ? ` de ${resolvedDelivery.fromEmail}` : '';
-    await sql`
-      INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario, correo_link)
-      VALUES (
-        COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
-        ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), ${resolvedDelivery.receivedAt.toISOString()},
-        'Sistema (detección automática)',
-        ${`Correo detectado para "${current.currentStepName}"${fromNote}.`}, ${emailLink}
-      )
-    `;
-  }
+  // Deja rastro en el Historial de Trazabilidad de CADA entrega que avanza
+  // un paso -- con correo detectado (link directo a Gmail) o confirmada a
+  // mano sin correo de por medio -- para poder reconstruir la secuencia
+  // completa (se entregó tal fecha, se devolvió, se volvió a entregar tal
+  // otra) sin que una confirmación manual quede invisible en el historial.
+  const emailLink = resolvedDelivery.messageId ? `https://mail.google.com/mail/u/0/#all/${resolvedDelivery.messageId}` : null;
+  const fromNote = resolvedDelivery.fromEmail ? ` de ${resolvedDelivery.fromEmail}` : '';
+  const comentario = resolvedDelivery.messageId
+    ? `Correo detectado para "${current.currentStepName}"${fromNote}.`
+    : `Entrega confirmada manualmente para "${current.currentStepName}".`;
+  await sql`
+    INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario, correo_link)
+    VALUES (
+      COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+      ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), ${resolvedDelivery.receivedAt.toISOString()},
+      ${actorName || (resolvedDelivery.messageId ? 'Sistema (detección automática)' : 'Usuario')},
+      ${comentario}, ${emailLink}
+    )
+  `;
 
   if (current.isFinal) {
     await sql`UPDATE informes SET flujo_completado = TRUE, estado = 'Enviado', updated_at = NOW() WHERE informe_id = ${reportId}`;
@@ -1065,8 +1068,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
         )
       `;
     } else if (action === 'advance_step') {
+      const { userName: advanceUserName } = request.body ?? {};
       try {
-        await advanceReportStep(sql, reportId);
+        await advanceReportStep(sql, reportId, undefined, advanceUserName);
       } catch (error) {
         if (error instanceof NoWorkflowStepError) {
           return response.status(400).json({ data: null, meta: {}, errors: [error.message] });
@@ -1181,6 +1185,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
         return response.status(400).json({ data: null, meta: {}, errors: ['Escribe la observación por la cual se devuelve al paso anterior.'] });
       }
 
+      let clearedStepNames: string[] = [];
       if (isReturning) {
         // El paso al que se devuelve queda exactamente como si nunca se
         // hubiera recibido nada -- el createStepAlert de abajo no toca estos
@@ -1192,6 +1197,24 @@ export default async function handler(request: VercelRequest, response: VercelRe
             correo_remitente = NULL, ultimo_recordatorio_en = NULL, updated_at = NOW()
           WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
         `;
+
+        // Los pasos que quedan ENTRE el paso al que se devuelve y el paso
+        // actual (exclusive/inclusive) quedaban con su fila vieja (fechas y
+        // estado de una pasada anterior) aunque el flujo ya no los haya
+        // alcanzado de nuevo -- se borran para que no sigan apareciendo en
+        // "Etapas del proceso" hasta que el flujo los alcance de verdad.
+        const clearedSteps = (await sql`
+          SELECT paso_id AS id, nombre AS name FROM tipo_informe_pasos
+          WHERE tipo_informe_id = ${report.typeId} AND orden > ${step.order} AND orden <= ${currentStep.order}
+            AND (proyecto_id = ${report.projectId} OR proyecto_id IS NULL)
+        `) as any[];
+        clearedStepNames = clearedSteps.map((s: any) => s.name);
+        if (clearedSteps.length > 0) {
+          await sql`
+            DELETE FROM informe_pasos_instancia
+            WHERE informe_id = ${reportId} AND paso_id = ANY(${clearedSteps.map((s: any) => s.id)})
+          `;
+        }
       }
 
       await sql`UPDATE alertas SET activa = FALSE, updated_at = NOW() WHERE informe_id = ${reportId}`;
@@ -1238,7 +1261,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
           COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
           ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), ${userName || 'Usuario'},
           ${isReturning
-            ? `Devuelto al paso "${step.name}" por observación: "${comment.trim()}"${emailSent ? ' (correo enviado a los responsables)' : ' (no se pudo enviar el correo)'}`
+            ? `Devuelto al paso "${step.name}" por observación: "${comment.trim()}"${emailSent ? ' (correo enviado a los responsables)' : ' (no se pudo enviar el correo)'}${clearedStepNames.length > 0 ? ` — también se reinician (quedan pendientes de nuevo): ${clearedStepNames.join(', ')}.` : ''}`
             : `Cambio manual de paso a: "${step.name}".${comment ? ` ${comment}` : ''}`}
         )
       `;

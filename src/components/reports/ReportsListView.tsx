@@ -14,7 +14,7 @@ import {
 } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
-import { STAGE_LABEL, STAGE_COLOR } from '../common/stageStatus';
+import { STAGE_LABEL, getStageColorClass } from '../common/stageStatus';
 import { BulkImportReportsModal } from './BulkImportReportsModal';
 import {
   Search,
@@ -530,7 +530,7 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
                         ) : report.currentStepName ? (
                           (() => {
                             const stage = report.stageInstances?.find((s) => s.stepId === report.currentStepId);
-                            const colorClass = (stage && STAGE_COLOR[stage.status]) || 'bg-slate-100 text-slate-600';
+                            const colorClass = stage ? getStageColorClass(stage) : 'bg-slate-100 text-slate-600';
                             return (
                               <span
                                 className={`inline-block max-w-44 truncate rounded-full px-2 py-0.5 text-xs whitespace-nowrap ${colorClass}`}

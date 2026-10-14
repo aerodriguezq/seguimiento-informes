@@ -537,7 +537,7 @@ export default function App() {
       const response = await fetch('/api/reports', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'advance_step', reportId }),
+        body: JSON.stringify({ action: 'advance_step', reportId, userName: user.name || user.email }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible avanzar el paso.');

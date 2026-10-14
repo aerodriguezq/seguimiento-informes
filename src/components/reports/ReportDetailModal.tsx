@@ -16,7 +16,7 @@ import {
 } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
-import { STAGE_LABEL, STAGE_COLOR } from '../common/stageStatus';
+import { STAGE_LABEL, getStageColorClass } from '../common/stageStatus';
 import { useAuth } from '../../auth/AuthContext';
 import {
   X,
@@ -483,7 +483,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                         >
                           {stage.stepName}
                         </div>
-                        <span className={`inline-block mt-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${STAGE_COLOR[stage.status] || 'bg-slate-100 text-slate-600'}`}>
+                        <span className={`inline-block mt-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${getStageColorClass(stage)}`}>
                           {STAGE_LABEL[stage.status] || stage.status}
                         </span>
                       </div>
@@ -649,7 +649,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                             )}
                           </td>
                           <td className="py-2.5 px-3">
-                            <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold whitespace-nowrap ${STAGE_COLOR[stage.status] || 'bg-slate-100 text-slate-600'}`}>
+                            <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-semibold whitespace-nowrap ${getStageColorClass(stage)}`}>
                               {STAGE_LABEL[stage.status] || stage.status}
                             </span>
                           </td>
