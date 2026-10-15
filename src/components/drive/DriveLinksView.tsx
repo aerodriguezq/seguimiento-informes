@@ -291,7 +291,12 @@ export const DriveLinksView: React.FC = () => {
           // El total crece a medida que se descubren más carpetas -- no se
           // conoce de antemano, así que el porcentaje es solo una
           // referencia aproximada mientras la copia sigue en curso.
-          const processed = result.copiedFiles + result.skippedFiles + (result.errors ?? 0);
+          // "total" cuenta carpetas Y archivos (toda fila de drive_copy_items),
+          // así que "processed" tiene que contar lo mismo -- antes solo sumaba
+          // archivos, y con una copia reanudada desde una validación (donde
+          // miles de carpetas ya quedaban resueltas de entrada) el porcentaje
+          // nunca se acercaba a 100% aunque ya casi no quedara nada por hacer.
+          const processed = result.copiedFiles + result.skippedFiles + result.createdFolders + result.reusedFolders + (result.errors ?? 0);
           const total = result.total ?? processed;
           setCopyProgress({
             percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
@@ -351,7 +356,7 @@ export const DriveLinksView: React.FC = () => {
       if (response.ok) {
         const result = payload.data;
         if (Array.isArray(result.recentItems)) setLiveLog(result.recentItems);
-        const processed = (result.copiedFiles ?? 0) + (result.skippedFiles ?? 0) + (result.errors ?? 0);
+        const processed = (result.copiedFiles ?? 0) + (result.skippedFiles ?? 0) + (result.createdFolders ?? 0) + (result.reusedFolders ?? 0) + (result.errors ?? 0);
         const total = result.total ?? processed;
         setCopyProgress({
           percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,

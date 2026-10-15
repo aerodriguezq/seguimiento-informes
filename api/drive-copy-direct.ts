@@ -159,6 +159,18 @@ export default async function handler(request: VercelRequest, response: VercelRe
       if (sourceJob.status !== 'done') {
         return response.status(400).json({ data: null, meta: {}, errors: ['Esa validación todavía no ha terminado.'] });
       }
+      // Cuenta lo que YA estaba resuelto por la validación antes de
+      // convertirlo -- si el resumen arrancara en ceros, la barra de
+      // progreso mostraría "38 de 7422" en vez de reflejar que miles de
+      // esos 7422 ya estaban resueltos desde antes (se veía como si casi no
+      // hubiera avanzado nada).
+      const [{ existingFolders }] = (await sql`
+        SELECT COUNT(*) AS "existingFolders" FROM drive_copy_items WHERE job_id = ${jobId} AND is_folder = TRUE AND status = 'exists'
+      `) as any[];
+      const [{ existingFiles }] = (await sql`
+        SELECT COUNT(*) AS "existingFiles" FROM drive_copy_items WHERE job_id = ${jobId} AND is_folder = FALSE AND status = 'exists'
+      `) as any[];
+
       await sql`
         UPDATE drive_copy_items SET status = 'copied', updated_at = NOW()
         WHERE job_id = ${jobId} AND is_folder = TRUE AND status = 'exists'
@@ -171,8 +183,13 @@ export default async function handler(request: VercelRequest, response: VercelRe
         UPDATE drive_copy_items SET status = 'pending', error_message = NULL, dest_id = NULL, updated_at = NOW()
         WHERE job_id = ${jobId} AND status IN ('missing', 'error')
       `;
+      const initialSummary: DriveCopySummary = {
+        ...emptyDriveCopySummary(),
+        skippedFiles: Number(existingFiles),
+        reusedFolders: Number(existingFolders),
+      };
       await sql`
-        UPDATE drive_copy_jobs SET status = 'running', phase = 'copying', summary = ${JSON.stringify(emptyDriveCopySummary())}::jsonb, updated_at = NOW()
+        UPDATE drive_copy_jobs SET status = 'running', phase = 'copying', summary = ${JSON.stringify(initialSummary)}::jsonb, updated_at = NOW()
         WHERE job_id = ${jobId}
       `;
       // No retorna -- sigue abajo con el mismo camino que cualquier otro
