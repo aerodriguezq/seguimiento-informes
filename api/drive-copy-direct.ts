@@ -13,6 +13,8 @@ import {
   type DriveCopyLogEntry,
 } from '../server/google-drive.js';
 
+type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
+
 function folderIdFromUrl(value: unknown) {
   if (typeof value !== 'string') return null;
   return value.match(/\/folders\/([\w-]+)/)?.[1] ?? null;
@@ -29,7 +31,74 @@ export const config = { maxDuration: 60 };
 // progreso en la base antes de que Vercel corte la ejecución.
 const CHUNK_BUDGET_MS = 40000;
 
+// Igual que getConnectedAccessToken en api/reports.ts -- no depende de la
+// cookie de sesión del navegador (no hay ninguna en un barrido por cron),
+// usa la cuenta de Google conectada más reciente.
+async function getMostRecentAccessToken(sql: SqlClient): Promise<string | null> {
+  const session = (await sql`
+    SELECT token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
+  `) as any[];
+  if (!session[0]) return null;
+  return getDriveAccessToken(session[0].token_json);
+}
+
+// Para que una copia (o validación) siga avanzando aunque la persona cierre
+// la pestaña, apague el computador o pierda la sesión -- GitHub Actions
+// "toca la puerta" cada 15 min (igual que los demás barridos) y esto
+// adelanta un poco cada job que siga en estado "running", sin depender de
+// que nadie tenga la página abierta sondeando. Si la pestaña SÍ está
+// abierta, el sondeo en vivo sigue siendo mucho más rápido (cada 1-2s); el
+// barrido es la red de seguridad para cuando no lo está.
+async function handleDriveCopySweep(sql: SqlClient): Promise<{ jobsProcessed: number; jobsCompleted: number; skipped?: string }> {
+  const runningJobs = (await sql`
+    SELECT job_id AS id, phase, summary, destination_root_id AS "destinationRootId"
+    FROM drive_copy_jobs WHERE status = 'running' ORDER BY updated_at ASC
+  `) as any[];
+  if (runningJobs.length === 0) return { jobsProcessed: 0, jobsCompleted: 0, skipped: 'no-running-jobs' };
+
+  const accessToken = await getMostRecentAccessToken(sql);
+  if (!accessToken) return { jobsProcessed: 0, jobsCompleted: 0, skipped: 'no-connected-google-account' };
+
+  const deadline = Date.now() + CHUNK_BUDGET_MS;
+  let jobsProcessed = 0;
+  let jobsCompleted = 0;
+
+  for (const job of runningJobs) {
+    if (Date.now() > deadline) break;
+    const isValidate = job.phase === 'validating';
+    const result = isValidate
+      ? await validateDriveItemsBatch(sql, accessToken, job.id, job.destinationRootId, job.summary as DriveValidateSummary, deadline)
+      : await copyDriveItemsBatch(sql, accessToken, job.id, job.destinationRootId, job.summary as DriveCopySummary, deadline);
+    jobsProcessed++;
+    if (result.done) {
+      await sql`
+        UPDATE drive_copy_jobs SET status = 'done', phase = 'done', summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW()
+        WHERE job_id = ${job.id}
+      `;
+      jobsCompleted++;
+    } else {
+      await sql`UPDATE drive_copy_jobs SET summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW() WHERE job_id = ${job.id}`;
+    }
+  }
+  return { jobsProcessed, jobsCompleted };
+}
+
 export default async function handler(request: VercelRequest, response: VercelResponse) {
+  if (request.method === 'GET') {
+    const cronSecret = process.env.CRON_SECRET;
+    const isCronRequest = !!cronSecret && request.headers.authorization === `Bearer ${cronSecret}`;
+    if (!isCronRequest) return response.status(401).json({ data: null, meta: {}, errors: ['No autorizado.'] });
+    try {
+      const sql = await getSql();
+      const result = await handleDriveCopySweep(sql);
+      return response.status(200).json({ data: result, meta: {}, errors: [] });
+    } catch (error) {
+      console.error('Drive copy background sweep failed', error);
+      const message = error instanceof Error ? error.message : 'No fue posible continuar las copias de Drive en segundo plano.';
+      return response.status(502).json({ data: null, meta: {}, errors: [message] });
+    }
+  }
+
   if (request.method !== 'POST') return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
 
   let connectionClosed = false;

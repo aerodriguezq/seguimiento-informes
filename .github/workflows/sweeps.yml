@@ -26,6 +26,14 @@ jobs:
           curl -sf -X GET "https://seguimiento-informes.vercel.app/api/alerts" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
 
+  copia-drive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Continuar copias/validaciones de Drive en curso (sin depender de que alguien tenga la pagina abierta)
+        run: |
+          curl -sf -X GET "https://seguimiento-informes.vercel.app/api/drive-copy-direct" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+
   # Importacion del cronograma de Seguimiento desde Google Sheets: ya no
   # corre sola -- solo manual, desde el boton "Ejecutar ahora" en Usuarios
   # Autorizados > Barridos, o disparando este workflow a mano.
