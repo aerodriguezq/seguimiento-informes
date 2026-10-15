@@ -121,12 +121,16 @@ export async function uploadDriveFile(
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
+// Forma única para el informe descargable (copia o validación, completo o
+// detenido a mitad de camino) -- mismos nombres de campo que ya usa el log
+// en vivo (relativePath/isFolder), para no tener dos formas distintas de
+// describir lo mismo según de dónde venga el dato.
 export type DriveCopyLogEntry = {
-  path: string;
+  relativePath: string;
   name: string;
-  type: 'folder' | 'file';
+  isFolder: boolean;
   mimeType: string;
-  status: 'copied' | 'skipped' | 'error';
+  status: string;
   errorMessage?: string | null;
 };
 

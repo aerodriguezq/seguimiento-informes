@@ -2,20 +2,18 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, ChevronDown, ChevronUp, Cloud, Copy, Download, ExternalLink, FolderInput, LogIn, LogOut, Save, SearchCheck, Square } from 'lucide-react';
 import { DriveLinks } from '../../types';
 
-type DriveCopyLogEntry = {
-  path: string;
-  name: string;
-  type: 'folder' | 'file';
-  mimeType: string;
-  status: 'copied' | 'skipped' | 'error';
-  errorMessage?: string | null;
-};
+// Forma única del informe descargable -- mismos nombres de campo que ya usa
+// el log en vivo (relativePath/isFolder), sea un informe de copia o de
+// validación, completo o detenido a mitad de camino.
+type DriveCopyLogEntry = { name: string; relativePath: string; isFolder: boolean; status: string; errorMessage?: string | null };
 
 type RecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'copied' | 'skipped' | 'error'; errorMessage?: string | null };
 
-const STATUS_LABELS: Record<DriveCopyLogEntry['status'], string> = {
+const STATUS_LABELS: Record<string, string> = {
   copied: 'Copiado',
   skipped: 'Omitido (ya existía)',
+  missing: 'Falta por copiar',
+  exists: 'Ya existe en destino',
   error: 'Error',
 };
 
@@ -24,12 +22,6 @@ const STATUS_LABELS: Record<DriveCopyLogEntry['status'], string> = {
 // que falta por copiar -- se corre antes de la copia real para saber qué
 // hace falta sin comprometerse todavía a copiar nada.
 type ValidateRecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'missing' | 'exists' | 'error'; errorMessage?: string | null };
-
-const VALIDATE_STATUS_LABELS: Record<ValidateRecentItem['status'], string> = {
-  missing: 'Falta por copiar',
-  exists: 'Ya existe en destino',
-  error: 'Error',
-};
 
 const LIVE_LOG_COLLAPSED_COUNT = 8;
 
@@ -128,34 +120,60 @@ function clearSavedValidateJob() {
   }
 }
 
-const csvCell = (value: string) => `"${value.replace(/"/g, '""')}"`;
+const REPORT_STATUS_FILL: Record<string, string> = {
+  copied: 'FFDCFCE7', // emerald-100
+  exists: 'FFF1F5F9', // slate-100
+  skipped: 'FFF1F5F9',
+  missing: 'FFFEF3C7', // amber-100
+  error: 'FFFEE2E2', // rose-100
+};
 
-const downloadCsv = (filenamePrefix: string, rows: string[][]) => {
-  const csvContent = rows.map((row) => row.map(csvCell).join(',')).join('\n');
-  const blob = new Blob([`﻿${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+const downloadDriveReportXlsx = async (filenamePrefix: string, sheetTitle: string, entries: DriveCopyLogEntry[]) => {
+  const ExcelJS = (await import('exceljs')).default;
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Seguimiento de Informes';
+
+  const sheet = workbook.addWorksheet(sheetTitle, { views: [{ state: 'frozen', ySplit: 1 }] });
+  sheet.columns = [
+    { header: 'Ruta', key: 'relativePath', width: 60 },
+    { header: 'Nombre', key: 'name', width: 35 },
+    { header: 'Tipo', key: 'tipo', width: 12 },
+    { header: 'Estado', key: 'estado', width: 22 },
+    { header: 'Detalle del error', key: 'errorMessage', width: 45 },
+  ];
+  sheet.getRow(1).eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
+  });
+
+  for (const entry of entries) {
+    const row = sheet.addRow({
+      relativePath: entry.relativePath,
+      name: entry.name,
+      tipo: entry.isFolder ? 'Carpeta' : 'Archivo',
+      estado: STATUS_LABELS[entry.status] || entry.status,
+      errorMessage: entry.errorMessage || '',
+    });
+    const fillColor = REPORT_STATUS_FILL[entry.status];
+    if (fillColor) {
+      row.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } }; });
+    }
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `${filenamePrefix}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+  anchor.download = `${filenamePrefix}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.xlsx`;
   document.body.appendChild(anchor);
   anchor.click();
   document.body.removeChild(anchor);
   URL.revokeObjectURL(url);
 };
 
-const downloadCopyReportCsv = (log: DriveCopyLogEntry[]) => {
-  downloadCsv('informe-copiado-drive', [
-    ['Ruta', 'Nombre', 'Tipo', 'Estado', 'Detalle del error'],
-    ...log.map((entry) => [entry.path, entry.name, entry.type === 'folder' ? 'Carpeta' : 'Archivo', STATUS_LABELS[entry.status], entry.errorMessage ?? '']),
-  ]);
-};
-
-const downloadValidateReportCsv = (items: ValidateRecentItem[]) => {
-  downloadCsv('informe-validacion-drive', [
-    ['Ruta', 'Nombre', 'Tipo', 'Estado', 'Detalle del error'],
-    ...items.map((entry) => [entry.relativePath, entry.name, entry.isFolder ? 'Carpeta' : 'Archivo', VALIDATE_STATUS_LABELS[entry.status], entry.errorMessage ?? '']),
-  ]);
-};
+const downloadCopyReportXlsx = (log: DriveCopyLogEntry[]) => void downloadDriveReportXlsx('informe-copiado-drive', 'Copia', log);
+const downloadValidateReportXlsx = (log: DriveCopyLogEntry[]) => void downloadDriveReportXlsx('informe-validacion-drive', 'Validacion', log);
 
 export const DriveLinksView: React.FC = () => {
   const [links, setLinks] = useState<DriveLinks>({ sourceUrl: '', destinationUrl: '' });
@@ -179,7 +197,7 @@ export const DriveLinksView: React.FC = () => {
   const [isValidating, setIsValidating] = useState(false);
   const [validateProgress, setValidateProgress] = useState({ percent: 0, processed: 0, total: 0, phase: '' });
   const [validateMessage, setValidateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [validateLog, setValidateLog] = useState<ValidateRecentItem[] | null>(null);
+  const [validateLog, setValidateLog] = useState<DriveCopyLogEntry[] | null>(null);
   const [validateLiveLog, setValidateLiveLog] = useState<ValidateRecentItem[]>([]);
   const [isValidateLogExpanded, setIsValidateLogExpanded] = useState(false);
   // Se guarda aparte del ref (que se limpia al terminar el loop) para poder
@@ -489,11 +507,16 @@ export const DriveLinksView: React.FC = () => {
       abortControllerRef.current?.abort();
       if (directJobIdRef.current) {
         try {
-          await fetch('/api/drive-copy-direct', {
+          const response = await fetch('/api/drive-copy-direct', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'cancel', jobId: directJobIdRef.current }),
           });
+          const payload = await parseJsonResponse(response);
+          // Esta llamada SIEMPRE pasa por acá, sin importar si el loop se
+          // enteró por una respuesta normal o por el abort de una petición
+          // en vuelo -- es el punto confiable para guardar el informe.
+          if (response.ok && Array.isArray(payload.data?.log)) setCopyLog(payload.data.log);
         } catch {
           // El loop local ya se detiene con directCancelRequestedRef.
         }
@@ -670,11 +693,13 @@ export const DriveLinksView: React.FC = () => {
     validateAbortControllerRef.current?.abort();
     if (validateJobIdRef.current) {
       try {
-        await fetch('/api/drive-copy-direct', {
+        const response = await fetch('/api/drive-copy-direct', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'cancel', jobId: validateJobIdRef.current }),
         });
+        const payload = await parseJsonResponse(response);
+        if (response.ok && Array.isArray(payload.data?.log)) setValidateLog(payload.data.log);
       } catch {
         // El loop local ya se detiene con validateCancelRequestedRef.
       }
@@ -731,8 +756,8 @@ export const DriveLinksView: React.FC = () => {
                   </button>
                 )}
                 {validateLog && validateLog.length > 0 && (
-                  <button type="button" onClick={() => downloadValidateReportCsv(validateLog)} className="inline-flex items-center gap-1.5 rounded-md border border-current px-2.5 py-1 text-[11px] font-bold hover:bg-white/60">
-                    <Download className="h-3.5 w-3.5" /> Descargar informe (CSV)
+                  <button type="button" onClick={() => void downloadValidateReportXlsx(validateLog)} className="inline-flex items-center gap-1.5 rounded-md border border-current px-2.5 py-1 text-[11px] font-bold hover:bg-white/60">
+                    <Download className="h-3.5 w-3.5" /> Descargar informe (Excel)
                   </button>
                 )}
               </div>
@@ -779,8 +804,8 @@ export const DriveLinksView: React.FC = () => {
             <div role="status" className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${message.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
               <span>{message.text}</span>
               {copyLog && copyLog.length > 0 && (
-                <button type="button" onClick={() => downloadCopyReportCsv(copyLog)} className="inline-flex items-center gap-1.5 rounded-md border border-current px-2.5 py-1 text-[11px] font-bold hover:bg-white/60">
-                  <Download className="h-3.5 w-3.5" /> Descargar informe (CSV)
+                <button type="button" onClick={() => void downloadCopyReportXlsx(copyLog)} className="inline-flex items-center gap-1.5 rounded-md border border-current px-2.5 py-1 text-[11px] font-bold hover:bg-white/60">
+                  <Download className="h-3.5 w-3.5" /> Descargar informe (Excel)
                 </button>
               )}
             </div>

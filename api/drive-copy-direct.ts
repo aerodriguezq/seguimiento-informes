@@ -26,11 +26,11 @@ function folderIdFromUrl(value: unknown) {
 // completarlo entero.
 async function buildJobLog(sql: SqlClient, jobId: string): Promise<{ total: number; log: DriveCopyLogEntry[] }> {
   const rows = (await sql`
-    SELECT relative_path AS path, name, is_folder AS "isFolder", mime_type AS "mimeType", status, error_message AS "errorMessage"
+    SELECT relative_path AS "relativePath", name, is_folder AS "isFolder", mime_type AS "mimeType", status, error_message AS "errorMessage"
     FROM drive_copy_items WHERE job_id = ${jobId} ORDER BY item_id ASC
   `) as any[];
   const log: DriveCopyLogEntry[] = rows.map((r) => ({
-    path: r.path, name: r.name, type: r.isFolder ? 'folder' : 'file', mimeType: r.mimeType, status: r.status, errorMessage: r.errorMessage,
+    relativePath: r.relativePath, name: r.name, isFolder: !!r.isFolder, mimeType: r.mimeType, status: r.status, errorMessage: r.errorMessage,
   }));
   return { total: rows.length, log };
 }
@@ -141,7 +141,12 @@ export default async function handler(request: VercelRequest, response: VercelRe
       // función de lote volver a llamar; `status = 'cancelled'` ya basta
       // para saber que está detenido.
       await sql`UPDATE drive_copy_jobs SET status = 'cancelled', updated_at = NOW() WHERE job_id = ${jobId}`;
-      return response.status(200).json({ data: { cancelled: true }, meta: {}, errors: [] });
+      // El informe de lo hecho hasta aquí viaja en la MISMA respuesta de
+      // cancelar -- este es el único punto donde el frontend siempre pasa,
+      // sin importar si el "Detener" interrumpió una petición en vuelo o
+      // llegó entre lotes.
+      const { total, log } = await buildJobLog(sql, jobId);
+      return response.status(200).json({ data: { cancelled: true, total, log }, meta: {}, errors: [] });
     }
 
     // Solo lectura -- no avanza nada. Sirve para reconstruir el progreso y
@@ -239,20 +244,13 @@ export default async function handler(request: VercelRequest, response: VercelRe
           ORDER BY updated_at DESC LIMIT 1
         `) as any[];
         if (cached) {
-          const [{ total: cachedTotal }] = (await sql`SELECT COUNT(*) AS total FROM drive_copy_items WHERE job_id = ${cached.id}`) as any[];
-          const cachedRows = (await sql`
-            SELECT relative_path AS path, name, is_folder AS "isFolder", mime_type AS "mimeType", status, error_message AS "errorMessage"
-            FROM drive_copy_items WHERE job_id = ${cached.id} ORDER BY item_id ASC
-          `) as any[];
-          const log: DriveCopyLogEntry[] = cachedRows.map((r) => ({
-            path: r.path, name: r.name, type: r.isFolder ? 'folder' : 'file', mimeType: r.mimeType, status: r.status, errorMessage: r.errorMessage,
-          }));
-          const recentItems = cachedRows.map((r) => ({
-            name: r.name, relativePath: r.path, isFolder: !!r.isFolder, status: r.status, errorMessage: r.errorMessage,
+          const { total: cachedTotal, log } = await buildJobLog(sql, cached.id);
+          const recentItems = log.map((entry) => ({
+            name: entry.name, relativePath: entry.relativePath, isFolder: entry.isFolder, status: entry.status, errorMessage: entry.errorMessage,
           }));
           return response.status(200).json({
             data: {
-              jobId: cached.id, done: true, cancelled: false, phase: 'done', total: Number(cachedTotal),
+              jobId: cached.id, done: true, cancelled: false, phase: 'done', total: cachedTotal,
               ...cached.summary, log, recentItems, cached: true, cachedAt: cached.updatedAt,
             },
             meta: {}, errors: [],
