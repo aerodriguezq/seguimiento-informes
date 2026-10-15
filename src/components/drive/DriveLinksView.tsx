@@ -51,19 +51,25 @@ async function parseJsonResponse(response: Response): Promise<any> {
   }
 }
 
-// Si la copia se corta por un error de red (no un "Detener" explícito), el
+// Si la copia se corta (error de red, o un "Detener" explícito), el
 // siguiente clic en "Copiar" retoma el mismo trabajo en vez de volver a
 // escanear todo el origen desde cero -- se guarda solo mientras el par
-// origen/destino no cambie.
+// origen/destino no cambie. `explicitlyStopped` distingue un corte
+// accidental (se retoma solo al recargar la página) de un "Detener" a
+// propósito (el backend lo revive y sigue justo donde quedó, pero solo
+// cuando la persona vuelve a pedirlo con un clic, no en automático al
+// volver a abrir la página -- pidió detenerlo, no que siguiera solo).
 const DRIVE_COPY_JOB_STORAGE_KEY = 'seguimiento_drive_copy_job';
 
-function readSavedCopyJob(sourceUrl: string, destinationUrl: string): string | null {
+type SavedJob = { jobId: string; explicitlyStopped: boolean };
+
+function readSavedCopyJob(sourceUrl: string, destinationUrl: string): SavedJob | null {
   try {
     const raw = window.localStorage.getItem(DRIVE_COPY_JOB_STORAGE_KEY);
     if (!raw) return null;
     const saved = JSON.parse(raw);
     if (saved?.sourceUrl === sourceUrl && saved?.destinationUrl === destinationUrl && typeof saved?.jobId === 'string') {
-      return saved.jobId;
+      return { jobId: saved.jobId, explicitlyStopped: !!saved.explicitlyStopped };
     }
     return null;
   } catch {
@@ -71,9 +77,9 @@ function readSavedCopyJob(sourceUrl: string, destinationUrl: string): string | n
   }
 }
 
-function saveCopyJob(jobId: string, sourceUrl: string, destinationUrl: string) {
+function saveCopyJob(jobId: string, sourceUrl: string, destinationUrl: string, explicitlyStopped = false) {
   try {
-    window.localStorage.setItem(DRIVE_COPY_JOB_STORAGE_KEY, JSON.stringify({ jobId, sourceUrl, destinationUrl }));
+    window.localStorage.setItem(DRIVE_COPY_JOB_STORAGE_KEY, JSON.stringify({ jobId, sourceUrl, destinationUrl, explicitlyStopped }));
   } catch {
     // Conveniencia solamente -- si no se puede guardar, el próximo intento simplemente arranca de cero.
   }
@@ -92,13 +98,13 @@ function clearSavedCopyJob() {
 // filas de un job de copia, y viceversa).
 const DRIVE_VALIDATE_JOB_STORAGE_KEY = 'seguimiento_drive_validate_job';
 
-function readSavedValidateJob(sourceUrl: string, destinationUrl: string): string | null {
+function readSavedValidateJob(sourceUrl: string, destinationUrl: string): SavedJob | null {
   try {
     const raw = window.localStorage.getItem(DRIVE_VALIDATE_JOB_STORAGE_KEY);
     if (!raw) return null;
     const saved = JSON.parse(raw);
     if (saved?.sourceUrl === sourceUrl && saved?.destinationUrl === destinationUrl && typeof saved?.jobId === 'string') {
-      return saved.jobId;
+      return { jobId: saved.jobId, explicitlyStopped: !!saved.explicitlyStopped };
     }
     return null;
   } catch {
@@ -106,9 +112,9 @@ function readSavedValidateJob(sourceUrl: string, destinationUrl: string): string
   }
 }
 
-function saveValidateJob(jobId: string, sourceUrl: string, destinationUrl: string) {
+function saveValidateJob(jobId: string, sourceUrl: string, destinationUrl: string, explicitlyStopped = false) {
   try {
-    window.localStorage.setItem(DRIVE_VALIDATE_JOB_STORAGE_KEY, JSON.stringify({ jobId, sourceUrl, destinationUrl }));
+    window.localStorage.setItem(DRIVE_VALIDATE_JOB_STORAGE_KEY, JSON.stringify({ jobId, sourceUrl, destinationUrl, explicitlyStopped }));
   } catch {
     // Conveniencia solamente.
   }
@@ -192,14 +198,15 @@ export const DriveLinksView: React.FC = () => {
         if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible cargar los enlaces.');
         const loaded: DriveLinks = payload.data || { sourceUrl: '', destinationUrl: '' };
         setLinks(loaded);
-        // Si quedó una copia en curso de un refresco o cierre anterior (no
-        // un "Detener" explícito, eso borra el job guardado), se retoma
-        // sola -- no hace falta darle clic a "Copiar" de nuevo para seguir
-        // viendo el progreso.
-        const savedJobId = readSavedCopyJob(loaded.sourceUrl, loaded.destinationUrl);
-        if (savedJobId) void resumeSavedCopy(savedJobId);
-        const savedValidateJobId = readSavedValidateJob(loaded.sourceUrl, loaded.destinationUrl);
-        if (savedValidateJobId) void resumeSavedValidate(savedValidateJobId);
+        // Si quedó una copia en curso de un refresco o cierre anterior, se
+        // retoma sola -- no hace falta darle clic a "Copiar" de nuevo para
+        // seguir viendo el progreso. Si en cambio se detuvo a propósito, NO
+        // se retoma sola acá (pidieron que parara) -- queda guardada para
+        // que el próximo clic en "Copiar"/"Validar" la retome desde ahí.
+        const savedJob = readSavedCopyJob(loaded.sourceUrl, loaded.destinationUrl);
+        if (savedJob && !savedJob.explicitlyStopped) void resumeSavedCopy(savedJob.jobId);
+        const savedValidateJob = readSavedValidateJob(loaded.sourceUrl, loaded.destinationUrl);
+        if (savedValidateJob && !savedValidateJob.explicitlyStopped) void resumeSavedValidate(savedValidateJob.jobId);
       } catch (error) {
         setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible cargar los enlaces.' });
       } finally {
@@ -262,7 +269,8 @@ export const DriveLinksView: React.FC = () => {
     try {
       while (!done) {
         if (directCancelRequestedRef.current) {
-          setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
+          if (jobId) saveCopyJob(jobId, links.sourceUrl, links.destinationUrl, true);
+          setMessage({ type: 'error', text: 'Copiado detenido por el usuario. El próximo "Copiar" retoma desde aquí.' });
           break;
         }
         const controller = new AbortController();
@@ -307,9 +315,14 @@ export const DriveLinksView: React.FC = () => {
         }
 
         if (result.cancelled) {
-          clearSavedCopyJob();
+          // No se borra el job guardado -- queda marcado como detenido a
+          // propósito, para que el próximo clic en "Copiar" lo retome
+          // justo donde quedó en vez de escanear todo de nuevo. No se
+          // retoma solo al volver a abrir la página (eso sí sería ignorar
+          // que pidieron pararlo).
+          saveCopyJob(jobId, links.sourceUrl, links.destinationUrl, true);
           setCopyLog(result.log || []);
-          setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
+          setMessage({ type: 'error', text: 'Copiado detenido por el usuario. El próximo "Copiar" retoma desde aquí.' });
           done = true;
         } else if (result.done) {
           clearSavedCopyJob();
@@ -327,7 +340,11 @@ export const DriveLinksView: React.FC = () => {
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
-        setMessage({ type: 'error', text: 'Copiado detenido por el usuario.' });
+        // El "Detener" abortó la petición en vuelo antes de que llegara
+        // respuesta -- igual queda marcado como detenido a propósito, para
+        // que el próximo "Copiar" lo retome en vez de escanear de nuevo.
+        if (jobId) saveCopyJob(jobId, links.sourceUrl, links.destinationUrl, true);
+        setMessage({ type: 'error', text: 'Copiado detenido por el usuario. El próximo "Copiar" retoma desde aquí.' });
       } else {
         setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible copiar desde Google Drive.' });
       }
@@ -383,6 +400,10 @@ export const DriveLinksView: React.FC = () => {
     if (!completedValidateJobId) return;
     const jobId = completedValidateJobId;
     setCompletedValidateJobId(null);
+    // Este job pasa a ser de copia (el backend ya le cambia el phase) -- se
+    // limpia el puntero de validación guardado para que un "Validar" más
+    // tarde no lo confunda con uno propio.
+    clearSavedValidateJob();
     setIsCopying(true);
     setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Copiando lo que falta...' });
     setMessage(null);
@@ -397,13 +418,13 @@ export const DriveLinksView: React.FC = () => {
     setMessage(null);
     setCopyLog(null);
     if (driveSession.connected) {
-      const savedJobId = readSavedCopyJob(links.sourceUrl, links.destinationUrl);
-      if (savedJobId) {
-        setMessage({ type: 'success', text: 'Retomando una copia interrumpida anteriormente...' });
+      const savedJob = readSavedCopyJob(links.sourceUrl, links.destinationUrl);
+      if (savedJob) {
+        setMessage({ type: 'success', text: savedJob.explicitlyStopped ? 'Retomando la copia desde donde se detuvo...' : 'Retomando una copia interrumpida anteriormente...' });
       } else {
         setLiveLog([]);
       }
-      await runDirectCopyLoop(savedJobId);
+      await runDirectCopyLoop(savedJob?.jobId ?? null);
       return;
     }
 
@@ -520,7 +541,8 @@ export const DriveLinksView: React.FC = () => {
     try {
       while (!done) {
         if (validateCancelRequestedRef.current) {
-          setValidateMessage({ type: 'error', text: 'Validación detenida por el usuario.' });
+          if (jobId) saveValidateJob(jobId, links.sourceUrl, links.destinationUrl, true);
+          setValidateMessage({ type: 'error', text: 'Validación detenida por el usuario. El próximo "Validar" retoma desde aquí.' });
           break;
         }
         const controller = new AbortController();
@@ -555,9 +577,12 @@ export const DriveLinksView: React.FC = () => {
         }
 
         if (result.cancelled) {
-          clearSavedValidateJob();
+          // Igual que en la copia -- se guarda como detenida a propósito en
+          // vez de borrarse, para que el próximo "Validar" retome desde
+          // aquí; no se retoma sola al recargar la página.
+          saveValidateJob(jobId, links.sourceUrl, links.destinationUrl, true);
           setValidateLog(result.log || []);
-          setValidateMessage({ type: 'error', text: 'Validación detenida por el usuario.' });
+          setValidateMessage({ type: 'error', text: 'Validación detenida por el usuario. El próximo "Validar" retoma desde aquí.' });
           done = true;
         } else if (result.done) {
           clearSavedValidateJob();
@@ -578,7 +603,8 @@ export const DriveLinksView: React.FC = () => {
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
-        setValidateMessage({ type: 'error', text: 'Validación detenida por el usuario.' });
+        if (jobId) saveValidateJob(jobId, links.sourceUrl, links.destinationUrl, true);
+        setValidateMessage({ type: 'error', text: 'Validación detenida por el usuario. El próximo "Validar" retoma desde aquí.' });
       } else {
         setValidateMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible validar la carpeta de Drive.' });
       }
@@ -630,13 +656,13 @@ export const DriveLinksView: React.FC = () => {
     setValidateLog(null);
     setCompletedValidateJobId(null);
     setIsValidateResultCached(false);
-    const savedJobId = force ? null : readSavedValidateJob(links.sourceUrl, links.destinationUrl);
-    if (savedJobId) {
-      setValidateMessage({ type: 'success', text: 'Retomando una validación interrumpida anteriormente...' });
+    const savedJob = force ? null : readSavedValidateJob(links.sourceUrl, links.destinationUrl);
+    if (savedJob) {
+      setValidateMessage({ type: 'success', text: savedJob.explicitlyStopped ? 'Retomando la validación desde donde se detuvo...' : 'Retomando una validación interrumpida anteriormente...' });
     } else {
       setValidateLiveLog([]);
     }
-    await runDirectValidateLoop(savedJobId, force);
+    await runDirectValidateLoop(savedJob?.jobId ?? null, force);
   };
 
   const stopValidate = async () => {

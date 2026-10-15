@@ -20,6 +20,21 @@ function folderIdFromUrl(value: unknown) {
   return value.match(/\/folders\/([\w-]+)/)?.[1] ?? null;
 }
 
+// Informe descargable (CSV) de todo lo que un job alcanzó a hacer -- se
+// arma igual al terminar de verdad que al detenerlo a propósito, para que
+// quien lo pare siempre tenga un registro de dónde quedó, no solo al
+// completarlo entero.
+async function buildJobLog(sql: SqlClient, jobId: string): Promise<{ total: number; log: DriveCopyLogEntry[] }> {
+  const rows = (await sql`
+    SELECT relative_path AS path, name, is_folder AS "isFolder", mime_type AS "mimeType", status, error_message AS "errorMessage"
+    FROM drive_copy_items WHERE job_id = ${jobId} ORDER BY item_id ASC
+  `) as any[];
+  const log: DriveCopyLogEntry[] = rows.map((r) => ({
+    path: r.path, name: r.name, type: r.isFolder ? 'folder' : 'file', mimeType: r.mimeType, status: r.status, errorMessage: r.errorMessage,
+  }));
+  return { total: rows.length, log };
+}
+
 // Deja más margen con reintentos por límite de tasa de Drive; el troceo por
 // lotes (ver server/google-drive.ts, que copia y descubre a la vez) es lo
 // que de verdad evita que una copia grande choque contra este límite --
@@ -121,7 +136,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
     if (action === 'cancel') {
       if (!jobId) return response.status(400).json({ data: null, meta: {}, errors: ['Falta jobId.'] });
-      await sql`UPDATE drive_copy_jobs SET status = 'cancelled', phase = 'cancelled', updated_at = NOW() WHERE job_id = ${jobId}`;
+      // `phase` NO se toca -- se deja como 'validating'/'copying' (de qué
+      // tipo era el job) para que, si se retoma más adelante, se sepa cuál
+      // función de lote volver a llamar; `status = 'cancelled'` ya basta
+      // para saber que está detenido.
+      await sql`UPDATE drive_copy_jobs SET status = 'cancelled', updated_at = NOW() WHERE job_id = ${jobId}`;
       return response.status(200).json({ data: { cancelled: true }, meta: {}, errors: [] });
     }
 
@@ -261,7 +280,12 @@ export default async function handler(request: VercelRequest, response: VercelRe
     `) as any[];
     if (!job) return response.status(404).json({ data: null, meta: {}, errors: ['Esta copia ya no existe (puede haber expirado).'] });
     if (job.status === 'cancelled') {
-      return response.status(200).json({ data: { jobId, done: true, cancelled: true, ...job.summary }, meta: {}, errors: [] });
+      // Llegar hasta acá con este jobId (sin pasar por la acción 'cancel'
+      // ni 'status') significa que alguien le está pidiendo seguir -- un
+      // job detenido a propósito no es un callejón sin salida, retoma
+      // justo donde quedó en vez de tener que empezar de cero.
+      await sql`UPDATE drive_copy_jobs SET status = 'running', updated_at = NOW() WHERE job_id = ${jobId}`;
+      job.status = 'running';
     }
 
     const deadline = Date.now() + CHUNK_BUDGET_MS;
@@ -276,10 +300,16 @@ export default async function handler(request: VercelRequest, response: VercelRe
         UPDATE drive_copy_jobs SET status = 'cancelled', phase = 'cancelled', summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW()
         WHERE job_id = ${jobId}
       `;
-      return response.status(200).json({ data: { jobId, done: true, cancelled: true, ...result.summary, recentItems: result.recentItems }, meta: {}, errors: [] });
+      // Al detenerlo a propósito también queda un informe descargable de lo
+      // que alcanzó a hacer -- sirve de referencia, aunque reanudar el
+      // mismo jobId (o "Copiar lo que falta" sobre una validación) ya
+      // retoma solo desde ahí sin necesidad de leer el CSV primero.
+      const { total: cancelledTotal, log: cancelledLog } = await buildJobLog(sql, jobId);
+      return response.status(200).json({
+        data: { jobId, done: true, cancelled: true, total: cancelledTotal, ...result.summary, log: cancelledLog, recentItems: result.recentItems },
+        meta: {}, errors: [],
+      });
     }
-
-    const [{ total }] = (await sql`SELECT COUNT(*) AS total FROM drive_copy_items WHERE job_id = ${jobId}`) as any[];
 
     if (result.done) {
       // `phase` NO se pisa a 'done' -- se deja como 'validating'/'copying'
@@ -290,22 +320,17 @@ export default async function handler(request: VercelRequest, response: VercelRe
         UPDATE drive_copy_jobs SET status = 'done', summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW()
         WHERE job_id = ${jobId}
       `;
-      const logRows = (await sql`
-        SELECT relative_path AS path, name, is_folder AS "isFolder", mime_type AS "mimeType", status, error_message AS "errorMessage"
-        FROM drive_copy_items WHERE job_id = ${jobId} ORDER BY item_id ASC
-      `) as any[];
-      const log: DriveCopyLogEntry[] = logRows.map((r) => ({
-        path: r.path, name: r.name, type: r.isFolder ? 'folder' : 'file', mimeType: r.mimeType, status: r.status, errorMessage: r.errorMessage,
-      }));
+      const { total, log } = await buildJobLog(sql, jobId);
       return response.status(200).json({
-        data: { jobId, done: true, cancelled: false, phase: 'done', total: Number(total), ...result.summary, log, recentItems: result.recentItems },
+        data: { jobId, done: true, cancelled: false, phase: 'done', total, ...result.summary, log, recentItems: result.recentItems },
         meta: {}, errors: [],
       });
     }
 
     await sql`UPDATE drive_copy_jobs SET summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW() WHERE job_id = ${jobId}`;
+    const [{ total: inProgressTotal }] = (await sql`SELECT COUNT(*) AS total FROM drive_copy_items WHERE job_id = ${jobId}`) as any[];
     return response.status(200).json({
-      data: { jobId, done: false, cancelled: false, phase: nextPhase, total: Number(total), ...result.summary, recentItems: result.recentItems },
+      data: { jobId, done: false, cancelled: false, phase: nextPhase, total: Number(inProgressTotal), ...result.summary, recentItems: result.recentItems },
       meta: {}, errors: [],
     });
   } catch (error) {
