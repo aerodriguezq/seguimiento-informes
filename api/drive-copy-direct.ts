@@ -114,8 +114,44 @@ export default async function handler(request: VercelRequest, response: VercelRe
       if (!sourceId || !destinationId) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Los enlaces de origen y destino no son carpetas Drive válidas.'] });
       }
-      jobId = crypto.randomUUID();
       const isValidate = action === 'validate';
+
+      // Validar recorre TODO el árbol -- si ya se hizo para este mismo par
+      // origen/destino en el último día, se reusa ese resultado tal cual en
+      // vez de volver a comparar todo contra Drive otra vez. `force: true`
+      // (botón "Revalidar") se salta este caché a propósito.
+      if (isValidate && !request.body?.force) {
+        const [cached] = (await sql`
+          SELECT job_id AS id, summary, updated_at AS "updatedAt"
+          FROM drive_copy_jobs
+          WHERE phase = 'validating' AND status = 'done'
+            AND source_root_id = ${sourceId} AND destination_root_id = ${destinationId}
+            AND updated_at > NOW() - INTERVAL '1 day'
+          ORDER BY updated_at DESC LIMIT 1
+        `) as any[];
+        if (cached) {
+          const [{ total: cachedTotal }] = (await sql`SELECT COUNT(*) AS total FROM drive_copy_items WHERE job_id = ${cached.id}`) as any[];
+          const cachedRows = (await sql`
+            SELECT relative_path AS path, name, is_folder AS "isFolder", mime_type AS "mimeType", status, error_message AS "errorMessage"
+            FROM drive_copy_items WHERE job_id = ${cached.id} ORDER BY item_id ASC
+          `) as any[];
+          const log: DriveCopyLogEntry[] = cachedRows.map((r) => ({
+            path: r.path, name: r.name, type: r.isFolder ? 'folder' : 'file', mimeType: r.mimeType, status: r.status, errorMessage: r.errorMessage,
+          }));
+          const recentItems = cachedRows.map((r) => ({
+            name: r.name, relativePath: r.path, isFolder: !!r.isFolder, status: r.status, errorMessage: r.errorMessage,
+          }));
+          return response.status(200).json({
+            data: {
+              jobId: cached.id, done: true, cancelled: false, phase: 'done', total: Number(cachedTotal),
+              ...cached.summary, log, recentItems, cached: true, cachedAt: cached.updatedAt,
+            },
+            meta: {}, errors: [],
+          });
+        }
+      }
+
+      jobId = crypto.randomUUID();
       // Solo se siembra la fila raíz -- nunca se lee el árbol completo por
       // adelantado. El resto se va descubriendo lote a lote a medida que se
       // copia (o se valida), en server/google-drive.ts.

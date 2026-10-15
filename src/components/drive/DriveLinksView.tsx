@@ -179,6 +179,7 @@ export const DriveLinksView: React.FC = () => {
   // Se guarda aparte del ref (que se limpia al terminar el loop) para poder
   // ofrecer "Copiar lo que falta" después de que la validación ya terminó.
   const [completedValidateJobId, setCompletedValidateJobId] = useState<string | null>(null);
+  const [isValidateResultCached, setIsValidateResultCached] = useState(false);
   const validateAbortControllerRef = useRef<AbortController | null>(null);
   const validateJobIdRef = useRef<string | null>(null);
   const validateCancelRequestedRef = useRef(false);
@@ -494,7 +495,19 @@ export const DriveLinksView: React.FC = () => {
   // Mismo mecanismo que runDirectCopyLoop, pero contra el job de validación
   // (action: 'validate' al crearlo) -- nunca escribe nada en Drive, solo
   // compara y clasifica.
-  const runDirectValidateLoop = async (initialJobId: string | null) => {
+  const relativeTimeFromNow = (isoDate: string): string => {
+    const diffMs = Date.now() - new Date(isoDate).getTime();
+    const minutes = Math.round(diffMs / 60000);
+    if (minutes < 1) return 'hace un momento';
+    if (minutes < 60) return `hace ${minutes} minuto(s)`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `hace ${hours} hora(s)`;
+    return `hace ${Math.round(hours / 24)} día(s)`;
+  };
+
+  // force=true salta el caché de un día y vuelve a recorrer Drive desde
+  // cero -- lo usa el botón "Revalidar ahora" sobre un resultado guardado.
+  const runDirectValidateLoop = async (initialJobId: string | null, force = false) => {
     validateCancelRequestedRef.current = false;
     validateJobIdRef.current = null;
     let jobId: string | null = initialJobId;
@@ -510,7 +523,7 @@ export const DriveLinksView: React.FC = () => {
         const response = await fetch('/api/drive-copy-direct', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(jobId ? { jobId } : { ...links, action: 'validate' }),
+          body: JSON.stringify(jobId ? { jobId } : { ...links, action: 'validate', force }),
           signal: controller.signal,
         });
         validateAbortControllerRef.current = null;
@@ -546,13 +559,15 @@ export const DriveLinksView: React.FC = () => {
           setValidateLog(result.log || []);
           const missingTotal = (result.missingFiles ?? 0) + (result.missingFolders ?? 0);
           const errorNote = result.errors > 0 ? ` (${result.errors} con error al validar)` : '';
+          const cachedNote = result.cached ? ` [resultado guardado, validado ${relativeTimeFromNow(result.cachedAt)}]` : '';
           setValidateMessage({
             type: missingTotal > 0 ? 'error' : 'success',
-            text: missingTotal > 0
+            text: (missingTotal > 0
               ? `Faltan por copiar: ${result.missingFiles} archivo(s) y ${result.missingFolders} carpeta(s). Ya existen: ${result.existingFiles} archivo(s) y ${result.existingFolders} carpeta(s)${errorNote}.`
-              : `Todo al día: no falta nada por copiar (${result.existingFiles} archivo(s) y ${result.existingFolders} carpeta(s) ya están en destino)${errorNote}.`,
+              : `Todo al día: no falta nada por copiar (${result.existingFiles} archivo(s) y ${result.existingFolders} carpeta(s) ya están en destino)${errorNote}.`) + cachedNote,
           });
           if (missingTotal > 0) setCompletedValidateJobId(jobId);
+          setIsValidateResultCached(!!result.cached);
           done = true;
         }
       }
@@ -603,19 +618,20 @@ export const DriveLinksView: React.FC = () => {
     await runDirectValidateLoop(jobId);
   };
 
-  const validateFolder = async () => {
+  const validateFolder = async (force = false) => {
     setIsValidating(true);
     setValidateProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando validación...' });
     setValidateMessage(null);
     setValidateLog(null);
     setCompletedValidateJobId(null);
-    const savedJobId = readSavedValidateJob(links.sourceUrl, links.destinationUrl);
+    setIsValidateResultCached(false);
+    const savedJobId = force ? null : readSavedValidateJob(links.sourceUrl, links.destinationUrl);
     if (savedJobId) {
       setValidateMessage({ type: 'success', text: 'Retomando una validación interrumpida anteriormente...' });
     } else {
       setValidateLiveLog([]);
     }
-    await runDirectValidateLoop(savedJobId);
+    await runDirectValidateLoop(savedJobId, force);
   };
 
   const stopValidate = async () => {
@@ -663,6 +679,16 @@ export const DriveLinksView: React.FC = () => {
             <div role="status" className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${validateMessage.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
               <span>{validateMessage.text}</span>
               <div className="flex items-center gap-2">
+                {isValidateResultCached && (
+                  <button
+                    type="button"
+                    onClick={() => void validateFolder(true)}
+                    disabled={isCopying || isValidating}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-current px-2.5 py-1 text-[11px] font-bold hover:bg-white/60 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <SearchCheck className="h-3.5 w-3.5" /> Revalidar ahora
+                  </button>
+                )}
                 {completedValidateJobId && (
                   <button
                     type="button"
@@ -735,7 +761,7 @@ export const DriveLinksView: React.FC = () => {
               {isValidating ? (
                 <button type="button" onClick={stopValidate} className="inline-flex items-center gap-2 rounded-lg border border-rose-600 bg-rose-50 px-4 py-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100"><Square className="h-3.5 w-3.5" /> Detener validación</button>
               ) : (
-                <button type="button" onClick={validateFolder} disabled={isSaving || isCopying || !links.sourceUrl || !links.destinationUrl || !driveSession.connected} title="Revisa qué archivos faltan por copiar, sin copiar nada todavía" className="inline-flex items-center gap-2 rounded-lg border border-indigo-600 px-4 py-2.5 text-xs font-bold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"><SearchCheck className="h-3.5 w-3.5" /> Validar qué falta</button>
+                <button type="button" onClick={() => void validateFolder()} disabled={isSaving || isCopying || !links.sourceUrl || !links.destinationUrl || !driveSession.connected} title="Revisa qué archivos faltan por copiar, sin copiar nada todavía" className="inline-flex items-center gap-2 rounded-lg border border-indigo-600 px-4 py-2.5 text-xs font-bold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"><SearchCheck className="h-3.5 w-3.5" /> Validar qué falta</button>
               )}
               {isCopying ? (
                 <button type="button" onClick={stopCopy} className="inline-flex items-center gap-2 rounded-lg border border-rose-600 bg-rose-50 px-4 py-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100"><Square className="h-3.5 w-3.5" /> Detener copiado</button>
