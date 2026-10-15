@@ -154,6 +154,48 @@ export async function seedDriveCopyRoot(sql: SqlClient, jobId: string, accessTok
   `;
 }
 
+// El listado de hijos de una carpeta DESTINO (para saber qué ya existe ahí)
+// se pedía a Drive cada vez que una invocación nueva volvía a tocar esa
+// misma carpeta -- cada sondeo del navegador, o cada corrida del barrido
+// por cron, es una invocación nueva sin memoria de la anterior. Ahora, una
+// vez que se lista una carpeta destino, esa respuesta queda guardada en la
+// fila que le corresponde (la raíz en drive_copy_jobs, cualquier otra en su
+// propia fila de drive_copy_items) y las invocaciones siguientes del MISMO
+// job la reusan en vez de volver a pedírsela a Drive. Esto asume que nadie
+// más le está agregando archivos a mano a esa carpeta destino a mitad de la
+// copia -- si eso pasa, esos archivos nuevos no se detectan como "ya
+// existen" hasta la próxima copia/validación.
+function createDestChildrenResolver(sql: SqlClient, jobId: string, accessToken: string) {
+  const memo = new Map<string, DriveFile[]>();
+  return async (destFolderId: string, parentItemId: number | string | null): Promise<DriveFile[]> => {
+    const memoized = memo.get(destFolderId);
+    if (memoized) return memoized;
+
+    if (parentItemId === null) {
+      const [row] = (await sql`SELECT dest_root_children AS children FROM drive_copy_jobs WHERE job_id = ${jobId}`) as any[];
+      if (row?.children) {
+        memo.set(destFolderId, row.children);
+        return row.children;
+      }
+    } else {
+      const [row] = (await sql`SELECT dest_children AS children FROM drive_copy_items WHERE item_id = ${parentItemId}`) as any[];
+      if (row?.children) {
+        memo.set(destFolderId, row.children);
+        return row.children;
+      }
+    }
+
+    const children = await listDriveChildren(accessToken, destFolderId);
+    memo.set(destFolderId, children);
+    if (parentItemId === null) {
+      await sql`UPDATE drive_copy_jobs SET dest_root_children = ${JSON.stringify(children)}::jsonb WHERE job_id = ${jobId}`;
+    } else {
+      await sql`UPDATE drive_copy_items SET dest_children = ${JSON.stringify(children)}::jsonb WHERE item_id = ${parentItemId}`;
+    }
+    return children;
+  };
+}
+
 const COPY_BATCH_SELECT_SIZE = 25;
 
 export type DriveCopyRecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'copied' | 'skipped' | 'error'; errorMessage?: string };
@@ -176,14 +218,7 @@ export async function copyDriveItemsBatch(
   deadline: number,
   isCancelled: () => boolean = () => false,
 ): Promise<{ summary: DriveCopySummary; done: boolean; cancelled: boolean; recentItems: DriveCopyRecentItem[] }> {
-  const destChildrenCache = new Map<string, DriveFile[]>();
-  const getDestChildren = async (destFolderId: string): Promise<DriveFile[]> => {
-    const cached = destChildrenCache.get(destFolderId);
-    if (cached) return cached;
-    const children = await listDriveChildren(accessToken, destFolderId);
-    destChildrenCache.set(destFolderId, children);
-    return children;
-  };
+  const getDestChildren = createDestChildrenResolver(sql, jobId, accessToken);
 
   // Los items que esta invocación procesó -- el llamador los agrega a un
   // log en vivo que se ve crecer en pantalla a medida que corre, en vez de
@@ -235,7 +270,7 @@ export async function copyDriveItemsBatch(
       const destParentId: string = item.parentItemId === null ? destinationRootId : item.parentDestId;
       try {
         if (item.isFolder) {
-          const siblings = await getDestChildren(destParentId);
+          const siblings = await getDestChildren(destParentId, item.parentItemId);
           const existing = siblings.find((f) => f.name === item.name && f.mimeType === FOLDER_MIME);
           const destFolder = existing ?? (await driveRequest<DriveFile>(accessToken, '/files?supportsAllDrives=true', {
             method: 'POST',
@@ -285,7 +320,7 @@ export async function copyDriveItemsBatch(
             recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'error', errorMessage: `No se pudo listar su contenido: ${errorMessage}` });
           }
         } else {
-          const siblings = await getDestChildren(destParentId);
+          const siblings = await getDestChildren(destParentId, item.parentItemId);
           const existing = siblings.find((f) => f.name === item.name && f.mimeType === item.mimeType);
           if (existing) {
             summary.skippedFiles++;
@@ -366,14 +401,7 @@ export async function validateDriveItemsBatch(
   deadline: number,
   isCancelled: () => boolean = () => false,
 ): Promise<{ summary: DriveValidateSummary; done: boolean; cancelled: boolean; recentItems: DriveValidateRecentItem[] }> {
-  const destChildrenCache = new Map<string, DriveFile[]>();
-  const getDestChildren = async (destFolderId: string): Promise<DriveFile[]> => {
-    const cached = destChildrenCache.get(destFolderId);
-    if (cached) return cached;
-    const children = await listDriveChildren(accessToken, destFolderId);
-    destChildrenCache.set(destFolderId, children);
-    return children;
-  };
+  const getDestChildren = createDestChildrenResolver(sql, jobId, accessToken);
 
   const recentItems: DriveValidateRecentItem[] = [];
 
@@ -428,7 +456,7 @@ export async function validateDriveItemsBatch(
         }
 
         if (item.isFolder) {
-          const siblings = await getDestChildren(destParentId!);
+          const siblings = await getDestChildren(destParentId!, item.parentItemId);
           const existing = siblings.find((f) => f.name === item.name && f.mimeType === FOLDER_MIME);
           if (existing) {
             summary.existingFolders++;
@@ -441,7 +469,7 @@ export async function validateDriveItemsBatch(
           }
           await discoverSourceChildren(sql, accessToken, jobId, item);
         } else {
-          const siblings = await getDestChildren(destParentId!);
+          const siblings = await getDestChildren(destParentId!, item.parentItemId);
           const existing = siblings.find((f) => f.name === item.name && f.mimeType === item.mimeType);
           if (existing) {
             summary.existingFiles++;
