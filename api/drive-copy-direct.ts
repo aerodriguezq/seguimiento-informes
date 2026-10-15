@@ -71,8 +71,12 @@ async function handleDriveCopySweep(sql: SqlClient): Promise<{ jobsProcessed: nu
       : await copyDriveItemsBatch(sql, accessToken, job.id, job.destinationRootId, job.summary as DriveCopySummary, deadline);
     jobsProcessed++;
     if (result.done) {
+      // `phase` NO se pisa a 'done' -- se deja como 'validating'/'copying'
+      // (qué tipo de job era) para que el caché de un día de Validar lo
+      // pueda seguir identificando después de terminado; `status = 'done'`
+      // ya basta para saber que terminó.
       await sql`
-        UPDATE drive_copy_jobs SET status = 'done', phase = 'done', summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW()
+        UPDATE drive_copy_jobs SET status = 'done', summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW()
         WHERE job_id = ${job.id}
       `;
       jobsCompleted++;
@@ -261,8 +265,12 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const [{ total }] = (await sql`SELECT COUNT(*) AS total FROM drive_copy_items WHERE job_id = ${jobId}`) as any[];
 
     if (result.done) {
+      // `phase` NO se pisa a 'done' -- se deja como 'validating'/'copying'
+      // para que el caché de un día de Validar lo pueda seguir
+      // identificando después de terminado; `status = 'done'` ya basta
+      // para saber que el job terminó.
       await sql`
-        UPDATE drive_copy_jobs SET status = 'done', phase = 'done', summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW()
+        UPDATE drive_copy_jobs SET status = 'done', summary = ${JSON.stringify(result.summary)}::jsonb, updated_at = NOW()
         WHERE job_id = ${jobId}
       `;
       const logRows = (await sql`
