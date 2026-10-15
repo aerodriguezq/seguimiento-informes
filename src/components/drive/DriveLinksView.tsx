@@ -43,6 +43,29 @@ async function parseJsonResponse(response: Response): Promise<any> {
   }
 }
 
+// Un sondeo de una copia/validación larga puede durar horas -- un corte de
+// red pasajero o que Vercel cambie de versión desplegada a mitad de camino
+// (esto último pasa seguido mientras seguimos ajustando esta misma
+// pantalla) tira un "Failed to fetch" aislado, no un corte real. Antes eso
+// mataba el intento entero y exigía un clic manual en "Copiar" para
+// retomar -- ahora reintenta solo unas veces con una pausa corta antes de
+// darse por vencido. Un "Detener" explícito (AbortError) nunca se
+// reintenta, se deja pasar de inmediato.
+const FETCH_RETRY_ATTEMPTS = 4;
+const FETCH_RETRY_DELAY_MS = 3000;
+
+async function fetchWithRetry(input: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(input, init);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error;
+      if (attempt >= FETCH_RETRY_ATTEMPTS) throw error;
+      await new Promise((resolve) => setTimeout(resolve, FETCH_RETRY_DELAY_MS));
+    }
+  }
+}
+
 // Si la copia se corta (error de red, o un "Detener" explícito), el
 // siguiente clic en "Copiar" retoma el mismo trabajo en vez de volver a
 // escanear todo el origen desde cero -- se guarda solo mientras el par
@@ -295,7 +318,7 @@ export const DriveLinksView: React.FC = () => {
         abortControllerRef.current = controller;
         const requestBody = isFirstRequest && firstRequestBody ? firstRequestBody : (jobId ? { jobId } : links);
         isFirstRequest = false;
-        const response = await fetch('/api/drive-copy-direct', {
+        const response = await fetchWithRetry('/api/drive-copy-direct', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
@@ -570,7 +593,7 @@ export const DriveLinksView: React.FC = () => {
         }
         const controller = new AbortController();
         validateAbortControllerRef.current = controller;
-        const response = await fetch('/api/drive-copy-direct', {
+        const response = await fetchWithRetry('/api/drive-copy-direct', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(jobId ? { jobId } : { ...links, action: 'validate', force }),
