@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { LogIn, ShieldAlert, ShieldCheck } from 'lucide-react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { Clock, LogIn, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 export type PermissionModule = 'dashboard' | 'reports' | 'projects' | 'alerts' | 'lists' | 'drive_links' | 'seguimiento' | 'peticiones' | 'file_cleaner';
 export type PermissionLevel = 'none' | 'view' | 'edit';
@@ -44,10 +44,21 @@ export function useAuth(): AuthContextValue {
   return ctx;
 }
 
+// Si no hay ninguna interacción (clic, tecla, scroll, movimiento de mouse)
+// en este tiempo, se cierra la sesión sola y se vuelve a pedir el ingreso --
+// puramente del lado del navegador: no depende de que cierta llamada al
+// backend se haya hecho, solo de que la persona haya estado usando la
+// página de verdad.
+const IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+const IDLE_CHECK_INTERVAL_MS = 60 * 1000;
+const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'scroll', 'touchstart', 'mousemove'] as const;
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [status, setStatus] = useState<'loading' | 'anonymous' | 'authenticated'>('loading');
   const [user, setUser] = useState<AuthUser | null>(null);
   const [wasUnauthorized, setWasUnauthorized] = useState(false);
+  const [wasIdleTimeout, setWasIdleTimeout] = useState(false);
+  const lastActivityRef = useRef(Date.now());
 
   useEffect(() => {
     const init = async () => {
@@ -77,6 +88,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setStatus('anonymous');
   };
 
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    lastActivityRef.current = Date.now();
+    const markActive = () => { lastActivityRef.current = Date.now(); };
+    ACTIVITY_EVENTS.forEach((eventName) => window.addEventListener(eventName, markActive, { passive: true }));
+    const intervalId = window.setInterval(() => {
+      if (Date.now() - lastActivityRef.current >= IDLE_TIMEOUT_MS) {
+        setWasIdleTimeout(true);
+        void logout();
+      }
+    }, IDLE_CHECK_INTERVAL_MS);
+    return () => {
+      ACTIVITY_EVENTS.forEach((eventName) => window.removeEventListener(eventName, markActive));
+      window.clearInterval(intervalId);
+    };
+  }, [status]);
+
   if (status === 'loading') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100">
@@ -100,6 +128,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             <div className="mt-4 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-left text-xs text-rose-700">
               <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
               <span>Esa cuenta de Google no está autorizada para usar esta aplicación. Contacta al administrador.</span>
+            </div>
+          )}
+          {wasIdleTimeout && (
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-left text-xs text-amber-800">
+              <Clock className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>Tu sesión se cerró por 2 horas sin actividad. Inicia sesión de nuevo para continuar.</span>
             </div>
           )}
           <a
