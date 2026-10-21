@@ -58,6 +58,8 @@ type SeguimientoRow = {
 type Kpi = { total: number; avance: number };
 type SeguimientoData = {
   config: {
+    seguimientoId: number;
+    nombre: string;
     spreadsheetId: string | null;
     cronogramaGid: string | null;
     lastImportAt: string | null;
@@ -67,6 +69,18 @@ type SeguimientoData = {
   } | null;
   kpis: Record<string, Kpi>;
   rows: SeguimientoRow[];
+};
+
+// Un proyecto puede tener varias hojas con el mismo formato (ej. una por
+// contrato/fase bajo un mismo proyecto) -- esto es el resumen liviano de
+// cada una, para armar el selector sin traer los datos pesados de todas.
+type SeguimientoSheetSummary = {
+  seguimientoId: number;
+  nombre: string;
+  spreadsheetId: string | null;
+  cronogramaGid: string | null;
+  lastImportAt: string | null;
+  lastError: string | null;
 };
 
 type LogEntry = { time: string; message: string; tone: 'info' | 'success' | 'error' };
@@ -184,14 +198,46 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   const [draftColumns, setDraftColumns] = useState<Set<string>>(new Set(INSUMO_COLUMN_KEYS));
   const [isSavingColumns, setIsSavingColumns] = useState(false);
 
+  // Un proyecto puede tener varias hojas con el mismo formato (ej. San
+  // Jacinto con una por contrato/fase) -- se listan primero (liviano) y se
+  // elige cuál mostrar con un selector, antes de pedir los datos pesados de
+  // ninguna en particular.
+  const [sheets, setSheets] = useState<SeguimientoSheetSummary[] | null>(null);
+  const [selectedSeguimientoId, setSelectedSeguimientoId] = useState<number | null>(null);
+  const [isAddingSheet, setIsAddingSheet] = useState(false);
+  const [newSheetName, setNewSheetName] = useState('');
+  const [newSheetLink, setNewSheetLink] = useState('');
+  const [isCreatingSheet, setIsCreatingSheet] = useState(false);
+
   const pushLog = (message: string, tone: LogEntry['tone']) => {
     const time = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     setLog((prev) => [{ time, message, tone }, ...prev].slice(0, 14));
   };
 
-  const fetchData = async () => {
+  const loadSheets = async (preferSeguimientoId?: number) => {
     try {
-      const res = await fetch(`/api/projects?seguimiento=cronograma&projectId=${encodeURIComponent(projectId)}`);
+      const res = await fetch(`/api/projects?seguimiento=listaHojas&projectId=${encodeURIComponent(projectId)}`);
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible cargar las hojas de seguimiento.');
+      const list: SeguimientoSheetSummary[] = payload.data || [];
+      setSheets(list);
+      const preferred = preferSeguimientoId && list.some((s) => s.seguimientoId === preferSeguimientoId)
+        ? preferSeguimientoId
+        : list[0]?.seguimientoId ?? null;
+      setSelectedSeguimientoId(preferred);
+      if (!preferred) {
+        setData(null);
+        setIsLoading(false);
+      }
+    } catch (err) {
+      pushLog(err instanceof Error ? err.message : 'No fue posible cargar las hojas de seguimiento.', 'error');
+      setIsLoading(false);
+    }
+  };
+
+  const fetchData = async (seguimientoId: number) => {
+    try {
+      const res = await fetch(`/api/projects?seguimiento=cronograma&seguimientoId=${seguimientoId}`);
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible cargar el seguimiento.');
       setData(payload.data);
@@ -205,11 +251,21 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   useEffect(() => {
     setIsLoading(true);
     setData(null);
-    fetchData();
+    setSheets(null);
+    setSelectedSeguimientoId(null);
+    void loadSheets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  useEffect(() => {
+    if (selectedSeguimientoId == null) return;
+    setIsLoading(true);
+    void fetchData(selectedSeguimientoId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSeguimientoId]);
+
   const handleImport = async () => {
+    if (!selectedSeguimientoId) return;
     setIsImporting(true);
     setIsLogVisible(true);
     pushLog('Leyendo la hoja de cálculo conectada (Cronograma, Insumos, Abono, Material Vegetal, Beneficiarios...)...', 'info');
@@ -217,7 +273,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'importCronograma', projectId: Number(projectId) }),
+        body: JSON.stringify({ kind: 'importCronograma', seguimientoId: selectedSeguimientoId }),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible importar el seguimiento.');
@@ -232,7 +288,8 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
         pushLog(`Entrega Estimada Manual: ${d.entregaEstimadaManual.filasLeidas} fila(s) → ${d.entregaEstimadaManual.subActividadesConDatos} sub actividad(es).`, 'info');
         pushLog(`Beneficiarios: ${d.beneficiarios.filasLeidas} fila(s).`, 'info');
       }
-      await fetchData();
+      await fetchData(selectedSeguimientoId);
+      await loadSheets(selectedSeguimientoId);
     } catch (err) {
       pushLog(err instanceof Error ? err.message : 'No fue posible importar el seguimiento.', 'error');
     } finally {
@@ -241,6 +298,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   };
 
   const handleSaveConfig = async () => {
+    if (!selectedSeguimientoId) return;
     const ids = extractSheetIds(sheetInput);
     if (!ids) {
       pushLog('Pega el link completo de la hoja de cálculo (o solo su ID).', 'error');
@@ -251,14 +309,15 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'seguimientoConfig', projectId: Number(projectId), spreadsheetId: ids.spreadsheetId, cronogramaGid: ids.gid }),
+        body: JSON.stringify({ kind: 'seguimientoConfig', seguimientoId: selectedSeguimientoId, spreadsheetId: ids.spreadsheetId, cronogramaGid: ids.gid }),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar la hoja de cálculo.');
       pushLog('Hoja de cálculo configurada. Ahora puedes importar.', 'success');
       setIsEditingConfig(false);
       setSheetInput('');
-      await fetchData();
+      await fetchData(selectedSeguimientoId);
+      await loadSheets(selectedSeguimientoId);
     } catch (err) {
       pushLog(err instanceof Error ? err.message : 'No fue posible guardar la hoja de cálculo.', 'error');
     } finally {
@@ -267,6 +326,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   };
 
   const handleSaveDriveFolder = async () => {
+    if (!selectedSeguimientoId) return;
     const url = driveFolderInput.trim();
     if (!url) {
       pushLog('Pega el link de la carpeta de Drive.', 'error');
@@ -277,17 +337,56 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'seguimientoDriveFolder', projectId: Number(projectId), driveFolderUrl: url }),
+        body: JSON.stringify({ kind: 'seguimientoDriveFolder', seguimientoId: selectedSeguimientoId, driveFolderUrl: url }),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar la carpeta de Drive.');
       pushLog('Carpeta de Drive vinculada.', 'success');
       setDriveFolderInput('');
-      await fetchData();
+      await fetchData(selectedSeguimientoId);
     } catch (err) {
       pushLog(err instanceof Error ? err.message : 'No fue posible guardar la carpeta de Drive.', 'error');
     } finally {
       setIsSavingDriveFolder(false);
+    }
+  };
+
+  // Crea una hoja NUEVA bajo este proyecto (la primera, o una adicional del
+  // mismo formato -- ej. otro contrato/fase de San Jacinto). El link de
+  // Google Sheets es opcional acá: se puede crear solo con el nombre y
+  // vincular la hoja de cálculo después con "Cambiar hoja".
+  const handleCreateSheet = async () => {
+    const nombre = newSheetName.trim() || (sheets && sheets.length > 0 ? '' : 'Principal');
+    if (!nombre) {
+      pushLog('Dale un nombre a la hoja (ej. "Contrato A", "Fase 1").', 'error');
+      return;
+    }
+    const ids = newSheetLink.trim() ? extractSheetIds(newSheetLink) : null;
+    if (newSheetLink.trim() && !ids) {
+      pushLog('Pega el link completo de la hoja de cálculo (o solo su ID), o déjalo en blanco para vincularla después.', 'error');
+      return;
+    }
+    setIsCreatingSheet(true);
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'seguimientoCreateSheet', projectId: Number(projectId), nombre,
+          spreadsheetId: ids?.spreadsheetId, cronogramaGid: ids?.gid,
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible crear la hoja.');
+      pushLog(`Hoja "${nombre}" creada.`, 'success');
+      setIsAddingSheet(false);
+      setNewSheetName('');
+      setNewSheetLink('');
+      await loadSheets(payload.data.seguimientoId);
+    } catch (err) {
+      pushLog(err instanceof Error ? err.message : 'No fue posible crear la hoja.', 'error');
+    } finally {
+      setIsCreatingSheet(false);
     }
   };
 
@@ -307,13 +406,14 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   };
 
   const handleSaveColumns = async () => {
+    if (!selectedSeguimientoId) return;
     setIsSavingColumns(true);
     try {
       const columnas = draftColumns.size === INSUMO_COLUMN_KEYS.length ? null : INSUMO_COLUMN_KEYS.filter((k) => draftColumns.has(k));
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'seguimientoInsumosColumnas', projectId: Number(projectId), columnas }),
+        body: JSON.stringify({ kind: 'seguimientoInsumosColumnas', seguimientoId: selectedSeguimientoId, columnas }),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar las columnas.');
@@ -338,7 +438,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
 
   const sharedDays = useMemo(() => (data ? buildSharedDays(data.rows) : []), [data]);
 
-  if (isLoading) {
+  if (isLoading && sheets === null) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-6 text-center text-xs text-slate-400">
         Cargando seguimiento...
@@ -346,9 +446,79 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
     );
   }
 
-  // Sin configuración: dentro del Detalle de Proyecto no molestamos a quien no es admin con
+  // Selector de hojas -- se muestra siempre que haya al menos una, aunque
+  // sea una sola (así "+ Agregar hoja" queda a la vista para cuando haga
+  // falta una segunda, ej. otro contrato/fase del mismo proyecto).
+  const sheetSelector = sheets && sheets.length > 0 && (
+    <div className="no-print flex flex-wrap items-center gap-1.5 px-4 pt-3">
+      {sheets.map((s) => (
+        <button
+          key={s.seguimientoId}
+          type="button"
+          onClick={() => setSelectedSeguimientoId(s.seguimientoId)}
+          className="rounded-full px-3 py-1 text-xs font-bold border transition"
+          style={
+            s.seguimientoId === selectedSeguimientoId
+              ? { borderColor: ACCENT, color: '#fff', background: ACCENT }
+              : { borderColor: BORDER, color: '#4b5563', background: '#fff' }
+          }
+        >
+          {s.nombre}
+          {s.lastError && <AlertTriangle className="inline-block h-3 w-3 ml-1 -mt-0.5 text-rose-300" />}
+        </button>
+      ))}
+      {canEdit && (
+        <button
+          type="button"
+          onClick={() => { setIsAddingSheet((v) => !v); setNewSheetName(''); setNewSheetLink(''); }}
+          className="rounded-full px-3 py-1 text-xs font-bold border border-dashed"
+          style={{ borderColor: BORDER, color: ACCENT }}
+        >
+          + Agregar hoja
+        </button>
+      )}
+    </div>
+  );
+
+  const addSheetForm = canEdit && isAddingSheet && (
+    <div className="no-print mx-4 mt-2 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
+      <div className="min-w-40">
+        <label htmlFor="seguimiento-new-sheet-name" className="block text-[11px] font-semibold text-slate-700 mb-1">Nombre de la hoja</label>
+        <input
+          id="seguimiento-new-sheet-name"
+          type="text"
+          value={newSheetName}
+          onChange={(e) => setNewSheetName(e.target.value)}
+          placeholder="Ej. Contrato A, Fase 1..."
+          className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
+        />
+      </div>
+      <div className="flex-1 min-w-64">
+        <label htmlFor="seguimiento-new-sheet-link" className="block text-[11px] font-semibold text-slate-700 mb-1">Link de Google Sheets (opcional, se puede vincular después)</label>
+        <input
+          id="seguimiento-new-sheet-link"
+          type="text"
+          value={newSheetLink}
+          onChange={(e) => setNewSheetLink(e.target.value)}
+          placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=..."
+          className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
+        />
+      </div>
+      <button
+        type="button"
+        onClick={handleCreateSheet}
+        disabled={isCreatingSheet}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
+      >
+        <Save className="h-3.5 w-3.5" />
+        {isCreatingSheet ? 'Creando...' : 'Crear hoja'}
+      </button>
+    </div>
+  );
+
+  // Sin ninguna hoja todavía: dentro del Detalle de Proyecto no molestamos a quien no es admin con
   // nada; en la página dedicada de Seguimiento sí decimos algo, para no dejarla en blanco.
-  if (!data?.config) {
+  if (!sheets || sheets.length === 0) {
     if (!canEdit) {
       if (!standalone) return null;
       return (
@@ -365,10 +535,23 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
           </div>
           <div>
             <h3 className="text-sm font-bold text-slate-900">Cronograma de Entregas · Consolidado de Insumos</h3>
-            <p className="text-[11px] text-slate-500">Este proyecto no tiene una hoja de cálculo vinculada todavía.</p>
+            <p className="text-[11px] text-slate-500">Este proyecto no tiene ninguna hoja de seguimiento todavía. Puedes agregar varias (ej. una por contrato o fase) con el mismo formato.</p>
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-40">
+            <label htmlFor="seguimiento-sheet-name-new" className="block text-[11px] font-semibold text-slate-700 mb-1">
+              Nombre de la hoja
+            </label>
+            <input
+              id="seguimiento-sheet-name-new"
+              type="text"
+              value={newSheetName}
+              onChange={(e) => setNewSheetName(e.target.value)}
+              placeholder="Ej. Principal, Contrato A..."
+              className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
+            />
+          </div>
           <div className="flex-1 min-w-64">
             <label htmlFor="seguimiento-sheet-link-new" className="block text-[11px] font-semibold text-slate-700 mb-1">
               Link de Google Sheets (pestaña del cronograma)
@@ -376,44 +559,20 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
             <input
               id="seguimiento-sheet-link-new"
               type="text"
-              value={sheetInput}
-              onChange={(e) => setSheetInput(e.target.value)}
+              value={newSheetLink}
+              onChange={(e) => setNewSheetLink(e.target.value)}
               placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=..."
               className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
             />
           </div>
           <button
             type="button"
-            onClick={handleSaveConfig}
-            disabled={isSavingConfig || !sheetInput.trim()}
+            onClick={handleCreateSheet}
+            disabled={isCreatingSheet || !newSheetLink.trim()}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
           >
             <Save className="h-3.5 w-3.5" />
-            {isSavingConfig ? 'Guardando...' : 'Vincular hoja'}
-          </button>
-        </div>
-        <div className="flex flex-wrap items-end gap-2 pt-1 border-t border-slate-100">
-          <div className="flex-1 min-w-64">
-            <label htmlFor="seguimiento-drive-folder-new" className="block text-[11px] font-semibold text-slate-700 mb-1">
-              Link de carpeta de Drive (opcional)
-            </label>
-            <input
-              id="seguimiento-drive-folder-new"
-              type="text"
-              value={driveFolderInput}
-              onChange={(e) => setDriveFolderInput(e.target.value)}
-              placeholder="https://drive.google.com/drive/folders/..."
-              className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={handleSaveDriveFolder}
-            disabled={isSavingDriveFolder || !driveFolderInput.trim()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
-          >
-            <FolderOpen className="h-3.5 w-3.5" />
-            {isSavingDriveFolder ? 'Guardando...' : 'Vincular carpeta'}
+            {isCreatingSheet ? 'Guardando...' : 'Vincular hoja'}
           </button>
         </div>
         {log.length > 0 && (
@@ -429,10 +588,75 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
     );
   }
 
+  // Hay al menos una hoja, pero la seleccionada todavía está cargando sus
+  // datos (o el sondeo de la lista de hojas aún no terminó).
+  if (!data) {
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        {sheetSelector}
+        {addSheetForm}
+        <div className="p-6 text-center text-xs text-slate-400">Cargando seguimiento...</div>
+      </div>
+    );
+  }
+
+  // La hoja seleccionada existe pero todavía no tiene una hoja de cálculo
+  // de Google Sheets vinculada -- se pide el link antes de mostrar el resto.
+  if (!data.config?.spreadsheetId) {
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        {sheetSelector}
+        {addSheetForm}
+        {canEdit ? (
+          <div className="p-4 space-y-3">
+            <p className="text-[11px] text-slate-500">La hoja "{data.config?.nombre}" todavía no tiene una hoja de cálculo vinculada.</p>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="flex-1 min-w-64">
+                <label htmlFor="seguimiento-sheet-link-link" className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Link de Google Sheets (pestaña del cronograma)
+                </label>
+                <input
+                  id="seguimiento-sheet-link-link"
+                  type="text"
+                  value={sheetInput}
+                  onChange={(e) => setSheetInput(e.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=..."
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveConfig}
+                disabled={isSavingConfig || !sheetInput.trim()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
+              >
+                <Save className="h-3.5 w-3.5" />
+                {isSavingConfig ? 'Guardando...' : 'Vincular hoja'}
+              </button>
+            </div>
+            {log.length > 0 && (
+              <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 space-y-1 font-mono text-[10.5px]">
+                {log.map((entry, idx) => (
+                  <p key={idx} className={entry.tone === 'error' ? 'text-rose-600' : entry.tone === 'success' ? 'text-emerald-700' : 'text-slate-500'}>
+                    {entry.message}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="py-10 text-center text-xs text-slate-400">La hoja "{data.config?.nombre}" todavía no tiene una hoja de cálculo vinculada.</p>
+        )}
+      </div>
+    );
+  }
+
   const hasData = data.rows.length > 0;
 
   return (
     <div id="project-seguimiento-cronograma" className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      {sheetSelector}
+      {addSheetForm}
       <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg shrink-0" style={{ background: ACCENT_LIGHT, color: ACCENT }}>
@@ -684,7 +908,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
                 key={row.id}
                 row={row}
                 days={sharedDays}
-                projectId={projectId}
+                seguimientoId={data.config!.seguimientoId}
                 visibleInsumoColumns={data.config?.insumosColumnasVisibles && data.config.insumosColumnasVisibles.length > 0 ? data.config.insumosColumnasVisibles : INSUMO_COLUMN_KEYS}
               />
             ))}
@@ -713,7 +937,7 @@ type InsumoDetalle = {
   tanda: string;
 };
 
-const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; days: string[]; projectId: string; visibleInsumoColumns: string[] }> = ({ row, days, projectId, visibleInsumoColumns }) => {
+const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; days: string[]; seguimientoId: number; visibleInsumoColumns: string[] }> = ({ row, days, seguimientoId, visibleInsumoColumns }) => {
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set(FILTER_KEYS));
   const toggleFilter = (key: string) => {
     setActiveFilters((prev) => {
@@ -744,7 +968,7 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; days: string[]; projec
       setIsLoadingInsumos(true);
       setInsumosError('');
       try {
-        const res = await fetch(`/api/projects?seguimiento=insumos&projectId=${encodeURIComponent(projectId)}&linea=${encodeURIComponent(row.lineaProductiva)}`);
+        const res = await fetch(`/api/projects?seguimiento=insumos&seguimientoId=${seguimientoId}&linea=${encodeURIComponent(row.lineaProductiva)}`);
         const payload = await res.json();
         if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible cargar los insumos.');
         setInsumos(payload.data);

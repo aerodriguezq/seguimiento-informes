@@ -49,24 +49,36 @@ function toNumOrNull(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-async function fetchSeguimiento(sql: SqlClient, projectId: number) {
+// Un proyecto puede tener varias hojas configuradas (mismo formato, ej.
+// varios contratos/fases) -- esto lista las disponibles para que el
+// frontend muestre un selector, sin traer los datos pesados de cada una.
+async function listSeguimientoSheets(sql: SqlClient, projectId: number) {
+  return (await sql`
+    SELECT seguimiento_id AS "seguimientoId", nombre, spreadsheet_id AS "spreadsheetId",
+      cronograma_gid AS "cronogramaGid", ultima_importacion AS "lastImportAt", ultimo_error AS "lastError"
+    FROM seguimiento_config WHERE proyecto_id = ${projectId} ORDER BY seguimiento_id ASC
+  `) as any[];
+}
+
+async function fetchSeguimiento(sql: SqlClient, seguimientoId: number) {
   const [config] = (await sql`
-    SELECT spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid",
+    SELECT seguimiento_id AS "seguimientoId", proyecto_id AS "projectId", nombre,
+      spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid",
       ultima_importacion AS "lastImportAt", ultimo_error AS "lastError",
       insumos_columnas_visibles AS "insumosColumnasVisibles", drive_folder_url AS "driveFolderUrl"
-    FROM seguimiento_config WHERE proyecto_id = ${projectId}
+    FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId}
   `) as any[];
 
   const rows = (await sql`
     SELECT fila_id AS id, sub_actividad AS "subActividad", concepto,
       total_toneladas AS "totalToneladas", toneladas_riego_abono AS "toneladasRiegoAbono",
       observaciones, es_resumen AS "isResumen"
-    FROM seguimiento_cronograma_filas WHERE proyecto_id = ${projectId} ORDER BY orden ASC
+    FROM seguimiento_cronograma_filas WHERE seguimiento_id = ${seguimientoId} ORDER BY orden ASC
   `) as any[];
 
   const referencia = (await sql`
     SELECT sub_actividad AS "subActividad", linea_productiva AS "lineaProductiva"
-    FROM seguimiento_referencia_lineas WHERE proyecto_id = ${projectId}
+    FROM seguimiento_referencia_lineas WHERE seguimiento_id = ${seguimientoId}
   `) as any[];
   const lineaBySub: Record<string, string> = {};
   referencia.forEach((r: any) => { lineaBySub[r.subActividad] = r.lineaProductiva; });
@@ -76,7 +88,7 @@ async function fetchSeguimiento(sql: SqlClient, projectId: number) {
       TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "fechaInicio", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "fechaFin",
       cantidad_total AS "cantidadTotal", cantidad_entregada AS "cantidadEntregada",
       toneladas_total AS "toneladasTotal", hectareas
-    FROM seguimiento_linea_pistas WHERE proyecto_id = ${projectId}
+    FROM seguimiento_linea_pistas WHERE seguimiento_id = ${seguimientoId}
   `) as any[]).map((p: any) => ({
     ...p,
     cantidadTotal: toNumOrNull(p.cantidadTotal) ?? 0,
@@ -89,7 +101,7 @@ async function fetchSeguimiento(sql: SqlClient, projectId: number) {
     SELECT sub_actividad AS "subActividad", TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "fechaInicio",
       TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "fechaFin", dias_entrega AS "diasEntrega",
       beneficiarios_por_dia AS "beneficiariosPorDia", total_toneladas_kit AS "totalToneladasKit"
-    FROM seguimiento_proyeccion WHERE proyecto_id = ${projectId}
+    FROM seguimiento_proyeccion WHERE seguimiento_id = ${seguimientoId}
   `) as any[]).map((p: any) => ({
     ...p,
     diasEntrega: toNumOrNull(p.diasEntrega),
@@ -99,7 +111,7 @@ async function fetchSeguimiento(sql: SqlClient, projectId: number) {
   const proyeccionBySub: Record<string, any> = {};
   proyeccion.forEach((p: any) => { proyeccionBySub[p.subActividad] = p; });
 
-  const kpiRows = (await sql`SELECT tipo, total, avance FROM seguimiento_kpis WHERE proyecto_id = ${projectId}`) as any[];
+  const kpiRows = (await sql`SELECT tipo, total, avance FROM seguimiento_kpis WHERE seguimiento_id = ${seguimientoId}`) as any[];
   const kpis: Record<string, { total: number; avance: number }> = {};
   kpiRows.forEach((k: any) => { kpis[k.tipo] = { total: toNumOrNull(k.total) ?? 0, avance: toNumOrNull(k.avance) ?? 0 }; });
 
@@ -121,12 +133,16 @@ async function fetchSeguimiento(sql: SqlClient, projectId: number) {
   };
 }
 
-async function importSeguimiento(sql: SqlClient, projectId: number) {
+async function importSeguimiento(sql: SqlClient, seguimientoId: number) {
   const [config] = (await sql`
-    SELECT spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid"
-    FROM seguimiento_config WHERE proyecto_id = ${projectId}
+    SELECT proyecto_id AS "projectId", spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid"
+    FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId}
   `) as any[];
-  if (!config) throw new Error('Este proyecto no tiene configurada una hoja de cálculo de seguimiento.');
+  if (!config) throw new Error('Esta hoja de seguimiento ya no existe.');
+  if (!config.spreadsheetId || !config.cronogramaGid) {
+    throw new Error('Esta hoja todavía no tiene una hoja de cálculo vinculada.');
+  }
+  const projectId = config.projectId;
 
   const accessToken = await getConnectedAccessToken(sql);
   if (!accessToken) throw new Error('Conecta una cuenta de Google (Fuentes Drive) para poder leer la hoja de cálculo.');
@@ -161,20 +177,21 @@ async function importSeguimiento(sql: SqlClient, projectId: number) {
   const beneficiariosGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.beneficiarios);
   const kpis = parseBeneficiariosKpis(beneficiariosGrid);
 
-  // --- Persistencia: se limpia todo lo del proyecto y se reinserta desde cero. ---
-  await sql`DELETE FROM seguimiento_cronograma_filas WHERE proyecto_id = ${projectId}`;
-  await sql`DELETE FROM seguimiento_referencia_lineas WHERE proyecto_id = ${projectId}`;
-  await sql`DELETE FROM seguimiento_linea_pistas WHERE proyecto_id = ${projectId}`;
-  await sql`DELETE FROM seguimiento_proyeccion WHERE proyecto_id = ${projectId}`;
-  await sql`DELETE FROM seguimiento_kpis WHERE proyecto_id = ${projectId}`;
-  await sql`DELETE FROM seguimiento_insumos_detalle WHERE proyecto_id = ${projectId}`;
+  // --- Persistencia: se limpia lo de ESTA hoja (no todo el proyecto, otras
+  // hojas del mismo proyecto no se tocan) y se reinserta desde cero. ---
+  await sql`DELETE FROM seguimiento_cronograma_filas WHERE seguimiento_id = ${seguimientoId}`;
+  await sql`DELETE FROM seguimiento_referencia_lineas WHERE seguimiento_id = ${seguimientoId}`;
+  await sql`DELETE FROM seguimiento_linea_pistas WHERE seguimiento_id = ${seguimientoId}`;
+  await sql`DELETE FROM seguimiento_proyeccion WHERE seguimiento_id = ${seguimientoId}`;
+  await sql`DELETE FROM seguimiento_kpis WHERE seguimiento_id = ${seguimientoId}`;
+  await sql`DELETE FROM seguimiento_insumos_detalle WHERE seguimiento_id = ${seguimientoId}`;
 
   let orden = 0;
   for (const row of parsedCronograma.rows) {
     const inserted = await sql`
       INSERT INTO seguimiento_cronograma_filas
-        (proyecto_id, orden, sub_actividad, concepto, total_toneladas, toneladas_riego_abono, observaciones, es_resumen)
-      VALUES (${projectId}, ${orden}, ${row.subActividad}, ${row.concepto}, ${row.totalToneladas}, ${row.toneladasRiegoAbono}, ${row.observaciones}, ${row.isResumen})
+        (proyecto_id, seguimiento_id, orden, sub_actividad, concepto, total_toneladas, toneladas_riego_abono, observaciones, es_resumen)
+      VALUES (${projectId}, ${seguimientoId}, ${orden}, ${row.subActividad}, ${row.concepto}, ${row.totalToneladas}, ${row.toneladasRiegoAbono}, ${row.observaciones}, ${row.isResumen})
       RETURNING fila_id AS id
     `;
     const filaId = inserted[0].id;
@@ -189,8 +206,8 @@ async function importSeguimiento(sql: SqlClient, projectId: number) {
 
   for (const [sub, linea] of Object.entries(referencia)) {
     await sql`
-      INSERT INTO seguimiento_referencia_lineas (proyecto_id, sub_actividad, linea_productiva)
-      VALUES (${projectId}, ${sub}, ${linea})
+      INSERT INTO seguimiento_referencia_lineas (proyecto_id, seguimiento_id, sub_actividad, linea_productiva)
+      VALUES (${projectId}, ${seguimientoId}, ${sub}, ${linea})
     `;
   }
 
@@ -198,8 +215,8 @@ async function importSeguimiento(sql: SqlClient, projectId: number) {
     for (const [linea, agg] of Object.entries(byLinea)) {
       await sql`
         INSERT INTO seguimiento_linea_pistas
-          (proyecto_id, linea_productiva, pista, fecha_inicio, fecha_fin, cantidad_total, cantidad_entregada, toneladas_total, hectareas)
-        VALUES (${projectId}, ${linea}, ${pista}, ${agg.fechaInicio}, ${agg.fechaFin}, ${agg.total}, ${agg.entregado}, ${agg.toneladas}, ${agg.hectareas})
+          (proyecto_id, seguimiento_id, linea_productiva, pista, fecha_inicio, fecha_fin, cantidad_total, cantidad_entregada, toneladas_total, hectareas)
+        VALUES (${projectId}, ${seguimientoId}, ${linea}, ${pista}, ${agg.fechaInicio}, ${agg.fechaFin}, ${agg.total}, ${agg.entregado}, ${agg.toneladas}, ${agg.hectareas})
       `;
     }
   };
@@ -211,14 +228,14 @@ async function importSeguimiento(sql: SqlClient, projectId: number) {
 
   for (const [sub, p] of Object.entries(proyeccion)) {
     await sql`
-      INSERT INTO seguimiento_proyeccion (proyecto_id, sub_actividad, fecha_inicio, fecha_fin, dias_entrega, beneficiarios_por_dia, total_toneladas_kit)
-      VALUES (${projectId}, ${sub}, ${p.fechaInicio}, ${p.fechaFin}, ${p.diasEntrega}, ${p.beneficiariosPorDia}, ${p.totalToneladasKit})
+      INSERT INTO seguimiento_proyeccion (proyecto_id, seguimiento_id, sub_actividad, fecha_inicio, fecha_fin, dias_entrega, beneficiarios_por_dia, total_toneladas_kit)
+      VALUES (${projectId}, ${seguimientoId}, ${sub}, ${p.fechaInicio}, ${p.fechaFin}, ${p.diasEntrega}, ${p.beneficiariosPorDia}, ${p.totalToneladasKit})
     `;
   }
 
   const kpiEntries: [string, Kpi][] = [['insumo', kpis.insumo], ['abono', kpis.abono], ['material_vegetal', kpis.materialVegetal]];
   for (const [tipo, k] of kpiEntries) {
-    await sql`INSERT INTO seguimiento_kpis (proyecto_id, tipo, total, avance) VALUES (${projectId}, ${tipo}, ${k.total}, ${k.avance})`;
+    await sql`INSERT INTO seguimiento_kpis (proyecto_id, seguimiento_id, tipo, total, avance) VALUES (${projectId}, ${seguimientoId}, ${tipo}, ${k.total}, ${k.avance})`;
   }
 
   // "Ver insumos": el detalle renglón por renglón, para el panel expandible
@@ -226,8 +243,8 @@ async function importSeguimiento(sql: SqlClient, projectId: number) {
   for (const r of insumosDetalleRows) {
     await sql`
       INSERT INTO seguimiento_insumos_detalle
-        (proyecto_id, linea_productiva, insumo, unidad, componente, proceso, cantidad, beneficiarios, fecha_compra, fecha_entrega, nota_entrega, llego, estado, tanda)
-      VALUES (${projectId}, ${r.linea}, ${r.insumo}, ${r.unidad}, ${r.componente}, ${r.proceso}, ${r.cantidad}, ${r.beneficiarios}, ${r.fechaCompra}, ${r.fechaEntrega}, ${r.notaEntrega}, ${r.llego}, ${r.estado}, ${r.tanda})
+        (proyecto_id, seguimiento_id, linea_productiva, insumo, unidad, componente, proceso, cantidad, beneficiarios, fecha_compra, fecha_entrega, nota_entrega, llego, estado, tanda)
+      VALUES (${projectId}, ${seguimientoId}, ${r.linea}, ${r.insumo}, ${r.unidad}, ${r.componente}, ${r.proceso}, ${r.cantidad}, ${r.beneficiarios}, ${r.fechaCompra}, ${r.fechaEntrega}, ${r.notaEntrega}, ${r.llego}, ${r.estado}, ${r.tanda})
     `;
   }
 
@@ -256,21 +273,23 @@ async function importSeguimiento(sql: SqlClient, projectId: number) {
 // lo que el equipo va cargando en Google Sheets sin depender de que un admin
 // entre a darle "Importar" a mano.
 async function importAllCronogramas(sql: SqlClient) {
-  const configs = (await sql`SELECT proyecto_id AS "projectId" FROM seguimiento_config`) as any[];
+  const configs = (await sql`
+    SELECT seguimiento_id AS "seguimientoId" FROM seguimiento_config WHERE spreadsheet_id IS NOT NULL AND cronograma_gid IS NOT NULL
+  `) as any[];
   let imported = 0;
   let failed = 0;
   for (const config of configs) {
     try {
-      await importSeguimiento(sql, config.projectId);
-      await sql`UPDATE seguimiento_config SET ultima_importacion = NOW(), ultimo_error = NULL WHERE proyecto_id = ${config.projectId}`;
+      await importSeguimiento(sql, config.seguimientoId);
+      await sql`UPDATE seguimiento_config SET ultima_importacion = NOW(), ultimo_error = NULL WHERE seguimiento_id = ${config.seguimientoId}`;
       imported++;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No fue posible importar el cronograma.';
-      await sql`UPDATE seguimiento_config SET ultimo_error = ${message} WHERE proyecto_id = ${config.projectId}`;
+      await sql`UPDATE seguimiento_config SET ultimo_error = ${message} WHERE seguimiento_id = ${config.seguimientoId}`;
       failed++;
     }
   }
-  return { projectsChecked: configs.length, imported, failed };
+  return { sheetsChecked: configs.length, imported, failed };
 }
 
 export default async function handler(
@@ -329,41 +348,93 @@ export default async function handler(
       return response.status(200).json({ data: kpis, meta: {}, errors: [] });
     }
 
-    if (request.method === 'GET' && request.query.seguimiento === 'cronograma') {
+    // Lista las hojas configuradas para un proyecto (puede haber varias, ej.
+    // San Jacinto con una por contrato/fase) -- el frontend arma el selector
+    // con esto antes de pedir los datos pesados de ninguna en particular.
+    if (request.method === 'GET' && request.query.seguimiento === 'listaHojas') {
       const projectId = Number(request.query.projectId);
       if (!Number.isInteger(projectId) || projectId <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
       }
-      const data = await fetchSeguimiento(sql, projectId);
+      const sheets = await listSeguimientoSheets(sql, projectId);
+      return response.status(200).json({ data: sheets, meta: { total: sheets.length }, errors: [] });
+    }
+
+    if (request.method === 'GET' && request.query.seguimiento === 'cronograma') {
+      const seguimientoId = Number(request.query.seguimientoId);
+      if (!Number.isInteger(seguimientoId) || seguimientoId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja de seguimiento es obligatorio.'] });
+      }
+      const data = await fetchSeguimiento(sql, seguimientoId);
       return response.status(200).json({ data, meta: {}, errors: [] });
     }
 
     // "Ver insumos": bajo demanda por línea, para no traer las ~900 filas de
     // Insumos Detalle en la carga principal de Seguimiento.
     if (request.method === 'GET' && request.query.seguimiento === 'insumos') {
-      const projectId = Number(request.query.projectId);
+      const seguimientoId = Number(request.query.seguimientoId);
       const linea = typeof request.query.linea === 'string' ? request.query.linea : '';
-      if (!Number.isInteger(projectId) || projectId <= 0 || !linea) {
-        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto y la línea productiva son obligatorios.'] });
+      if (!Number.isInteger(seguimientoId) || seguimientoId <= 0 || !linea) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja de seguimiento y la línea productiva son obligatorios.'] });
       }
       const insumos = (await sql`
         SELECT insumo, unidad, componente, proceso, cantidad, beneficiarios,
           TO_CHAR(fecha_compra, 'YYYY-MM-DD') AS "fechaCompra", TO_CHAR(fecha_entrega, 'YYYY-MM-DD') AS "fechaEntrega",
           nota_entrega AS "notaEntrega", llego, estado, tanda
         FROM seguimiento_insumos_detalle
-        WHERE proyecto_id = ${projectId} AND linea_productiva = ${linea}
+        WHERE seguimiento_id = ${seguimientoId} AND linea_productiva = ${linea}
         ORDER BY insumo_id ASC
       `) as any[];
       return response.status(200).json({ data: insumos, meta: { total: insumos.length }, errors: [] });
+    }
+
+    // Crea una hoja de seguimiento NUEVA para un proyecto -- un proyecto
+    // puede tener varias (ej. una por contrato/fase, todas con el mismo
+    // formato). spreadsheetId/cronogramaGid/driveFolderUrl son opcionales
+    // acá: se puede crear "en blanco" (solo el nombre) y vincular la hoja
+    // de cálculo después con "Cambiar hoja".
+    if (request.method === 'POST' && request.body?.kind === 'seguimientoCreateSheet') {
+      if (!(await canEditModuleRequest(request, sql, 'seguimiento'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Seguimiento.'] });
+      }
+      const projectId = Number(request.body?.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      const nombre = String(request.body?.nombre ?? '').trim() || 'Principal';
+      const { spreadsheetId, cronogramaGid, driveFolderUrl } = request.body ?? {};
+      const rows = await sql`
+        INSERT INTO seguimiento_config (proyecto_id, nombre, spreadsheet_id, cronograma_gid, drive_folder_url)
+        VALUES (
+          ${projectId}, ${nombre},
+          ${spreadsheetId ? String(spreadsheetId).trim() : null}, ${cronogramaGid ? String(cronogramaGid).trim() : null},
+          ${driveFolderUrl ? String(driveFolderUrl).trim() : null}
+        )
+        RETURNING seguimiento_id AS "seguimientoId", nombre, spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid"
+      `;
+      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'DELETE' && request.query.seguimiento === 'hoja') {
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede eliminar una hoja de seguimiento.'] });
+      }
+      const seguimientoId = Number(request.query.seguimientoId);
+      if (!Number.isInteger(seguimientoId) || seguimientoId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja de seguimiento es obligatorio.'] });
+      }
+      const deleted = await sql`DELETE FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId} RETURNING seguimiento_id AS id`;
+      if (!deleted[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Esa hoja de seguimiento ya no existe.'] });
+      return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
     }
 
     if (request.method === 'POST' && request.body?.kind === 'seguimientoInsumosColumnas') {
       if (!(await isAdminRequest(request, sql))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede configurar las columnas visibles.'] });
       }
-      const projectId = Number(request.body?.projectId);
-      if (!Number.isInteger(projectId) || projectId <= 0) {
-        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      const seguimientoId = Number(request.body?.seguimientoId);
+      if (!Number.isInteger(seguimientoId) || seguimientoId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja de seguimiento es obligatorio.'] });
       }
       const columnas = request.body?.columnas;
       if (columnas !== null && !Array.isArray(columnas)) {
@@ -372,11 +443,11 @@ export default async function handler(
       const columnasJson = columnas === null ? null : JSON.stringify(columnas.map((c: unknown) => String(c)));
       const rows = await sql`
         UPDATE seguimiento_config SET insumos_columnas_visibles = ${columnasJson}::jsonb
-        WHERE proyecto_id = ${projectId}
+        WHERE seguimiento_id = ${seguimientoId}
         RETURNING insumos_columnas_visibles AS "insumosColumnasVisibles"
       `;
       if (rows.length === 0) {
-        return response.status(404).json({ data: null, meta: {}, errors: ['Este proyecto no tiene configurado un cronograma de Seguimiento.'] });
+        return response.status(404).json({ data: null, meta: {}, errors: ['Esa hoja de seguimiento ya no existe.'] });
       }
       return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
     }
@@ -385,20 +456,22 @@ export default async function handler(
       if (!(await canEditModuleRequest(request, sql, 'seguimiento'))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Seguimiento.'] });
       }
-      const projectId = Number(request.body?.projectId);
-      if (!Number.isInteger(projectId) || projectId <= 0) {
-        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      const seguimientoId = Number(request.body?.seguimientoId);
+      if (!Number.isInteger(seguimientoId) || seguimientoId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja de seguimiento es obligatorio.'] });
       }
       const driveFolderUrl = String(request.body?.driveFolderUrl ?? '').trim();
       if (!driveFolderUrl) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El link de la carpeta de Drive es obligatorio.'] });
       }
       const rows = await sql`
-        INSERT INTO seguimiento_config (proyecto_id, drive_folder_url)
-        VALUES (${projectId}, ${driveFolderUrl})
-        ON CONFLICT (proyecto_id) DO UPDATE SET drive_folder_url = EXCLUDED.drive_folder_url
+        UPDATE seguimiento_config SET drive_folder_url = ${driveFolderUrl}
+        WHERE seguimiento_id = ${seguimientoId}
         RETURNING drive_folder_url AS "driveFolderUrl"
       `;
+      if (rows.length === 0) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Esa hoja de seguimiento ya no existe.'] });
+      }
       return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
     }
 
@@ -406,9 +479,9 @@ export default async function handler(
       if (!(await canEditModuleRequest(request, sql, 'seguimiento'))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Seguimiento.'] });
       }
-      const projectId = Number(request.body?.projectId);
-      if (!Number.isInteger(projectId) || projectId <= 0) {
-        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      const seguimientoId = Number(request.body?.seguimientoId);
+      if (!Number.isInteger(seguimientoId) || seguimientoId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja de seguimiento es obligatorio.'] });
       }
 
       if (request.body.kind === 'seguimientoConfig') {
@@ -417,21 +490,23 @@ export default async function handler(
           return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja y el gid de la pestaña son obligatorios.'] });
         }
         const rows = await sql`
-          INSERT INTO seguimiento_config (proyecto_id, spreadsheet_id, cronograma_gid)
-          VALUES (${projectId}, ${String(spreadsheetId).trim()}, ${String(cronogramaGid).trim()})
-          ON CONFLICT (proyecto_id) DO UPDATE SET spreadsheet_id = EXCLUDED.spreadsheet_id, cronograma_gid = EXCLUDED.cronograma_gid
+          UPDATE seguimiento_config SET spreadsheet_id = ${String(spreadsheetId).trim()}, cronograma_gid = ${String(cronogramaGid).trim()}
+          WHERE seguimiento_id = ${seguimientoId}
           RETURNING spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid"
         `;
+        if (rows.length === 0) {
+          return response.status(404).json({ data: null, meta: {}, errors: ['Esa hoja de seguimiento ya no existe.'] });
+        }
         return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
       }
 
       try {
-        const result = await importSeguimiento(sql, projectId);
-        await sql`UPDATE seguimiento_config SET ultima_importacion = NOW(), ultimo_error = NULL WHERE proyecto_id = ${projectId}`;
+        const result = await importSeguimiento(sql, seguimientoId);
+        await sql`UPDATE seguimiento_config SET ultima_importacion = NOW(), ultimo_error = NULL WHERE seguimiento_id = ${seguimientoId}`;
         return response.status(200).json({ data: result, meta: {}, errors: [] });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'No fue posible importar el seguimiento.';
-        await sql`UPDATE seguimiento_config SET ultimo_error = ${message} WHERE proyecto_id = ${projectId}`;
+        await sql`UPDATE seguimiento_config SET ultimo_error = ${message} WHERE seguimiento_id = ${seguimientoId}`;
         return response.status(502).json({ data: null, meta: {}, errors: [message] });
       }
     }
