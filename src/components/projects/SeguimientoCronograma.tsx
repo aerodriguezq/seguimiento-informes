@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarRange, RefreshCw, AlertTriangle, Settings, Save, Search, ChevronDown, ChevronUp, Columns3, Printer, FolderOpen } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
+import { SeguimientoGanttMensual } from './SeguimientoGanttMensual';
 
 const INSUMO_COLUMNS: { key: string; label: string }[] = [
   { key: 'insumo', label: 'Insumo' },
@@ -66,6 +67,7 @@ type SeguimientoData = {
   config: {
     seguimientoId: number;
     nombre: string;
+    formato: string;
     spreadsheetId: string | null;
     cronogramaGid: string | null;
     lastImportAt: string | null;
@@ -327,16 +329,23 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible importar el seguimiento.');
-      pushLog(`Importado: ${payload.data.rowsImported} fila(s), ${payload.data.lineasDetectadas} línea(s) productiva(s).`, 'success');
-      const d = payload.data.detalle;
-      if (d) {
-        pushLog(`Referencia SubActividad-Linea: ${d.referenciaSubActividadLinea.filasLeidas} fila(s) → ${d.referenciaSubActividadLinea.lineasMapeadas} línea(s) mapeada(s).`, d.referenciaSubActividadLinea.lineasMapeadas === 0 ? 'error' : 'info');
-        pushLog(`Insumos Detalle: ${d.insumosDetalle.filasLeidas} fila(s) → ${d.insumosDetalle.lineasConDatos} línea(s) con datos.`, 'info');
-        pushLog(`Abono: ${d.abono.filasLeidas} fila(s) → ${d.abono.lineasConDatos} línea(s) con datos.`, 'info');
-        pushLog(`Material Vegetal: ${d.materialVegetal.filasLeidas} fila(s) → ${d.materialVegetal.lineasConDatos} línea(s) con datos.`, 'info');
-        pushLog(`Entrega Insumos: ${d.entregaInsumos.filasLeidas} fila(s) → ${d.entregaInsumos.lineasConDatos} línea(s) con datos.`, 'info');
-        pushLog(`Entrega Estimada Manual: ${d.entregaEstimadaManual.filasLeidas} fila(s) → ${d.entregaEstimadaManual.subActividadesConDatos} sub actividad(es).`, 'info');
-        pushLog(`Beneficiarios: ${d.beneficiarios.filasLeidas} fila(s).`, 'info');
+      if (payload.data.formato === 'gantt_mensual') {
+        pushLog(
+          `Importado: ${payload.data.rowsImported} subactividad(es)${payload.data.tieneFinanciero ? ' (Físico + Financiero)' : ' (solo Físico -- no se encontró una pestaña "GANTT FINANCIERO")'}.`,
+          'success',
+        );
+      } else {
+        pushLog(`Importado: ${payload.data.rowsImported} fila(s), ${payload.data.lineasDetectadas} línea(s) productiva(s).`, 'success');
+        const d = payload.data.detalle;
+        if (d) {
+          pushLog(`Referencia SubActividad-Linea: ${d.referenciaSubActividadLinea.filasLeidas} fila(s) → ${d.referenciaSubActividadLinea.lineasMapeadas} línea(s) mapeada(s).`, d.referenciaSubActividadLinea.lineasMapeadas === 0 ? 'error' : 'info');
+          pushLog(`Insumos Detalle: ${d.insumosDetalle.filasLeidas} fila(s) → ${d.insumosDetalle.lineasConDatos} línea(s) con datos.`, 'info');
+          pushLog(`Abono: ${d.abono.filasLeidas} fila(s) → ${d.abono.lineasConDatos} línea(s) con datos.`, 'info');
+          pushLog(`Material Vegetal: ${d.materialVegetal.filasLeidas} fila(s) → ${d.materialVegetal.lineasConDatos} línea(s) con datos.`, 'info');
+          pushLog(`Entrega Insumos: ${d.entregaInsumos.filasLeidas} fila(s) → ${d.entregaInsumos.lineasConDatos} línea(s) con datos.`, 'info');
+          pushLog(`Entrega Estimada Manual: ${d.entregaEstimadaManual.filasLeidas} fila(s) → ${d.entregaEstimadaManual.subActividadesConDatos} sub actividad(es).`, 'info');
+          pushLog(`Beneficiarios: ${d.beneficiarios.filasLeidas} fila(s).`, 'info');
+        }
       }
       await fetchData(selectedSeguimientoId);
       await loadSheets(selectedSeguimientoId);
@@ -945,7 +954,9 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
         </div>
       )}
 
-      {!hasData ? (
+      {data.config.formato === 'gantt_mensual' ? (
+        <SeguimientoGanttMensual seguimientoId={data.config.seguimientoId} lastImportAt={data.config.lastImportAt} />
+      ) : !hasData ? (
         <div className="p-4">
           <div className="py-8 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
             Sin datos importados todavía. {canEdit ? 'Usa "Importar" para traer el seguimiento.' : ''}

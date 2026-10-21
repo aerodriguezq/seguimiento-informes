@@ -5,6 +5,7 @@ import { getSheetTitleByGid, getSheetGridWithBackgrounds, getSheetValues, listSh
 import { getDriveFileMeta, downloadDriveFileBuffer } from '../../server/google-drive.js';
 import { isExcelMimeType, loadExcelWorkbook, findExcelSheetByName, getExcelGridWithBackgrounds, getExcelValues } from '../../server/excel-seguimiento-source.js';
 import { parseCronograma } from '../../server/cronograma-parser.js';
+import { parseGanttMensual, extractValorUnitarioPorSubactividad, deriveGanttFinanciero, type GanttMensualPayload } from '../../server/gantt-mensual-parser.js';
 import {
   parseReferenciaLineas,
   parseInsumosDetalle,
@@ -66,7 +67,7 @@ async function listSeguimientoSheets(sql: SqlClient, projectId: number) {
 
 async function fetchSeguimiento(sql: SqlClient, seguimientoId: number) {
   const [config] = (await sql`
-    SELECT seguimiento_id AS "seguimientoId", proyecto_id AS "projectId", nombre,
+    SELECT seguimiento_id AS "seguimientoId", proyecto_id AS "projectId", nombre, formato,
       spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid",
       ultima_importacion AS "lastImportAt", ultimo_error AS "lastError",
       insumos_columnas_visibles AS "insumosColumnasVisibles", drive_folder_url AS "driveFolderUrl"
@@ -137,6 +138,67 @@ async function fetchSeguimiento(sql: SqlClient, seguimientoId: number) {
   };
 }
 
+// Formato "Gantt mensual": Plan/Ejecutado por mes y por subactividad,
+// agrupadas por Actividad -- ver parseGanttMensual. GANTT FINANCIERO (si
+// existe) solo aporta el Valor Unitario por subactividad; sus montos
+// mensuales se derivan multiplicando los del Físico, en vez de leer sus
+// propias columnas de mes (son fórmulas que a menudo no cachean el
+// resultado cuando da 0).
+async function importGanttMensual(
+  sql: SqlClient,
+  seguimientoId: number,
+  fisico: GanttMensualPayload,
+  findSiblingValues: (namePattern: string) => Promise<SheetValue[][] | null>,
+) {
+  const financieroGrid = await findSiblingValues('financiero');
+  const valorUnitarioList = financieroGrid ? extractValorUnitarioPorSubactividad(financieroGrid) : null;
+  const financiero = valorUnitarioList ? deriveGanttFinanciero(fisico, valorUnitarioList) : null;
+
+  // Limpia tanto el formato clásico (por si esta hoja tenía datos de un
+  // vínculo anterior) como el Gantt mensual de una importación previa.
+  await sql`DELETE FROM seguimiento_cronograma_filas WHERE seguimiento_id = ${seguimientoId}`;
+  await sql`DELETE FROM seguimiento_referencia_lineas WHERE seguimiento_id = ${seguimientoId}`;
+  await sql`DELETE FROM seguimiento_linea_pistas WHERE seguimiento_id = ${seguimientoId}`;
+  await sql`DELETE FROM seguimiento_proyeccion WHERE seguimiento_id = ${seguimientoId}`;
+  await sql`DELETE FROM seguimiento_kpis WHERE seguimiento_id = ${seguimientoId}`;
+  await sql`DELETE FROM seguimiento_insumos_detalle WHERE seguimiento_id = ${seguimientoId}`;
+  await sql`DELETE FROM seguimiento_gantt_subactividades WHERE seguimiento_id = ${seguimientoId}`;
+
+  const buildRows = (tipo: string, payload: GanttMensualPayload) =>
+    payload.subactividades.map((s, i) => ({
+      seguimiento_id: seguimientoId,
+      tipo,
+      orden: i,
+      actividad: s.actividad,
+      descripcion: s.descripcion,
+      sub_actividad: s.subActividad,
+      meta: s.meta,
+      unidad: s.unidad,
+      meses: payload.meses,
+      plan_meses: s.plan,
+      ejecutado_meses: s.ejecutado,
+    }));
+
+  const allRows = buildRows('fisico', fisico).concat(financiero ? buildRows('financiero', financiero) : []);
+  if (allRows.length > 0) {
+    await sql`
+      INSERT INTO seguimiento_gantt_subactividades
+        (seguimiento_id, tipo, orden, actividad, descripcion, sub_actividad, meta, unidad, meses, plan_meses, ejecutado_meses)
+      SELECT r.seguimiento_id, r.tipo, r.orden, r.actividad, r.descripcion, r.sub_actividad, r.meta, r.unidad, r.meses, r.plan_meses, r.ejecutado_meses
+      FROM jsonb_to_recordset(${JSON.stringify(allRows)}::jsonb)
+        AS r(seguimiento_id integer, tipo text, orden integer, actividad text, descripcion text, sub_actividad text, meta numeric, unidad text, meses jsonb, plan_meses jsonb, ejecutado_meses jsonb)
+    `;
+  }
+
+  await sql`UPDATE seguimiento_config SET formato = 'gantt_mensual' WHERE seguimiento_id = ${seguimientoId}`;
+
+  return {
+    rowsImported: fisico.subactividades.length,
+    formato: 'gantt_mensual' as const,
+    tieneFinanciero: !!financiero,
+  };
+}
+
 async function importSeguimiento(sql: SqlClient, seguimientoId: number) {
   const [config] = (await sql`
     SELECT proyecto_id AS "projectId", spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid"
@@ -158,16 +220,25 @@ async function importSeguimiento(sql: SqlClient, seguimientoId: number) {
   const fileMeta = await getDriveFileMeta(accessToken, config.spreadsheetId);
 
   let sheetTitle: string;
-  let cronogramaGrid: SheetCell[][];
+  let getCronogramaGridWithBackgrounds: () => Promise<SheetCell[][]>;
   let getValues: (tabName: string) => Promise<SheetValue[][]>;
+  // Solo para el formato "Gantt mensual" (ver más abajo): busca una pestaña
+  // hermana por coincidencia de nombre (ej. "GANTT FINANCIERO"), sin hacer
+  // falta que el usuario la seleccione -- devuelve null si no existe.
+  let findSiblingValues: (namePattern: string) => Promise<SheetValue[][] | null>;
 
   if (fileMeta.mimeType === GOOGLE_SHEETS_MIME) {
     if (!config.cronogramaGid) {
       throw new Error('Esta hoja todavía no tiene seleccionada la pestaña del cronograma. Usa "Cambiar hoja".');
     }
     sheetTitle = await getSheetTitleByGid(accessToken, config.spreadsheetId, config.cronogramaGid);
-    cronogramaGrid = await getSheetGridWithBackgrounds(accessToken, config.spreadsheetId, sheetTitle);
+    getCronogramaGridWithBackgrounds = () => getSheetGridWithBackgrounds(accessToken, config.spreadsheetId, sheetTitle);
     getValues = (tabName) => getSheetValues(accessToken, config.spreadsheetId, tabName);
+    findSiblingValues = async (pattern) => {
+      const tabs = await listSheetTabs(accessToken, config.spreadsheetId);
+      const match = tabs.find((t) => t.name.toLowerCase().includes(pattern));
+      return match ? getSheetValues(accessToken, config.spreadsheetId, match.name) : null;
+    };
   } else if (isExcelMimeType(fileMeta.mimeType)) {
     const buffer = await downloadDriveFileBuffer(accessToken, config.spreadsheetId);
     const workbook = await loadExcelWorkbook(buffer);
@@ -176,14 +247,33 @@ async function importSeguimiento(sql: SqlClient, seguimientoId: number) {
     // Si no, se intenta detectar una pestaña llamada "Cronograma" por defecto.
     const cronogramaSheet = findExcelSheetByName(workbook, config.cronogramaGid || 'Cronograma');
     sheetTitle = cronogramaSheet.name;
-    cronogramaGrid = getExcelGridWithBackgrounds(cronogramaSheet);
+    getCronogramaGridWithBackgrounds = async () => getExcelGridWithBackgrounds(cronogramaSheet);
     getValues = async (tabName) => getExcelValues(findExcelSheetByName(workbook, tabName));
+    findSiblingValues = async (pattern) => {
+      const match = workbook.worksheets.find((ws) => ws.name.toLowerCase().includes(pattern));
+      return match ? getExcelValues(match) : null;
+    };
   } else {
     throw new Error(
       `El archivo vinculado ("${fileMeta.name}") no es ni una Hoja de Google ni un Excel (.xlsx) -- vuelve a vincularlo con "Cambiar hoja".`,
     );
   }
 
+  // Formato "Gantt mensual" (ej. San Jacinto: Plan/Ejecutado por mes y por
+  // subactividad, agrupadas por Actividad) -- muy distinto del Cronograma
+  // por día + Insumos/Abono/etc. de siempre. Se detecta solo, sin que el
+  // usuario tenga que elegir el formato a mano: si la pestaña seleccionada
+  // calza con esa forma, se usa ese camino completo (incluyendo
+  // GANTT FINANCIERO si existe una pestaña hermana) y no se tocan las demás
+  // pestañas fijas (Insumos Detalle, Abono, etc.), que en este formato ni
+  // siquiera existen.
+  const cronogramaValues = await getValues(sheetTitle);
+  const ganttFisico = parseGanttMensual(cronogramaValues);
+  if (ganttFisico) {
+    return await importGanttMensual(sql, seguimientoId, ganttFisico, findSiblingValues);
+  }
+
+  const cronogramaGrid = await getCronogramaGridWithBackgrounds();
   const parsedCronograma = parseCronograma(cronogramaGrid);
   if (parsedCronograma.rows.length === 0) {
     throw new Error(
@@ -442,6 +532,35 @@ export default async function handler(
         return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja de seguimiento es obligatorio.'] });
       }
       const data = await fetchSeguimiento(sql, seguimientoId);
+      return response.status(200).json({ data, meta: {}, errors: [] });
+    }
+
+    // Datos del formato "Gantt mensual" (ver importGanttMensual) -- se pide
+    // aparte de "cronograma" porque solo aplica cuando config.formato es
+    // 'gantt_mensual'.
+    if (request.method === 'GET' && request.query.seguimiento === 'gantt') {
+      const seguimientoId = Number(request.query.seguimientoId);
+      if (!Number.isInteger(seguimientoId) || seguimientoId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja de seguimiento es obligatorio.'] });
+      }
+      const rows = (await sql`
+        SELECT tipo, orden, actividad, descripcion, sub_actividad AS "subActividad", meta, unidad,
+          meses, plan_meses AS "plan", ejecutado_meses AS "ejecutado"
+        FROM seguimiento_gantt_subactividades WHERE seguimiento_id = ${seguimientoId} ORDER BY tipo ASC, orden ASC
+      `) as any[];
+      const toSubactividad = (r: any) => ({
+        actividad: r.actividad, descripcion: r.descripcion, subActividad: r.subActividad,
+        meta: toNumOrNull(r.meta) ?? 0, unidad: r.unidad,
+        plan: (r.plan as number[]).map((v) => toNumOrNull(v) ?? 0),
+        ejecutado: (r.ejecutado as number[]).map((v) => toNumOrNull(v) ?? 0),
+      });
+      const fisicoRows = rows.filter((r) => r.tipo === 'fisico');
+      const financieroRows = rows.filter((r) => r.tipo === 'financiero');
+      const data = {
+        meses: (fisicoRows[0]?.meses || financieroRows[0]?.meses || []) as string[],
+        fisico: fisicoRows.map(toSubactividad),
+        financiero: financieroRows.length > 0 ? financieroRows.map(toSubactividad) : null,
+      };
       return response.status(200).json({ data, meta: {}, errors: [] });
     }
 
