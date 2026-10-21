@@ -215,6 +215,13 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   const [newSheetLink, setNewSheetLink] = useState('');
   const [isCreatingSheet, setIsCreatingSheet] = useState(false);
 
+  // Lista de pestañas del archivo vinculado (Google Sheets o Excel), para
+  // que el usuario elija a mano cuál es la del cronograma en vez de
+  // depender de que se llame literalmente "Cronograma" (ej. "GANTT Fisico").
+  const [sheetTabs, setSheetTabs] = useState<{ id: string; name: string }[] | null>(null);
+  const [isLoadingTabs, setIsLoadingTabs] = useState(false);
+  const [isSavingTab, setIsSavingTab] = useState(false);
+
   const pushLog = (message: string, tone: LogEntry['tone']) => {
     const time = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     setLog((prev) => [{ time, message, tone }, ...prev].slice(0, 14));
@@ -266,9 +273,46 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   useEffect(() => {
     if (selectedSeguimientoId == null) return;
     setIsLoading(true);
+    setSheetTabs(null);
     void fetchData(selectedSeguimientoId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSeguimientoId]);
+
+  const loadSheetTabs = async (seguimientoId: number) => {
+    setIsLoadingTabs(true);
+    try {
+      const res = await fetch(`/api/projects?seguimiento=listaPestanas&seguimientoId=${seguimientoId}`);
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible listar las pestañas del archivo.');
+      setSheetTabs(payload.data || []);
+    } catch (err) {
+      pushLog(err instanceof Error ? err.message : 'No fue posible listar las pestañas del archivo.', 'error');
+    } finally {
+      setIsLoadingTabs(false);
+    }
+  };
+
+  const handleSelectTab = async (tabId: string) => {
+    if (!selectedSeguimientoId || !data?.config?.spreadsheetId) return;
+    setIsSavingTab(true);
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'seguimientoConfig', seguimientoId: selectedSeguimientoId, spreadsheetId: data.config.spreadsheetId, cronogramaGid: tabId }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible seleccionar la pestaña.');
+      const tabName = sheetTabs?.find((t) => t.id === tabId)?.name ?? tabId;
+      pushLog(`Pestaña del cronograma: "${tabName}". Usa "Importar" para traer los datos de ahí.`, 'success');
+      await fetchData(selectedSeguimientoId);
+      await loadSheets(selectedSeguimientoId);
+    } catch (err) {
+      pushLog(err instanceof Error ? err.message : 'No fue posible seleccionar la pestaña.', 'error');
+    } finally {
+      setIsSavingTab(false);
+    }
+  };
 
   const handleImport = async () => {
     if (!selectedSeguimientoId) return;
@@ -319,11 +363,12 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar la hoja de cálculo.');
-      pushLog('Hoja de cálculo configurada. Ahora puedes importar.', 'success');
-      setIsEditingConfig(false);
+      pushLog('Hoja de cálculo configurada.', 'success');
+      setIsEditingConfig(true);
       setSheetInput('');
       await fetchData(selectedSeguimientoId);
       await loadSheets(selectedSeguimientoId);
+      await loadSheetTabs(selectedSeguimientoId);
     } catch (err) {
       pushLog(err instanceof Error ? err.message : 'No fue posible guardar la hoja de cálculo.', 'error');
     } finally {
@@ -759,6 +804,50 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
             <Save className="h-3.5 w-3.5" />
             {isSavingConfig ? 'Guardando...' : 'Guardar'}
           </button>
+
+          {data.config.spreadsheetId && (
+            <div className="w-full pt-2 mt-1 border-t border-slate-200">
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[11px] font-semibold text-slate-700">Pestaña del cronograma</p>
+                <button
+                  type="button"
+                  onClick={() => selectedSeguimientoId && void loadSheetTabs(selectedSeguimientoId)}
+                  disabled={isLoadingTabs}
+                  className="text-[10.5px] font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                >
+                  {isLoadingTabs ? 'Buscando...' : sheetTabs ? 'Actualizar' : 'Ver pestañas'}
+                </button>
+              </div>
+              {sheetTabs === null ? (
+                <p className="text-[11px] text-slate-400">
+                  {isLoadingTabs ? 'Buscando pestañas...' : 'Muestra las pestañas del archivo para elegir cuál es el cronograma (ej. "GANTT Fisico").'}
+                </p>
+              ) : sheetTabs.length === 0 ? (
+                <p className="text-[11px] text-slate-400">El archivo no tiene pestañas.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {sheetTabs.map((tab) => {
+                    const isSelected = data.config?.cronogramaGid === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => handleSelectTab(tab.id)}
+                        disabled={isSavingTab || isSelected}
+                        className="px-2.5 py-1 text-[11px] font-semibold rounded-full border disabled:cursor-default"
+                        style={isSelected
+                          ? { background: ACCENT, color: '#fff', borderColor: ACCENT }
+                          : { color: '#475569', borderColor: BORDER }}
+                      >
+                        {tab.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="w-full flex flex-wrap items-end gap-2 pt-2 mt-1 border-t border-slate-200">
             <div className="flex-1 min-w-64">
               <label htmlFor="seguimiento-drive-folder-edit" className="block text-[11px] font-semibold text-slate-700 mb-1">

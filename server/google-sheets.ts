@@ -17,16 +17,26 @@ async function sheetsRequest<T>(accessToken: string, path: string): Promise<T> {
   return payload as T;
 }
 
-// Encuentra el título real de una pestaña a partir de su gid (Apps Script identifica
-// las pestañas por gid en la URL, pero la API de Sheets necesita el título para leerla).
-export async function getSheetTitleByGid(accessToken: string, spreadsheetId: string, gid: string | number): Promise<string> {
+export type SheetTab = { id: string; name: string };
+
+// Lista las pestañas de una Hoja de Google (id = gid como string) -- se usa
+// tanto para resolver un gid guardado a su título real como para mostrarle
+// al usuario la lista completa y que elija cuál es la del cronograma.
+export async function listSheetTabs(accessToken: string, spreadsheetId: string): Promise<SheetTab[]> {
   const payload = await sheetsRequest<{ sheets: Array<{ properties: { sheetId: number; title: string } }> }>(
     accessToken,
     `${spreadsheetId}?fields=sheets.properties`,
   );
-  const sheet = (payload.sheets || []).find((s) => String(s.properties.sheetId) === String(gid));
+  return (payload.sheets || []).map((s) => ({ id: String(s.properties.sheetId), name: s.properties.title }));
+}
+
+// Encuentra el título real de una pestaña a partir de su gid (Apps Script identifica
+// las pestañas por gid en la URL, pero la API de Sheets necesita el título para leerla).
+export async function getSheetTitleByGid(accessToken: string, spreadsheetId: string, gid: string | number): Promise<string> {
+  const tabs = await listSheetTabs(accessToken, spreadsheetId);
+  const sheet = tabs.find((s) => s.id === String(gid));
   if (!sheet) throw new Error(`No se encontró ninguna pestaña con gid ${gid} en esa hoja de cálculo.`);
-  return sheet.properties.title;
+  return sheet.name;
 }
 
 export type SheetCell = { text: string; backgroundColor: string | null };

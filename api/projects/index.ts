@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { canEditModuleRequest, isAdminRequest } from '../../server/admin-auth.js';
 import { getGoogleOAuthClient } from '../../server/google-oauth.js';
-import { getSheetTitleByGid, getSheetGridWithBackgrounds, getSheetValues, type SheetCell, type SheetValue } from '../../server/google-sheets.js';
+import { getSheetTitleByGid, getSheetGridWithBackgrounds, getSheetValues, listSheetTabs, type SheetCell, type SheetValue, type SheetTab } from '../../server/google-sheets.js';
 import { getDriveFileMeta, downloadDriveFileBuffer } from '../../server/google-drive.js';
 import { isExcelMimeType, loadExcelWorkbook, findExcelSheetByName, getExcelGridWithBackgrounds, getExcelValues } from '../../server/excel-seguimiento-source.js';
 import { parseCronograma } from '../../server/cronograma-parser.js';
@@ -171,7 +171,10 @@ async function importSeguimiento(sql: SqlClient, seguimientoId: number) {
   } else if (isExcelMimeType(fileMeta.mimeType)) {
     const buffer = await downloadDriveFileBuffer(accessToken, config.spreadsheetId);
     const workbook = await loadExcelWorkbook(buffer);
-    const cronogramaSheet = findExcelSheetByName(workbook, 'Cronograma');
+    // Un .xlsx no tiene "gid" -- si el usuario ya eligió una pestaña a mano
+    // (con el selector de "Cambiar hoja"), cronograma_gid guarda su NOMBRE.
+    // Si no, se intenta detectar una pestaña llamada "Cronograma" por defecto.
+    const cronogramaSheet = findExcelSheetByName(workbook, config.cronogramaGid || 'Cronograma');
     sheetTitle = cronogramaSheet.name;
     cronogramaGrid = getExcelGridWithBackgrounds(cronogramaSheet);
     getValues = async (tabName) => getExcelValues(findExcelSheetByName(workbook, tabName));
@@ -390,6 +393,47 @@ export default async function handler(
       }
       const sheets = await listSeguimientoSheets(sql, projectId);
       return response.status(200).json({ data: sheets, meta: { total: sheets.length }, errors: [] });
+    }
+
+    // Lista las pestañas del archivo (Hoja de Google o Excel) ya vinculado a
+    // una hoja de seguimiento, para que el usuario elija a mano cuál es la
+    // del cronograma -- no todas las fuentes la llaman literalmente
+    // "Cronograma" (ej. "GANTT Fisico"), así que no basta con adivinar.
+    if (request.method === 'GET' && request.query.seguimiento === 'listaPestanas') {
+      const seguimientoId = Number(request.query.seguimientoId);
+      if (!Number.isInteger(seguimientoId) || seguimientoId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja de seguimiento es obligatorio.'] });
+      }
+      const [config] = (await sql`
+        SELECT spreadsheet_id AS "spreadsheetId" FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId}
+      `) as any[];
+      if (!config?.spreadsheetId) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Esta hoja todavía no tiene un archivo vinculado.'] });
+      }
+      const accessToken = await getConnectedAccessToken(sql);
+      if (!accessToken) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Conecta una cuenta de Google (Fuentes Drive) para poder leer el archivo.'] });
+      }
+      try {
+        const fileMeta = await getDriveFileMeta(accessToken, config.spreadsheetId);
+        let tabs: SheetTab[];
+        if (fileMeta.mimeType === GOOGLE_SHEETS_MIME) {
+          tabs = await listSheetTabs(accessToken, config.spreadsheetId);
+        } else if (isExcelMimeType(fileMeta.mimeType)) {
+          const buffer = await downloadDriveFileBuffer(accessToken, config.spreadsheetId);
+          const workbook = await loadExcelWorkbook(buffer);
+          tabs = workbook.worksheets.map((ws) => ({ id: ws.name, name: ws.name }));
+        } else {
+          return response.status(400).json({
+            data: null, meta: {},
+            errors: [`El archivo vinculado ("${fileMeta.name}") no es ni una Hoja de Google ni un Excel (.xlsx).`],
+          });
+        }
+        return response.status(200).json({ data: tabs, meta: { total: tabs.length }, errors: [] });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'No fue posible listar las pestañas del archivo.';
+        return response.status(502).json({ data: null, meta: {}, errors: [message] });
+      }
     }
 
     if (request.method === 'GET' && request.query.seguimiento === 'cronograma') {
