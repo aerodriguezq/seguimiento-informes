@@ -193,6 +193,49 @@ export function extractValorUnitarioPorSubactividad(grid: SheetValue[][]): Array
   return out;
 }
 
+export type AvanceGeneralFinanciero = {
+  planificadoAcumulado: number[];
+  ejecutadoAcumulado: number[];
+  totalPlanificado: number;
+};
+
+// GANTT FINANCIERO trae, debajo de las subactividades, un bloque resumen de
+// todo el proyecto ("Avance Acumulado Planificado $" / "Avance Acumulado
+// Ejecutado $", uno por mes) -- a diferencia de "Avance Ejecutado $" (fila
+// de cada mes suelto), este SÍ viene con valor cacheado en cada mes, así
+// que es seguro leerlo directo sin depender de fórmulas. Se usa para
+// mostrar el avance financiero GENERAL del proyecto (ponderado por plata,
+// no por cantidad de subactividades).
+export function extractAvanceGeneralFinanciero(grid: SheetValue[][], mesesCount: number): AvanceGeneralFinanciero | null {
+  const findLabelCell = (label: string): { row: number; col: number } | null => {
+    const target = normalizeHeader(label);
+    for (let r = 0; r < grid.length; r++) {
+      const row = grid[r] || [];
+      for (let c = 0; c < row.length; c++) {
+        if (normalizeHeader(row[c]) === target) return { row: r, col: c };
+      }
+    }
+    return null;
+  };
+  const planRef = findLabelCell('Avance Acumulado Planificado $');
+  const ejecRef = findLabelCell('Avance Acumulado Ejecutado $');
+  if (!planRef || !ejecRef) return null;
+
+  const readMonths = (ref: { row: number; col: number }): number[] => {
+    const row = grid[ref.row] || [];
+    const vals: number[] = [];
+    for (let i = 0; i < mesesCount; i++) vals.push(toNum(row[ref.col + 1 + i]));
+    return vals;
+  };
+  const planificadoAcumulado = readMonths(planRef);
+  const ejecutadoAcumulado = readMonths(ejecRef);
+  return {
+    planificadoAcumulado,
+    ejecutadoAcumulado,
+    totalPlanificado: planificadoAcumulado[planificadoAcumulado.length - 1] ?? 0,
+  };
+}
+
 // Deriva el Gantt Financiero a partir del Físico ya parseado + el Valor
 // Unitario por fila de GANTT FINANCIERO (emparejados por posición, como
 // hacen las propias fórmulas del archivo original, que referencian la

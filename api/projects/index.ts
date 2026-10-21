@@ -5,7 +5,13 @@ import { getSheetTitleByGid, getSheetGridWithBackgrounds, getSheetValues, listSh
 import { getDriveFileMeta, downloadDriveFileBuffer } from '../../server/google-drive.js';
 import { isExcelMimeType, loadExcelWorkbook, findExcelSheetByName, getExcelGridWithBackgrounds, getExcelValues } from '../../server/excel-seguimiento-source.js';
 import { parseCronograma } from '../../server/cronograma-parser.js';
-import { parseGanttMensual, extractValorUnitarioPorSubactividad, deriveGanttFinanciero, type GanttMensualPayload } from '../../server/gantt-mensual-parser.js';
+import {
+  parseGanttMensual,
+  extractValorUnitarioPorSubactividad,
+  deriveGanttFinanciero,
+  extractAvanceGeneralFinanciero,
+  type GanttMensualPayload,
+} from '../../server/gantt-mensual-parser.js';
 import {
   parseReferenciaLineas,
   parseInsumosDetalle,
@@ -153,6 +159,11 @@ async function importGanttMensual(
   const financieroGrid = await findSiblingValues('financiero');
   const valorUnitarioList = financieroGrid ? extractValorUnitarioPorSubactividad(financieroGrid) : null;
   const financiero = valorUnitarioList ? deriveGanttFinanciero(fisico, valorUnitarioList) : null;
+  // Avance financiero GENERAL del proyecto (ponderado por plata, no por
+  // cantidad de subactividades) -- viene de un bloque resumen aparte de
+  // GANTT FINANCIERO, con lo que ya ejecutó/planeó TODO el proyecto, mes a
+  // mes acumulado.
+  const avanceGeneral = financieroGrid ? extractAvanceGeneralFinanciero(financieroGrid, fisico.meses.length) : null;
 
   // Limpia tanto el formato clásico (por si esta hoja tenía datos de un
   // vínculo anterior) como el Gantt mensual de una importación previa.
@@ -179,7 +190,23 @@ async function importGanttMensual(
       ejecutado_meses: s.ejecutado,
     }));
 
-  const allRows = buildRows('fisico', fisico).concat(financiero ? buildRows('financiero', financiero) : []);
+  const resumenRow = avanceGeneral
+    ? [{
+        seguimiento_id: seguimientoId,
+        tipo: 'resumen',
+        orden: 0,
+        actividad: 'Avance financiero general',
+        descripcion: '',
+        sub_actividad: 'planificado_vs_ejecutado',
+        meta: avanceGeneral.totalPlanificado,
+        unidad: 'COP',
+        meses: fisico.meses,
+        plan_meses: avanceGeneral.planificadoAcumulado,
+        ejecutado_meses: avanceGeneral.ejecutadoAcumulado,
+      }]
+    : [];
+
+  const allRows = buildRows('fisico', fisico).concat(financiero ? buildRows('financiero', financiero) : []).concat(resumenRow);
   if (allRows.length > 0) {
     await sql`
       INSERT INTO seguimiento_gantt_subactividades
@@ -556,10 +583,18 @@ export default async function handler(
       });
       const fisicoRows = rows.filter((r) => r.tipo === 'fisico');
       const financieroRows = rows.filter((r) => r.tipo === 'financiero');
+      const resumenRow = rows.find((r) => r.tipo === 'resumen');
       const data = {
         meses: (fisicoRows[0]?.meses || financieroRows[0]?.meses || []) as string[],
         fisico: fisicoRows.map(toSubactividad),
         financiero: financieroRows.length > 0 ? financieroRows.map(toSubactividad) : null,
+        resumenFinanciero: resumenRow
+          ? {
+              totalPlanificado: toNumOrNull(resumenRow.meta) ?? 0,
+              planificadoAcumulado: (resumenRow.plan as number[]).map((v) => toNumOrNull(v) ?? 0),
+              ejecutadoAcumulado: (resumenRow.ejecutado as number[]).map((v) => toNumOrNull(v) ?? 0),
+            }
+          : null,
       };
       return response.status(200).json({ data, meta: {}, errors: [] });
     }

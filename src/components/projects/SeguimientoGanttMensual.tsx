@@ -10,7 +10,8 @@ type GanttSubactividad = {
   plan: number[];
   ejecutado: number[];
 };
-type GanttData = { meses: string[]; fisico: GanttSubactividad[]; financiero: GanttSubactividad[] | null };
+type ResumenFinanciero = { totalPlanificado: number; planificadoAcumulado: number[]; ejecutadoAcumulado: number[] };
+type GanttData = { meses: string[]; fisico: GanttSubactividad[]; financiero: GanttSubactividad[] | null; resumenFinanciero: ResumenFinanciero | null };
 
 type Estado = 'cumplida' | 'adelantada' | 'al_dia' | 'atrasada' | 'inicia_este_mes' | 'aun_no_inicia';
 type Bucket = 'atrasada' | 'al_dia' | 'por_iniciar';
@@ -85,6 +86,9 @@ function fmtValor(v: number, unidad: string): string {
 function fmtPct(ejec: number, meta: number): string {
   if (meta <= 0) return '0%';
   return `${Math.round((ejec / meta) * 100)}%`;
+}
+function fmtCOPCompact(v: number): string {
+  return v.toLocaleString('es-CO', { style: 'currency', currency: 'COP', notation: 'compact', maximumFractionDigits: 1 });
 }
 
 const MonthBars: React.FC<{ meses: string[]; plan: number[]; ejecutado: number[]; currentIdx: number }> = ({ meses, plan, ejecutado, currentIdx }) => {
@@ -288,6 +292,47 @@ export const SeguimientoGanttMensual: React.FC<{ seguimientoId: number; lastImpo
           <p className="text-[10.5px] text-slate-500 mt-0.5">por iniciar</p>
         </div>
       </div>
+
+      {tipo === 'financiero' && data.resumenFinanciero && (
+        <div className="mx-4 mt-3 rounded-lg border border-slate-200 p-3.5" style={{ background: ACCENT_LIGHT }}>
+          <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: ACCENT }}>Avance financiero general del proyecto</p>
+          <p className="text-[10.5px] text-slate-500 mt-0.5">
+            Acumulado a {monthLabelLong(meses[closedCount > 0 ? closedCount - 1 : 0])} (último mes cerrado), sobre un presupuesto total de {fmtCOPCompact(data.resumenFinanciero.totalPlanificado)}.
+          </p>
+          <div className="mt-2.5 grid grid-cols-2 gap-3">
+            {(() => {
+              const idx = Math.max(closedCount - 1, 0);
+              const ejec = data.resumenFinanciero.ejecutadoAcumulado[idx] ?? 0;
+              const plan = data.resumenFinanciero.planificadoAcumulado[idx] ?? 0;
+              const total = data.resumenFinanciero.totalPlanificado;
+              const pctEjec = total > 0 ? (ejec / total) * 100 : 0;
+              const pctPlan = total > 0 ? (plan / total) * 100 : 0;
+              return (
+                <>
+                  <div>
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-[11px] font-semibold text-slate-600">Ejecutado</span>
+                      <span className="text-[11px] font-bold text-slate-800">{pctEjec.toFixed(1)}% · {fmtCOPCompact(ejec)}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-white/70 overflow-hidden mt-1">
+                      <div className="h-full rounded-full" style={{ width: `${Math.min(pctEjec, 100)}%`, background: '#34a06a' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-[11px] font-semibold text-slate-600">Planificado</span>
+                      <span className="text-[11px] font-bold text-slate-800">{pctPlan.toFixed(1)}% · {fmtCOPCompact(plan)}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-white/70 overflow-hidden mt-1">
+                      <div className="h-full rounded-full" style={{ width: `${Math.min(pctPlan, 100)}%`, background: ACCENT }} />
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
 
       <div className="px-4 mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
         <div className="flex items-center gap-1.5 flex-wrap">
