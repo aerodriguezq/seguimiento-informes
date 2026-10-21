@@ -160,6 +160,7 @@ export const SeguimientoGanttMensual: React.FC<{ seguimientoId: number; lastImpo
   const [actividadFiltro, setActividadFiltro] = useState<string>('Todas');
   const [estadoFiltro, setEstadoFiltro] = useState<Bucket | 'Todos'>('Todos');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [showAvancePorMes, setShowAvancePorMes] = useState(false);
 
   useEffect(() => {
     setIsLoading(true);
@@ -331,6 +332,54 @@ export const SeguimientoGanttMensual: React.FC<{ seguimientoId: number; lastImpo
               );
             })()}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowAvancePorMes((v) => !v)}
+            className="mt-2.5 inline-flex items-center gap-1 text-[10.5px] font-semibold"
+            style={{ color: ACCENT }}
+          >
+            {showAvancePorMes ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {showAvancePorMes ? 'Ocultar detalle mes a mes' : 'Ver detalle mes a mes'}
+          </button>
+
+          {showAvancePorMes && (
+            <div className="mt-2 overflow-x-auto">
+              <table className="text-[10.5px] border-collapse" style={{ minWidth: meses.length * 56 }}>
+                <thead>
+                  <tr>
+                    <th className="text-left font-semibold text-slate-500 pr-2 pb-1 sticky left-0" style={{ background: ACCENT_LIGHT }}></th>
+                    {meses.map((m, i) => (
+                      <th
+                        key={m}
+                        className="text-right font-semibold pb-1 px-1.5"
+                        style={i === closedCount - 1 ? { color: ACCENT } : { color: '#94a3b8' }}
+                      >
+                        {monthLabel(m)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {([
+                    { label: 'Planificado %', arr: data.resumenFinanciero.planificadoAcumulado, color: ACCENT },
+                    { label: 'Ejecutado %', arr: data.resumenFinanciero.ejecutadoAcumulado, color: '#34a06a' },
+                  ] as const).map((fila) => (
+                    <tr key={fila.label} className="border-t" style={{ borderColor: '#d6e3ec' }}>
+                      <td className="text-left font-semibold py-1 pr-2 whitespace-nowrap sticky left-0" style={{ color: fila.color, background: ACCENT_LIGHT }}>
+                        {fila.label}
+                      </td>
+                      {fila.arr.map((v, i) => (
+                        <td key={i} className="text-right tabular-nums py-1 px-1.5" style={i === closedCount - 1 ? { fontWeight: 700, color: '#1e293b' } : { color: '#475569' }}>
+                          {data.resumenFinanciero!.totalPlanificado > 0 ? `${((v / data.resumenFinanciero!.totalPlanificado) * 100).toFixed(1)}%` : '0%'}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
