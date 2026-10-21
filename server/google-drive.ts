@@ -148,6 +148,21 @@ export async function getDriveFileMeta(accessToken: string, fileId: string): Pro
   return driveRequest<DriveFile>(accessToken, `/files/${fileId}?fields=id,name,mimeType&supportsAllDrives=true`);
 }
 
+// Descarga el contenido binario de un archivo (p.ej. un .xlsx subido tal
+// cual a Drive, sin convertir a Hoja de Google) -- driveRequest no sirve
+// acá porque siempre intenta parsear JSON, y esto es un blob.
+export async function downloadDriveFileBuffer(accessToken: string, fileId: string): Promise<Buffer> {
+  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.error?.message || `Google Drive respondió ${response.status} al descargar el archivo.`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
 // Siembra la fila raíz (sin padre) de la que arranca todo el copiado.
 export async function seedDriveCopyRoot(sql: SqlClient, jobId: string, accessToken: string, sourceRootId: string): Promise<void> {
   const source = await getDriveFileMeta(accessToken, sourceRootId);

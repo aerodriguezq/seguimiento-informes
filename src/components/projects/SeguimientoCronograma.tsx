@@ -17,13 +17,19 @@ const INSUMO_COLUMNS: { key: string; label: string }[] = [
 ];
 const INSUMO_COLUMN_KEYS = INSUMO_COLUMNS.map((c) => c.key);
 
+// Acepta tanto un link de Hoja de Google (con gid de pestaña) como un link
+// de archivo de Drive -- un .xlsx subido tal cual no tiene "gid" de pestaña
+// (el backend ubica su pestaña del cronograma por nombre en ese caso), así
+// que gid queda vacío para ese caso.
 function extractSheetIds(input: string): { spreadsheetId: string; gid: string } | null {
   const trimmed = input.trim();
-  const urlMatch = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
-  if (urlMatch) {
+  const sheetsMatch = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if (sheetsMatch) {
     const gidMatch = trimmed.match(/[?#&]gid=(\d+)/);
-    return { spreadsheetId: urlMatch[1], gid: gidMatch ? gidMatch[1] : '0' };
+    return { spreadsheetId: sheetsMatch[1], gid: gidMatch ? gidMatch[1] : '0' };
   }
+  const fileMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (fileMatch) return { spreadsheetId: fileMatch[1], gid: '' };
   if (/^[a-zA-Z0-9_-]{20,}$/.test(trimmed)) return { spreadsheetId: trimmed, gid: '0' };
   return null;
 }
@@ -309,7 +315,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'seguimientoConfig', seguimientoId: selectedSeguimientoId, spreadsheetId: ids.spreadsheetId, cronogramaGid: ids.gid }),
+        body: JSON.stringify({ kind: 'seguimientoConfig', seguimientoId: selectedSeguimientoId, spreadsheetId: ids.spreadsheetId, cronogramaGid: ids.gid || null }),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar la hoja de cálculo.');
@@ -494,13 +500,13 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
         />
       </div>
       <div className="flex-1 min-w-64">
-        <label htmlFor="seguimiento-new-sheet-link" className="block text-[11px] font-semibold text-slate-700 mb-1">Link de Google Sheets (opcional, se puede vincular después)</label>
+        <label htmlFor="seguimiento-new-sheet-link" className="block text-[11px] font-semibold text-slate-700 mb-1">Link de Google Sheets o Excel (opcional, se puede vincular después)</label>
         <input
           id="seguimiento-new-sheet-link"
           type="text"
           value={newSheetLink}
           onChange={(e) => setNewSheetLink(e.target.value)}
-          placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=..."
+          placeholder="Link de Google Sheets o de un .xlsx en Drive"
           className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
         />
       </div>
@@ -554,14 +560,14 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
           </div>
           <div className="flex-1 min-w-64">
             <label htmlFor="seguimiento-sheet-link-new" className="block text-[11px] font-semibold text-slate-700 mb-1">
-              Link de Google Sheets (pestaña del cronograma)
+              Link de Google Sheets o Excel (pestaña del cronograma)
             </label>
             <input
               id="seguimiento-sheet-link-new"
               type="text"
               value={newSheetLink}
               onChange={(e) => setNewSheetLink(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=..."
+              placeholder="Link de Google Sheets o de un .xlsx en Drive"
               className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
             />
           </div>
@@ -613,14 +619,14 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
             <div className="flex flex-wrap items-end gap-2">
               <div className="flex-1 min-w-64">
                 <label htmlFor="seguimiento-sheet-link-link" className="block text-[11px] font-semibold text-slate-700 mb-1">
-                  Link de Google Sheets (pestaña del cronograma)
+                  Link de Google Sheets o Excel (pestaña del cronograma)
                 </label>
                 <input
                   id="seguimiento-sheet-link-link"
                   type="text"
                   value={sheetInput}
                   onChange={(e) => setSheetInput(e.target.value)}
-                  placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=..."
+                  placeholder="Link de Google Sheets o de un .xlsx en Drive"
                   className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
                 />
               </div>
@@ -667,7 +673,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
             <p className="text-[11px] text-slate-500">
               {data.config.lastImportAt
                 ? `Última importación: ${new Date(data.config.lastImportAt).toLocaleString('es-CO')}`
-                : 'Aún no se ha importado desde Google Sheets.'}
+                : 'Aún no se ha importado.'}
             </p>
           </div>
         </div>
@@ -719,7 +725,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
                 style={{ background: ACCENT }}
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${isImporting ? 'animate-spin' : ''}`} />
-                {isImporting ? 'Importando...' : 'Importar desde Google Sheets'}
+                {isImporting ? 'Importando...' : 'Importar'}
               </button>
             </>
           )}
@@ -730,14 +736,14 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
         <div className="no-print mx-4 mt-3 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
           <div className="flex-1 min-w-64">
             <label htmlFor="seguimiento-sheet-link-edit" className="block text-[11px] font-semibold text-slate-700 mb-1">
-              Nuevo link de Google Sheets (pestaña del cronograma)
+              Nuevo link de Google Sheets o Excel (pestaña del cronograma)
             </label>
             <input
               id="seguimiento-sheet-link-edit"
               type="text"
               value={sheetInput}
               onChange={(e) => setSheetInput(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=..."
+              placeholder="Link de Google Sheets o de un .xlsx en Drive"
               className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
             />
             <p className="mt-1 text-[10.5px] text-slate-500 font-mono">
@@ -853,7 +859,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       {!hasData ? (
         <div className="p-4">
           <div className="py-8 text-center text-xs text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
-            Sin datos importados todavía. {canEdit ? 'Usa "Importar desde Google Sheets" para traer el seguimiento.' : ''}
+            Sin datos importados todavía. {canEdit ? 'Usa "Importar" para traer el seguimiento.' : ''}
           </div>
         </div>
       ) : (

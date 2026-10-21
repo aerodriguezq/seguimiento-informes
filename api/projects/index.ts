@@ -1,7 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { canEditModuleRequest, isAdminRequest } from '../../server/admin-auth.js';
 import { getGoogleOAuthClient } from '../../server/google-oauth.js';
-import { getSheetTitleByGid, getSheetGridWithBackgrounds, getSheetValues } from '../../server/google-sheets.js';
+import { getSheetTitleByGid, getSheetGridWithBackgrounds, getSheetValues, type SheetCell, type SheetValue } from '../../server/google-sheets.js';
+import { getDriveFileMeta, downloadDriveFileBuffer } from '../../server/google-drive.js';
+import { isExcelMimeType, loadExcelWorkbook, findExcelSheetByName, getExcelGridWithBackgrounds, getExcelValues } from '../../server/excel-seguimiento-source.js';
 import { parseCronograma } from '../../server/cronograma-parser.js';
 import {
   parseReferenciaLineas,
@@ -29,6 +31,8 @@ async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
   if (!token.token) throw new Error('La sesión de Google conectada expiró. Reconéctala desde Fuentes Drive.');
   return token.token;
 }
+
+const GOOGLE_SHEETS_MIME = 'application/vnd.google-apps.spreadsheet';
 
 const SEGUIMIENTO_SHEET_NAMES = {
   insumosDetalle: 'Insumos Detalle',
@@ -139,42 +143,70 @@ async function importSeguimiento(sql: SqlClient, seguimientoId: number) {
     FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId}
   `) as any[];
   if (!config) throw new Error('Esta hoja de seguimiento ya no existe.');
-  if (!config.spreadsheetId || !config.cronogramaGid) {
-    throw new Error('Esta hoja todavía no tiene una hoja de cálculo vinculada.');
+  if (!config.spreadsheetId) {
+    throw new Error('Esta hoja todavía no tiene un archivo vinculado.');
   }
   const projectId = config.projectId;
 
   const accessToken = await getConnectedAccessToken(sql);
-  if (!accessToken) throw new Error('Conecta una cuenta de Google (Fuentes Drive) para poder leer la hoja de cálculo.');
+  if (!accessToken) throw new Error('Conecta una cuenta de Google (Fuentes Drive) para poder leer el archivo.');
 
-  const sheetTitle = await getSheetTitleByGid(accessToken, config.spreadsheetId, config.cronogramaGid);
-  const cronogramaGrid = await getSheetGridWithBackgrounds(accessToken, config.spreadsheetId, sheetTitle);
-  const parsedCronograma = parseCronograma(cronogramaGrid);
-  if (parsedCronograma.rows.length === 0) {
+  // El archivo vinculado puede ser una Hoja de Google nativa (se lee con la
+  // API de Sheets, ubicando pestañas por gid/nombre) o un .xlsx subido tal
+  // cual a Drive (la API de Sheets lo rechaza -- se descarga y se lee con
+  // ExcelJS, ubicando pestañas solo por nombre ya que un .xlsx no tiene gid).
+  const fileMeta = await getDriveFileMeta(accessToken, config.spreadsheetId);
+
+  let sheetTitle: string;
+  let cronogramaGrid: SheetCell[][];
+  let getValues: (tabName: string) => Promise<SheetValue[][]>;
+
+  if (fileMeta.mimeType === GOOGLE_SHEETS_MIME) {
+    if (!config.cronogramaGid) {
+      throw new Error('Esta hoja todavía no tiene seleccionada la pestaña del cronograma. Usa "Cambiar hoja".');
+    }
+    sheetTitle = await getSheetTitleByGid(accessToken, config.spreadsheetId, config.cronogramaGid);
+    cronogramaGrid = await getSheetGridWithBackgrounds(accessToken, config.spreadsheetId, sheetTitle);
+    getValues = (tabName) => getSheetValues(accessToken, config.spreadsheetId, tabName);
+  } else if (isExcelMimeType(fileMeta.mimeType)) {
+    const buffer = await downloadDriveFileBuffer(accessToken, config.spreadsheetId);
+    const workbook = await loadExcelWorkbook(buffer);
+    const cronogramaSheet = findExcelSheetByName(workbook, 'Cronograma');
+    sheetTitle = cronogramaSheet.name;
+    cronogramaGrid = getExcelGridWithBackgrounds(cronogramaSheet);
+    getValues = async (tabName) => getExcelValues(findExcelSheetByName(workbook, tabName));
+  } else {
     throw new Error(
-      `La pestaña "${sheetTitle}" (gid ${config.cronogramaGid}) no tiene la estructura esperada: no se encontró una fila con encabezado "Sub Actividad" ni columnas de día (1-31). Verifica que sea la pestaña correcta del cronograma con "Cambiar hoja".`,
+      `El archivo vinculado ("${fileMeta.name}") no es ni una Hoja de Google ni un Excel (.xlsx) -- vuelve a vincularlo con "Cambiar hoja".`,
     );
   }
 
-  const referenciaGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.referenciaLineas);
+  const parsedCronograma = parseCronograma(cronogramaGrid);
+  if (parsedCronograma.rows.length === 0) {
+    throw new Error(
+      `La pestaña "${sheetTitle}" no tiene la estructura esperada: no se encontró una fila con encabezado "Sub Actividad" ni columnas de día (1-31). Verifica que sea la pestaña correcta del cronograma con "Cambiar hoja".`,
+    );
+  }
+
+  const referenciaGrid = await getValues(SEGUIMIENTO_SHEET_NAMES.referenciaLineas);
   const referencia = parseReferenciaLineas(referenciaGrid);
 
-  const insumosGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.insumosDetalle);
+  const insumosGrid = await getValues(SEGUIMIENTO_SHEET_NAMES.insumosDetalle);
   const { compra, entrega, detalle: insumosDetalleRows } = parseInsumosDetalle(insumosGrid);
 
-  const abonoGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.abono);
+  const abonoGrid = await getValues(SEGUIMIENTO_SHEET_NAMES.abono);
   const abono = parseAbono(abonoGrid);
 
-  const mvGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.materialVegetal);
+  const mvGrid = await getValues(SEGUIMIENTO_SHEET_NAMES.materialVegetal);
   const materialVegetal = parseMaterialVegetal(mvGrid);
 
-  const entregaInsumosGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.entregaInsumos);
+  const entregaInsumosGrid = await getValues(SEGUIMIENTO_SHEET_NAMES.entregaInsumos);
   const entregaInsumos = parseEntregaInsumos(entregaInsumosGrid);
 
-  const estimadaGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.entregaEstimada);
+  const estimadaGrid = await getValues(SEGUIMIENTO_SHEET_NAMES.entregaEstimada);
   const proyeccion = parseEntregaEstimada(estimadaGrid);
 
-  const beneficiariosGrid = await getSheetValues(accessToken, config.spreadsheetId, SEGUIMIENTO_SHEET_NAMES.beneficiarios);
+  const beneficiariosGrid = await getValues(SEGUIMIENTO_SHEET_NAMES.beneficiarios);
   const kpis = parseBeneficiariosKpis(beneficiariosGrid);
 
   // --- Persistencia: se limpia lo de ESTA hoja (no todo el proyecto, otras
@@ -274,7 +306,7 @@ async function importSeguimiento(sql: SqlClient, seguimientoId: number) {
 // entre a darle "Importar" a mano.
 async function importAllCronogramas(sql: SqlClient) {
   const configs = (await sql`
-    SELECT seguimiento_id AS "seguimientoId" FROM seguimiento_config WHERE spreadsheet_id IS NOT NULL AND cronograma_gid IS NOT NULL
+    SELECT seguimiento_id AS "seguimientoId" FROM seguimiento_config WHERE spreadsheet_id IS NOT NULL
   `) as any[];
   let imported = 0;
   let failed = 0;
@@ -486,11 +518,13 @@ export default async function handler(
 
       if (request.body.kind === 'seguimientoConfig') {
         const { spreadsheetId, cronogramaGid } = request.body ?? {};
-        if (!spreadsheetId || !cronogramaGid) {
-          return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja y el gid de la pestaña son obligatorios.'] });
+        if (!spreadsheetId) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id o link del archivo es obligatorio.'] });
         }
+        // El gid solo aplica a Hojas de Google (un .xlsx de Drive no tiene
+        // ese concepto -- su pestaña del cronograma se ubica por nombre).
         const rows = await sql`
-          UPDATE seguimiento_config SET spreadsheet_id = ${String(spreadsheetId).trim()}, cronograma_gid = ${String(cronogramaGid).trim()}
+          UPDATE seguimiento_config SET spreadsheet_id = ${String(spreadsheetId).trim()}, cronograma_gid = ${cronogramaGid ? String(cronogramaGid).trim() : null}
           WHERE seguimiento_id = ${seguimientoId}
           RETURNING spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid"
         `;
