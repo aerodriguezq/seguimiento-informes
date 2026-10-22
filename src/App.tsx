@@ -133,12 +133,16 @@ export default function App() {
   const { user, canView, canEdit, logout } = useAuth();
 
   const canViewModule = (mod: ActiveModule): boolean => {
-    if (mod === 'users') return user.isAdmin;
+    if (mod === 'users' || mod === 'projects') return user.isAdmin;
     if (mod === 'dashboard' || mod === 'new_report' || mod === 'project_detail') {
       return mod === 'new_report' ? canView('reports') : mod === 'project_detail' ? canView('projects') : true;
     }
     return canView(mod as any);
   };
+
+  // Cartera de Proyectos (listado completo) quedó restringida a admins; a los
+  // demás usuarios el botón de "volver" los manda al Dashboard en su lugar.
+  const goBackFromProjectDetail = () => goToModule(user.isAdmin ? 'projects' : 'dashboard');
 
   // Global State
   const [activeModule, setActiveModule] = useState<ActiveModule>(
@@ -1303,8 +1307,8 @@ export default function App() {
             />
           )}
 
-          {/* M05: Proyectos */}
-          {!isLoadingWorkspace && !workspaceError && activeModule === 'projects' && (
+          {/* M05: Proyectos (cartera completa -- solo administradores) */}
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'projects' && user.isAdmin && (
             <ProjectsListView
               projects={projects}
               reports={reports}
@@ -1322,10 +1326,10 @@ export default function App() {
               <p className="mt-1 text-xs text-slate-500">Elige un proyecto desde la Cartera de Proyectos para ver su detalle.</p>
               <button
                 type="button"
-                onClick={() => goToModule('projects')}
+                onClick={goBackFromProjectDetail}
                 className="mt-4 inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-teal-800"
               >
-                Ir a Proyectos
+                {user.isAdmin ? 'Ir a Proyectos' : 'Ir al Dashboard'}
               </button>
             </div>
           )}
@@ -1336,7 +1340,7 @@ export default function App() {
               reportTypes={reportTypes}
               alerts={alerts}
               contacts={contacts}
-              onBackToProjects={() => goToModule('projects')}
+              onBackToProjects={goBackFromProjectDetail}
               onOpenNewReport={handleOpenNewReport}
               onSelectReport={handleNavigateToReport}
               onToggleProjectAutoAlerts={handleToggleProjectAutoAlerts}

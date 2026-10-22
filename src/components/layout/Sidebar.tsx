@@ -15,6 +15,7 @@ import {
   Sprout,
   PanelLeftClose,
   PanelLeftOpen,
+  Info,
 } from 'lucide-react';
 import { ActiveModule, Project, Report } from '../../types';
 import { useAuth } from '../../auth/AuthContext';
@@ -158,7 +159,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           icon: FolderKanban,
           badge: projects.length,
           badgeColor: 'bg-white/10 text-slate-300',
-          visible: canView('projects'),
+          visible: user.isAdmin,
+        },
+        {
+          kind: 'leaf',
+          id: 'project_detail',
+          label: 'Detalle del Proyecto',
+          icon: Info,
+          visible: canView('projects') && !!currentProjectId,
         },
         {
           kind: 'group',

@@ -340,7 +340,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               className="inline-flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-semibold mb-1"
             >
               <ArrowLeft className="w-4 h-4" />
-              <span>Volver a la cartera de proyectos</span>
+              <span>{user.isAdmin ? 'Volver a la cartera de proyectos' : 'Volver al Dashboard'}</span>
             </button>
 
             <div className="flex flex-wrap items-center gap-2">
