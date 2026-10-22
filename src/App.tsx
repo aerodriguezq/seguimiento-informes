@@ -1120,6 +1120,9 @@ export default function App() {
         urgentReportsCount={urgentReportsCount}
         activeAlertsCount={activeAlertsCount}
         currentProject={currentProject}
+        currentProjectId={currentProjectId}
+        projects={projects}
+        reports={reports}
       />
 
       {/* Main Workspace Column */}

@@ -1,25 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
-  Folder,
-  FolderOpen,
-  FileSpreadsheet,
-  TrendingUp,
+  FolderKanban,
   FileText,
   List,
   PlusCircle,
   BellRing,
-  Wrench,
-  Cloud,
+  HardDrive,
   Archive,
   Users,
   ChevronRight,
   Inbox,
   ShieldCheck,
+  Sprout,
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
-import { ActiveModule, Project } from '../../types';
+import { ActiveModule, Project, Report } from '../../types';
 import { useAuth } from '../../auth/AuthContext';
 
 interface SidebarProps {
@@ -29,6 +26,9 @@ interface SidebarProps {
   urgentReportsCount: number;
   activeAlertsCount: number;
   currentProject: Project | null;
+  currentProjectId: string;
+  projects: Project[];
+  reports: Report[];
 }
 
 type LeafNode = {
@@ -36,7 +36,7 @@ type LeafNode = {
   id: ActiveModule;
   label: string;
   icon: React.ElementType;
-  badge?: number;
+  badge?: number | string;
   badgeColor?: string;
   visible: boolean;
 };
@@ -45,17 +45,31 @@ type GroupNode = {
   id: string;
   label: string;
   icon: React.ElementType;
+  badge?: number | string;
+  badgeColor?: string;
   visible: boolean;
   children: NavNode[];
 };
-type NavNode = LeafNode | GroupNode;
+// Encabezado de sección estático (no colapsable) -- solo organiza
+// visualmente, no tiene estado propio ni aparece en findAncestorGroups.
+type SectionNode = {
+  kind: 'section';
+  label: string;
+  children: NavNode[];
+};
+type NavNode = LeafNode | GroupNode | SectionNode;
 
-// Busca la cadena de ids de grupo que hay que tener abiertos para que
-// "targetId" quede visible (p.ej. para 'alerts' -> ['proyectos', 'informes']).
+// Busca la cadena de ids de grupo colapsable que hay que tener abiertos para
+// que "targetId" quede visible (p.ej. para 'alerts' -> ['informes']). Las
+// secciones estáticas no tienen id/estado propio, así que no se agregan al
+// path, pero sí hay que recorrer sus hijos.
 function findAncestorGroups(nodes: NavNode[], targetId: ActiveModule, path: string[] = []): string[] | null {
   for (const node of nodes) {
     if (node.kind === 'leaf') {
       if (node.id === targetId) return path;
+    } else if (node.kind === 'section') {
+      const found = findAncestorGroups(node.children, targetId, path);
+      if (found) return found;
     } else {
       const found = findAncestorGroups(node.children, targetId, [...path, node.id]);
       if (found) return found;
@@ -71,10 +85,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
   urgentReportsCount,
   activeAlertsCount,
   currentProject,
+  currentProjectId,
+  projects,
+  reports,
 }) => {
   const { user, canView } = useAuth();
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['proyectos', 'informes', 'admin']));
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['informes']));
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [seguimientoPct, setSeguimientoPct] = useState<number | null>(null);
+  const [peticionesCount, setPeticionesCount] = useState<number | null>(null);
+
+  // Badges con datos reales del proyecto activo -- mismo endpoint que ya usa
+  // el Dashboard para "Cronograma de Entregas" y el que ya filtra Peticiones
+  // por proyecto (ver remasterización de acceso por proyecto).
+  useEffect(() => {
+    if (!currentProjectId) {
+      setSeguimientoPct(null);
+      setPeticionesCount(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/projects?seguimiento=kpisResumen&projectId=${currentProjectId}`)
+      .then((res) => res.json())
+      .then((payload) => {
+        if (cancelled || !payload?.data) return;
+        const kpis = Object.values(payload.data) as { total: number; avance: number }[];
+        const totals = kpis.reduce((acc, k) => acc + (Number(k.total) || 0), 0);
+        const avances = kpis.reduce((acc, k) => acc + (Number(k.avance) || 0), 0);
+        setSeguimientoPct(totals > 0 ? Math.round((avances / totals) * 1000) / 10 : null);
+      })
+      .catch(() => setSeguimientoPct(null));
+    fetch(`/api/catalogs?kind=peticiones&projectId=${currentProjectId}`)
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!cancelled && Array.isArray(payload?.data)) setPeticionesCount(payload.data.length);
+      })
+      .catch(() => setPeticionesCount(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProjectId]);
 
   const toggleGroup = (id: string) => {
     setExpandedGroups((prev) => {
@@ -87,51 +137,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const navTree: NavNode[] = [
     {
-      kind: 'leaf',
-      id: 'dashboard',
-      label: 'Dashboard',
-      icon: LayoutDashboard,
-      visible: true,
-    },
-    {
-      kind: 'group',
-      id: 'proyectos',
-      label: 'Proyectos',
-      icon: Folder,
-      visible: true,
+      kind: 'section',
+      label: 'Operación & Seguimiento',
       children: [
         {
           kind: 'leaf',
+          id: 'dashboard',
+          label: 'Dashboard General',
+          icon: LayoutDashboard,
+          visible: true,
+        },
+        {
+          kind: 'leaf',
           id: 'projects',
-          label: 'Lista de Proyectos',
-          icon: FolderOpen,
+          label: 'Cartera de Proyectos',
+          icon: FolderKanban,
+          badge: projects.length,
+          badgeColor: 'bg-white/10 text-slate-300',
           visible: canView('projects'),
-        },
-        {
-          kind: 'leaf',
-          id: 'project_detail',
-          label: 'Detalle de Proyecto',
-          icon: FileSpreadsheet,
-          visible: canView('projects'),
-        },
-        {
-          kind: 'leaf',
-          id: 'seguimiento',
-          label: 'Seguimiento',
-          icon: TrendingUp,
-          visible: canView('seguimiento'),
         },
         {
           kind: 'group',
           id: 'informes',
-          label: 'Informes',
+          label: 'Gestión de Informes',
           icon: FileText,
+          badge: reports.length,
+          badgeColor: 'bg-white/10 text-slate-300',
           visible: true,
           children: [
             {
               kind: 'leaf',
               id: 'reports',
-              label: 'Ver Todos',
+              label: 'Ver Informes Radicados',
               icon: List,
               badge: pendingReportsCount,
               badgeColor: 'bg-amber-100 text-amber-800',
@@ -140,7 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {
               kind: 'leaf',
               id: 'new_report',
-              label: 'Crear Nuevo Informe',
+              label: '+ Radicar Nuevo Informe',
               icon: PlusCircle,
               visible: canView('reports'),
             },
@@ -155,27 +192,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
             },
           ],
         },
+        {
+          kind: 'leaf',
+          id: 'seguimiento',
+          label: 'Entregas en Campo',
+          icon: Sprout,
+          badge: seguimientoPct !== null ? `${seguimientoPct}%` : undefined,
+          badgeColor: 'bg-emerald-500/20 text-emerald-300',
+          visible: canView('seguimiento'),
+        },
+        {
+          kind: 'leaf',
+          id: 'peticiones',
+          label: 'Peticiones & PQRS',
+          icon: Inbox,
+          badge: peticionesCount !== null && peticionesCount > 0 ? peticionesCount : undefined,
+          badgeColor: 'bg-amber-500/20 text-amber-300',
+          visible: canView('peticiones'),
+        },
       ],
     },
     {
-      kind: 'leaf',
-      id: 'peticiones',
-      label: 'Peticiones',
-      icon: Inbox,
-      visible: canView('peticiones'),
-    },
-    {
-      kind: 'group',
-      id: 'admin',
-      label: 'Administración / Datos',
-      icon: Wrench,
-      visible: true,
+      kind: 'section',
+      label: 'Datos & Gobernanza',
       children: [
         {
           kind: 'leaf',
           id: 'drive_links',
-          label: 'Fuentes Drive',
-          icon: Cloud,
+          label: 'Fuentes Google Drive',
+          icon: HardDrive,
           visible: canView('drive_links'),
         },
         {
@@ -188,7 +233,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {
           kind: 'leaf',
           id: 'users',
-          label: 'Usuarios',
+          label: 'Equipo & Permisos',
           icon: Users,
           visible: user.isAdmin,
         },
@@ -219,7 +264,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeModule]);
 
+  const hasBadge = (badge: number | string | undefined): badge is number | string =>
+    badge !== undefined && (typeof badge === 'string' ? badge !== '' : badge > 0);
+
   const renderNode = (node: NavNode, depth: number): React.ReactNode => {
+    if (node.kind === 'section') {
+      const visibleChildren = node.children.map((child) => renderNode(child, 0)).filter(Boolean);
+      if (visibleChildren.length === 0) return null;
+      return (
+        <div key={node.label}>
+          {!isCollapsed && (
+            <div className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              {node.label}
+            </div>
+          )}
+          <div className="space-y-1">{visibleChildren}</div>
+        </div>
+      );
+    }
+
     if (!node.visible) return null;
 
     if (node.kind === 'leaf') {
@@ -249,9 +312,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             />
             {!isCollapsed && <span className="truncate">{node.label}</span>}
           </div>
-          {!isCollapsed && node.badge !== undefined && node.badge > 0 && (
+          {!isCollapsed && hasBadge(node.badge) && (
             <span
-              className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold font-mono ${
                 isActive ? 'bg-white/20 text-white' : node.badgeColor
               }`}
             >
@@ -286,7 +349,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <Icon className="w-4 h-4 shrink-0 text-slate-400" />
             <span className="truncate">{node.label}</span>
           </div>
-          <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-slate-500 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+          <div className="flex items-center gap-1.5 shrink-0">
+            {hasBadge(node.badge) && (
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold font-mono ${node.badgeColor}`}>
+                {node.badge}
+              </span>
+            )}
+            <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-slate-500 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+          </div>
         </button>
         {isOpen && <div className="space-y-1 mt-1">{visibleChildren}</div>}
       </div>
@@ -382,6 +452,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {navTree.map((node) => renderNode(node, 0))}
         </nav>
       </div>
+
+      {/* Footer de estado -- sin hora de sincronización inventada: solo
+          confirma que el sistema está respondiendo. */}
+      {!isCollapsed ? (
+        <div className="p-3 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2 truncate">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+            <span className="truncate">Sistema en línea</span>
+          </div>
+          <span className="text-[10px] font-mono text-slate-500">v2.0</span>
+        </div>
+      ) : (
+        <div className="p-3 border-t border-slate-800 text-center shrink-0">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" title="Sistema en línea" />
+        </div>
+      )}
     </aside>
   );
 };
