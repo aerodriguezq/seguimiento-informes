@@ -69,7 +69,6 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
   const activeAlerts = alerts.filter((alert) => alert.active).length;
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedProject, setSelectedProject] = useState('all');
   const [selectedType, setSelectedType] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState<string>(initialFilterStatus);
   const [selectedSemaforo, setSelectedSemaforo] = useState<'all' | 'vencido' | 'proximo' | 'en_tiempo'>('all');
@@ -90,11 +89,6 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
         if (!matchesConsecutive && !matchesProject && !matchesType && !matchesBpin && !matchesObs) {
           return false;
         }
-      }
-
-      // Project filter
-      if (selectedProject !== 'all' && report.projectId !== selectedProject) {
-        return false;
       }
 
       // Type filter
@@ -142,7 +136,7 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
       }
       return 0;
     });
-  }, [reports, searchTerm, selectedProject, selectedType, selectedStatus, selectedSemaforo, sortField, sortOrder]);
+  }, [reports, searchTerm, selectedType, selectedStatus, selectedSemaforo, sortField, sortOrder]);
 
   const handleExportCSV = () => {
     const headers = ['Consecutivo', 'Proyecto', 'BPIN', 'Tipo', 'Periodo', 'Fecha_Limite', 'Estado', 'Semaforo'];
@@ -295,22 +289,6 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
             />
           </div>
 
-          {/* Project Filter */}
-          <div>
-            <select
-              id="reports-project-filter"
-              value={selectedProject}
-              onChange={(e) => setSelectedProject(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200 rounded-lg outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all text-slate-800"
-            >
-              <option value="all">Todos los proyectos ({projects.length})</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.bpin})
-                </option>
-              ))}
-            </select>
-          </div>
 
           {/* Report Type Filter */}
           <div>

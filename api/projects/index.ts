@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { canEditModuleRequest, isAdminRequest } from '../../server/admin-auth.js';
+import { canEditModuleRequest, isAdminRequest, getAccessibleProjectIds } from '../../server/admin-auth.js';
 import { getGoogleOAuthClient } from '../../server/google-oauth.js';
 import { getSheetTitleByGid, getSheetGridWithBackgrounds, getSheetValues, listSheetTabs, type SheetCell, type SheetValue, type SheetTab } from '../../server/google-sheets.js';
 import { getDriveFileMeta, downloadDriveFileBuffer } from '../../server/google-drive.js';
@@ -491,9 +491,18 @@ export default async function handler(
     // Tarjetas de % de avance del Dashboard: mismo dato que las 3 tarjetas de
     // Seguimiento, pero sumado entre todos los proyectos que tengan KPIs.
     if (request.method === 'GET' && request.query.seguimiento === 'kpisResumen') {
+      const kpiProjectId = request.query.projectId ? Number(request.query.projectId) : null;
+      if (kpiProjectId !== null) {
+        const accessibleIds = await getAccessibleProjectIds(request, sql);
+        if (accessibleIds !== 'all' && !accessibleIds.includes(kpiProjectId)) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes acceso a ese proyecto.'] });
+        }
+      }
       const kpiRows = (await sql`
         SELECT tipo, SUM(total) AS total, SUM(avance) AS avance
-        FROM seguimiento_kpis GROUP BY tipo
+        FROM seguimiento_kpis
+        WHERE ${kpiProjectId === null} OR proyecto_id = ${kpiProjectId}
+        GROUP BY tipo
       `) as any[];
       const kpis: Record<string, { total: number; avance: number }> = {};
       kpiRows.forEach((k: any) => { kpis[k.tipo] = { total: toNumOrNull(k.total) ?? 0, avance: toNumOrNull(k.avance) ?? 0 }; });
@@ -792,8 +801,9 @@ export default async function handler(
       }
 
       const hasAutoAlerts = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'autoAlertsEnabled');
+      const hasActive = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'active');
 
-      const currentProjects = await sql`SELECT fecha_inicio, fecha_fin, alertas_automaticas FROM proyectos WHERE proyecto_id = ${projectId}`;
+      const currentProjects = await sql`SELECT fecha_inicio, fecha_fin, alertas_automaticas, activo FROM proyectos WHERE proyecto_id = ${projectId}`;
       if (!currentProjects[0]) {
         return response.status(404).json({ data: null, meta: {}, errors: ['Proyecto no encontrado.'] });
       }
@@ -801,12 +811,13 @@ export default async function handler(
       const nextStartDate = hasStartDate ? (startDate || null) : currentProjects[0].fecha_inicio;
       const nextEndDate = hasEndDate ? (endDate || null) : currentProjects[0].fecha_fin;
       const nextAutoAlerts = hasAutoAlerts ? Boolean(request.body.autoAlertsEnabled) : currentProjects[0].alertas_automaticas;
+      const nextActive = hasActive ? Boolean(request.body.active) : currentProjects[0].activo;
 
       const updatedProjects = await sql`
         UPDATE proyectos
-        SET fecha_inicio = ${nextStartDate}, fecha_fin = ${nextEndDate}, alertas_automaticas = ${nextAutoAlerts}
+        SET fecha_inicio = ${nextStartDate}, fecha_fin = ${nextEndDate}, alertas_automaticas = ${nextAutoAlerts}, activo = ${nextActive}
         WHERE proyecto_id = ${projectId}
-        RETURNING proyecto_id AS id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate", alertas_automaticas AS "autoAlertsEnabled"
+        RETURNING proyecto_id AS id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate", alertas_automaticas AS "autoAlertsEnabled", activo AS active
       `;
 
       // "Tipos de Informe Aplicables": antes esto solo actualizaba estado
@@ -917,6 +928,14 @@ export default async function handler(
       });
     }
 
+    // Acceso por proyecto: admin o usuario sin restricciones ve todos: los
+    // demás, solo los que el admin les asignó en Usuarios. Se filtra acá
+    // (no solo en el picker de tarjetas) para que la restricción aplique en
+    // toda la app -- "Proyectos", selects de Informes, etc.
+    const accessibleIds = await getAccessibleProjectIds(request, sql);
+    const accessibleIdsArray = accessibleIds === 'all' ? [] : accessibleIds;
+    const activeOnly = request.query.activeOnly === 'true' || request.query.activeOnly === '1';
+
     const projects = await sql`
       SELECT
         p.proyecto_id AS id,
@@ -935,6 +954,8 @@ export default async function handler(
       FROM proyectos p
       LEFT JOIN empresas e ON e.empresa_id = p.empresa_id
       LEFT JOIN proyecto_tipo_informe pti ON pti.proyecto_id = p.proyecto_id
+      WHERE (${accessibleIds === 'all'} OR p.proyecto_id = ANY(${accessibleIdsArray}))
+        AND (${!activeOnly} OR p.activo = TRUE)
       GROUP BY p.proyecto_id, e.empresa_id, e.nombre
       ORDER BY p.nombre ASC
     `;

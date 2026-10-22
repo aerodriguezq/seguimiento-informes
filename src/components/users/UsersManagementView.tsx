@@ -8,6 +8,8 @@ export interface AuthorizedUser {
   isAdmin: boolean;
   active: boolean;
   permissions: Partial<Record<PermissionModule, PermissionLevel>>;
+  // null = acceso a todos los proyectos; array = restringido a esos ids.
+  projectIds: string[] | null;
 }
 
 export interface SweepConfig {
@@ -40,8 +42,9 @@ export interface EmailLogEntry {
 interface UsersManagementViewProps {
   users: AuthorizedUser[];
   currentUserEmail: string;
+  projects: { id: string; name: string }[];
   onAddUser: (email: string, name: string) => Promise<void>;
-  onUpdateUser: (email: string, updates: Partial<Pick<AuthorizedUser, 'name' | 'active' | 'isAdmin' | 'permissions'>> & { newEmail?: string }) => Promise<void>;
+  onUpdateUser: (email: string, updates: Partial<Pick<AuthorizedUser, 'name' | 'active' | 'isAdmin' | 'permissions' | 'projectIds'>> & { newEmail?: string }) => Promise<void>;
   onRemoveUser: (email: string) => Promise<void>;
   onSendTestEmail: (email: string) => Promise<void>;
   sweeps: SweepConfig[];
@@ -72,16 +75,18 @@ const UserRow: React.FC<{
   user: AuthorizedUser;
   isSelf: boolean;
   defaultOpen: boolean;
+  projects: UsersManagementViewProps['projects'];
   onUpdateUser: UsersManagementViewProps['onUpdateUser'];
   onRemoveUser: UsersManagementViewProps['onRemoveUser'];
   onSendTestEmail: UsersManagementViewProps['onSendTestEmail'];
-}> = ({ user, isSelf, defaultOpen, onUpdateUser, onRemoveUser, onSendTestEmail }) => {
+}> = ({ user, isSelf, defaultOpen, projects, onUpdateUser, onRemoveUser, onSendTestEmail }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [email, setEmail] = useState(user.email);
   const [name, setName] = useState(user.name || '');
   const [isAdmin, setIsAdmin] = useState(user.isAdmin);
   const [active, setActive] = useState(user.active);
   const [permissions, setPermissions] = useState<Partial<Record<PermissionModule, PermissionLevel>>>(user.permissions || {});
+  const [projectIds, setProjectIds] = useState<string[] | null>(user.projectIds);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
@@ -94,7 +99,8 @@ const UserRow: React.FC<{
     name !== (user.name || '') ||
     isAdmin !== user.isAdmin ||
     active !== user.active ||
-    JSON.stringify(permissions) !== JSON.stringify(user.permissions || {});
+    JSON.stringify(permissions) !== JSON.stringify(user.permissions || {}) ||
+    JSON.stringify([...(projectIds ?? [])].sort()) !== JSON.stringify([...(user.projectIds ?? [])].sort());
 
   const handleSave = async () => {
     if (emailChanged && !window.confirm(`¿Cambiar el correo de ${user.email} a ${email.trim().toLowerCase()}? Se cerrará cualquier sesión activa de esa cuenta.`)) {
@@ -103,7 +109,7 @@ const UserRow: React.FC<{
     setIsSaving(true);
     setError('');
     try {
-      await onUpdateUser(user.email, { name, isAdmin, active, permissions, ...(emailChanged ? { newEmail: email.trim().toLowerCase() } : {}) });
+      await onUpdateUser(user.email, { name, isAdmin, active, permissions, projectIds, ...(emailChanged ? { newEmail: email.trim().toLowerCase() } : {}) });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No fue posible guardar los cambios.');
     } finally {
@@ -226,6 +232,46 @@ const UserRow: React.FC<{
             </div>
           )}
           {isAdmin && <p className="text-[11px] text-slate-500 italic">Los administradores tienen acceso total a todos los módulos.</p>}
+
+          {!isAdmin && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Acceso a proyectos</p>
+                <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={projectIds === null}
+                    onChange={(e) => setProjectIds(e.target.checked ? null : [])}
+                    className="rounded text-teal-600"
+                  />
+                  Todos los proyectos
+                </label>
+              </div>
+              {projectIds !== null && (
+                projects.length === 0 ? (
+                  <p className="text-[11px] text-slate-400">No hay proyectos creados todavía.</p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-40 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                    {projects.map((p) => (
+                      <label key={p.id} className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={projectIds.includes(p.id)}
+                          onChange={(e) =>
+                            setProjectIds((prev) =>
+                              e.target.checked ? [...(prev ?? []), p.id] : (prev ?? []).filter((id) => id !== p.id),
+                            )
+                          }
+                          className="rounded text-teal-600"
+                        />
+                        <span className="truncate">{p.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )
+              )}
+            </div>
+          )}
 
           {error && <p className="text-xs font-semibold text-rose-600">{error}</p>}
           {testStatus && (
@@ -625,6 +671,7 @@ const SweepCard: React.FC<{
 export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
   users,
   currentUserEmail,
+  projects,
   onAddUser,
   onUpdateUser,
   onRemoveUser,
@@ -776,6 +823,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({
                 user={u}
                 isSelf={u.email === currentUserEmail}
                 defaultOpen={visibleUsers.length === 1 && idx === 0}
+                projects={projects}
                 onUpdateUser={onUpdateUser}
                 onRemoveUser={onRemoveUser}
                 onSendTestEmail={onSendTestEmail}

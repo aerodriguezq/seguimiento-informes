@@ -28,6 +28,7 @@ import { NewReportWizard } from './components/reports/NewReportWizard';
 import { ReportDetailModal } from './components/reports/ReportDetailModal';
 import { ProjectsListView } from './components/projects/ProjectsListView';
 import { ProjectDetailView } from './components/projects/ProjectDetailView';
+import { ProjectPickerView } from './components/projects/ProjectPickerView';
 import { SeguimientoModule } from './components/projects/SeguimientoModule';
 import { PeticionesView } from './components/peticiones/PeticionesView';
 import { AlertsView } from './components/alerts/AlertsView';
@@ -57,6 +58,38 @@ const PATH_TO_MODULE: Partial<Record<string, ActiveModule>> = Object.fromEntries
   Object.entries(MODULE_ROUTES).map(([mod, path]) => [path, mod as ActiveModule])
 );
 
+function mapReport(report: any): Report {
+  return {
+    id: String(report.id),
+    consecutive: report.consecutive || '',
+    projectId: String(report.projectId),
+    projectName: report.projectName,
+    projectBpin: report.projectBpin,
+    typeId: String(report.typeId),
+    typeName: report.typeName,
+    month: report.month,
+    year: report.year,
+    dueDate: report.dueDate,
+    status: report.status,
+    contactIds: report.contactIds,
+    primaryContactId: report.primaryContactId,
+    observations: report.observations,
+    history: report.history.map((h: any) => ({ status: h.status, date: h.date, userName: h.userName, comment: h.comment, emailLink: h.emailLink ?? null })),
+    attachments: report.attachments.map((a: any) => ({ id: String(a.id), name: a.name, driveUrl: a.driveUrl, uploadedAt: a.uploadedAt, uploadedBy: a.uploadedBy })),
+    alertRulesCount: report.alertRulesCount,
+    createdAt: report.createdAt,
+    currentStepId: report.currentStepId ? String(report.currentStepId) : undefined,
+    currentStepName: report.currentStepName || undefined,
+    currentStepIsFinal: report.currentStepIsFinal ?? undefined,
+    currentStepEmailSubject: report.currentStepEmailSubject || undefined,
+    isWorkflowCompleted: report.isWorkflowCompleted ?? undefined,
+    revisorNombre: report.revisorNombre ?? undefined,
+    fechaEntregaReal: report.fechaEntregaReal ?? undefined,
+    fechaRevision: report.fechaRevision ?? undefined,
+    stageInstances: report.stageInstances,
+  };
+}
+
 function mapAlert(a: any): ScheduledAlert {
   return {
     id: String(a.id),
@@ -80,7 +113,7 @@ function mapAlert(a: any): ScheduledAlert {
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, canView, canEdit } = useAuth();
+  const { user, canView, canEdit, logout } = useAuth();
 
   const canViewModule = (mod: ActiveModule): boolean => {
     if (mod === 'users') return user.isAdmin;
@@ -136,7 +169,18 @@ export default function App() {
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
   // Context & Selections
-  const [currentProjectId, setCurrentProjectId] = useState<string>('');
+  // El proyecto elegido queda en localStorage para que una recarga no
+  // devuelva a la pantalla de tarjetas -- se valida contra la lista real de
+  // proyectos accesibles una vez carga el workspace (ver loadWorkspace).
+  const [currentProjectId, setCurrentProjectIdRaw] = useState<string>('');
+  const selectProject = (projId: string) => {
+    setCurrentProjectIdRaw(projId);
+    try { localStorage.setItem('currentProjectId', projId); } catch { /* localStorage puede no estar disponible */ }
+  };
+  const clearCurrentProject = () => {
+    setCurrentProjectIdRaw('');
+    try { localStorage.removeItem('currentProjectId'); } catch { /* localStorage puede no estar disponible */ }
+  };
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [reportsFilterStatus, setReportsFilterStatus] = useState<string>('all');
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
@@ -152,28 +196,18 @@ export default function App() {
   useEffect(() => {
     const loadWorkspace = async () => {
       try {
-        const [projectsResponse, catalogsResponse, reportsResponse, alertsResponse] = await Promise.all([
+        const [projectsResponse, catalogsResponse] = await Promise.all([
           fetch('/api/projects'),
           fetch('/api/catalogs'),
-          fetch('/api/reports'),
-          fetch('/api/alerts'),
         ]);
         const projectsPayload = await projectsResponse.json();
         const catalogsPayload = await catalogsResponse.json();
-        const reportsPayload = await reportsResponse.json();
-        const alertsPayload = await alertsResponse.json();
 
         if (!projectsResponse.ok) {
           throw new Error(projectsPayload.errors?.[0] || 'No fue posible consultar los proyectos.');
         }
         if (!catalogsResponse.ok) {
           throw new Error(catalogsPayload.errors?.[0] || 'No fue posible consultar los catálogos.');
-        }
-        if (!reportsResponse.ok) {
-          throw new Error(reportsPayload.errors?.[0] || 'No fue posible consultar los informes.');
-        }
-        if (!alertsResponse.ok) {
-          throw new Error(alertsPayload.errors?.[0] || 'No fue posible consultar las alertas.');
         }
 
         const loadedProjects: Project[] = projectsPayload.data.map((project: {
@@ -185,6 +219,7 @@ export default function App() {
           autoAlertsEnabled: boolean;
           startDate: string | null;
           endDate: string | null;
+          active: boolean;
         }) => ({
           id: String(project.id),
           name: project.name,
@@ -195,53 +230,36 @@ export default function App() {
           applicableTypeIds: project.applicable_type_ids.map(String),
           startDate: project.startDate || '',
           endDate: project.endDate || '',
+          active: project.active !== false,
         }));
-
-        const loadedReports: Report[] = reportsPayload.data.map((report: any) => ({
-          id: String(report.id),
-          consecutive: report.consecutive || '',
-          projectId: String(report.projectId),
-          projectName: report.projectName,
-          projectBpin: report.projectBpin,
-          typeId: String(report.typeId),
-          typeName: report.typeName,
-          month: report.month,
-          year: report.year,
-          dueDate: report.dueDate,
-          status: report.status,
-          contactIds: report.contactIds,
-          primaryContactId: report.primaryContactId,
-          observations: report.observations,
-          history: report.history.map((h: any) => ({ status: h.status, date: h.date, userName: h.userName, comment: h.comment, emailLink: h.emailLink ?? null })),
-          attachments: report.attachments.map((a: any) => ({ id: String(a.id), name: a.name, driveUrl: a.driveUrl, uploadedAt: a.uploadedAt, uploadedBy: a.uploadedBy })),
-          alertRulesCount: report.alertRulesCount,
-          createdAt: report.createdAt,
-          currentStepId: report.currentStepId ? String(report.currentStepId) : undefined,
-          currentStepName: report.currentStepName || undefined,
-          currentStepIsFinal: report.currentStepIsFinal ?? undefined,
-          currentStepEmailSubject: report.currentStepEmailSubject || undefined,
-          isWorkflowCompleted: report.isWorkflowCompleted ?? undefined,
-          revisorNombre: report.revisorNombre ?? undefined,
-          fechaEntregaReal: report.fechaEntregaReal ?? undefined,
-          fechaRevision: report.fechaRevision ?? undefined,
-          stageInstances: report.stageInstances,
-        }));
-
-        const loadedAlerts: ScheduledAlert[] = alertsPayload.data.map(mapAlert);
 
         setProjects(loadedProjects);
         setReportTypes(catalogsPayload.data.reportTypes);
         setReportTypeSteps(catalogsPayload.data.reportTypeSteps || []);
-        setAuthorizedUsers(catalogsPayload.data.authorizedUsers || []);
+        setAuthorizedUsers((catalogsPayload.data.authorizedUsers || []).map((u: any) => ({
+          ...u,
+          projectIds: Array.isArray(u.projectIds) ? u.projectIds.map(String) : null,
+        })));
         setSweeps(catalogsPayload.data.sweeps || []);
         setEmailLog(catalogsPayload.data.emailLog || []);
         setContacts(catalogsPayload.data.contacts);
         setEmpresas(catalogsPayload.data.empresas || []);
         setAreasConsolida(catalogsPayload.data.areasConsolida || []);
         setPeticionesConfig(catalogsPayload.data.peticionesConfig || { driveRootFolderId: null, driveRootFolderUrl: null });
-        setReports(loadedReports);
-        setAlerts(loadedAlerts);
-        setCurrentProjectId((currentId) => currentId || loadedProjects[0]?.id || '');
+
+        // Restaura el proyecto elegido en una sesión anterior (si sigue
+        // siendo uno al que esta cuenta tiene acceso); si no hay nada
+        // guardado pero solo hay UN proyecto accesible, se entra directo a
+        // ese -- no tiene sentido pedirle elegir entre uno solo.
+        let storedProjectId = '';
+        try { storedProjectId = localStorage.getItem('currentProjectId') || ''; } catch { /* ignorar */ }
+        const restoredProjectId = storedProjectId && loadedProjects.some((p) => p.id === storedProjectId)
+          ? storedProjectId
+          : loadedProjects.length === 1
+            ? loadedProjects[0].id
+            : '';
+        if (restoredProjectId) selectProject(restoredProjectId);
+
         setWorkspaceError(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'No fue posible cargar el espacio de trabajo.';
@@ -255,6 +273,40 @@ export default function App() {
     void loadWorkspace();
   }, []);
 
+  // Informes y alertas quedan acotados al proyecto activo -- se recargan
+  // cada vez que cambia (al elegirlo en las tarjetas, o con el selector del
+  // header). Antes de elegir un proyecto no hay nada que mostrar todavía.
+  useEffect(() => {
+    if (!currentProjectId) {
+      setReports([]);
+      setAlerts([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [reportsResponse, alertsResponse] = await Promise.all([
+          fetch(`/api/reports?projectId=${currentProjectId}`),
+          fetch(`/api/alerts?projectId=${currentProjectId}`),
+        ]);
+        const reportsPayload = await reportsResponse.json();
+        const alertsPayload = await alertsResponse.json();
+        if (!reportsResponse.ok) throw new Error(reportsPayload.errors?.[0] || 'No fue posible consultar los informes.');
+        if (!alertsResponse.ok) throw new Error(alertsPayload.errors?.[0] || 'No fue posible consultar las alertas.');
+        if (cancelled) return;
+        setReports(reportsPayload.data.map(mapReport));
+        setAlerts(alertsPayload.data.map(mapAlert));
+      } catch (error) {
+        if (!cancelled) {
+          showToast(error instanceof Error ? error.message : 'No fue posible cargar los informes y alertas de este proyecto.', 'info');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProjectId]);
+
   const currentProject = projects.find((p) => p.id === currentProjectId) || null;
 
   // Counts for sidebar
@@ -267,7 +319,7 @@ export default function App() {
 
   // Handlers
   const handleSelectProjectFromHeader = (projId: string) => {
-    setCurrentProjectId(projId);
+    selectProject(projId);
     showToast(`Proyecto activo cambiado a: ${projects.find((p) => p.id === projId)?.name}`, 'info');
   };
 
@@ -277,7 +329,7 @@ export default function App() {
 
   const handleOpenNewReport = (preselectedProjId?: string) => {
     if (preselectedProjId) {
-      setCurrentProjectId(preselectedProjId);
+      selectProject(preselectedProjId);
     }
     goToModule('new_report');
   };
@@ -288,7 +340,7 @@ export default function App() {
   };
 
   const handleSelectProjectDetail = (projId: string) => {
-    setCurrentProjectId(projId);
+    selectProject(projId);
     goToModule('project_detail');
   };
 
@@ -324,39 +376,10 @@ export default function App() {
 
   // Report creation
   const handleRefetchReports = async () => {
-    const response = await fetch('/api/reports');
+    const response = await fetch(`/api/reports?projectId=${currentProjectId}`);
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible recargar los informes.');
-    const loadedReports: Report[] = payload.data.map((report: any) => ({
-      id: String(report.id),
-      consecutive: report.consecutive || '',
-      projectId: String(report.projectId),
-      projectName: report.projectName,
-      projectBpin: report.projectBpin,
-      typeId: String(report.typeId),
-      typeName: report.typeName,
-      month: report.month,
-      year: report.year,
-      dueDate: report.dueDate,
-      status: report.status,
-      contactIds: report.contactIds,
-      primaryContactId: report.primaryContactId,
-      observations: report.observations,
-      history: report.history.map((h: any) => ({ status: h.status, date: h.date, userName: h.userName, comment: h.comment, emailLink: h.emailLink ?? null })),
-      attachments: report.attachments.map((a: any) => ({ id: String(a.id), name: a.name, driveUrl: a.driveUrl, uploadedAt: a.uploadedAt, uploadedBy: a.uploadedBy })),
-      alertRulesCount: report.alertRulesCount,
-      createdAt: report.createdAt,
-      currentStepId: report.currentStepId ? String(report.currentStepId) : undefined,
-      currentStepName: report.currentStepName || undefined,
-      currentStepIsFinal: report.currentStepIsFinal ?? undefined,
-      currentStepEmailSubject: report.currentStepEmailSubject || undefined,
-      isWorkflowCompleted: report.isWorkflowCompleted ?? undefined,
-      revisorNombre: report.revisorNombre ?? undefined,
-      fechaEntregaReal: report.fechaEntregaReal ?? undefined,
-      fechaRevision: report.fechaRevision ?? undefined,
-      stageInstances: report.stageInstances,
-    }));
-    setReports(loadedReports);
+    setReports(payload.data.map(mapReport));
   };
 
   // Cualquier acción que pueda crear/cerrar alertas de paso en el backend
@@ -364,7 +387,7 @@ export default function App() {
   // que la pestaña "Alertas Vinculadas" no se quede mostrando datos viejos
   // hasta el próximo refresh de página.
   const refetchAlerts = async () => {
-    const alertsResponse = await fetch('/api/alerts');
+    const alertsResponse = await fetch(`/api/alerts?projectId=${currentProjectId}`);
     const alertsPayload = await alertsResponse.json();
     if (alertsResponse.ok) {
       setAlerts(alertsPayload.data.map(mapAlert));
@@ -605,6 +628,28 @@ export default function App() {
         newState ? `Alertas automáticas activadas para ${project.name}` : `Alertas automáticas desactivadas para ${project.name}`,
         'info',
       );
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible guardar el cambio.', 'info');
+    }
+  };
+
+  // Decide si un proyecto aparece en la pantalla de tarjetas tras iniciar
+  // sesión -- desactivarlo no saca a nadie que ya lo tenga abierto, solo lo
+  // oculta la próxima vez que alguien elija proyecto.
+  const handleToggleProjectActive = async (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return;
+    const newState = !project.active;
+    try {
+      const response = await fetch('/api/projects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: Number(projectId), active: newState }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el cambio.');
+      setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, active: newState } : p)));
+      showToast(newState ? `"${project.name}" marcado como activo.` : `"${project.name}" marcado como inactivo.`, 'info');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'No fue posible guardar el cambio.', 'info');
     }
@@ -945,7 +990,7 @@ export default function App() {
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible agregar el usuario.');
-    setAuthorizedUsers((prev) => [...prev.filter((u) => u.email !== payload.data.email), payload.data]);
+    setAuthorizedUsers((prev) => [...prev.filter((u) => u.email !== payload.data.email), { ...payload.data, projectIds: null }]);
     showToast(`Usuario "${email}" autorizado.`, 'success');
   };
 
@@ -963,7 +1008,7 @@ export default function App() {
 
   const handleUpdateAuthorizedUser = async (
     email: string,
-    updates: { name?: string; active?: boolean; isAdmin?: boolean; permissions?: Record<string, string>; newEmail?: string }
+    updates: { name?: string; active?: boolean; isAdmin?: boolean; permissions?: Record<string, string>; projectIds?: string[] | null; newEmail?: string }
   ) => {
     const response = await fetch('/api/catalogs', {
       method: 'PATCH',
@@ -972,7 +1017,11 @@ export default function App() {
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el usuario.');
-    setAuthorizedUsers((prev) => prev.map((u) => (u.email === email ? payload.data : u)));
+    const updated = {
+      ...payload.data,
+      projectIds: Array.isArray(payload.data.projectIds) ? payload.data.projectIds.map(String) : null,
+    };
+    setAuthorizedUsers((prev) => prev.map((u) => (u.email === email ? updated : u)));
     showToast(`Usuario "${email}" actualizado.`, 'success');
   };
 
@@ -1036,6 +1085,13 @@ export default function App() {
 
   const activeReportForModal = reports.find((r) => r.id === selectedReportId);
 
+  // Remasterización: hasta elegir un proyecto, toda la app queda en espera
+  // -- se muestra el selector de tarjetas en vez del shell normal (sin
+  // sidebar/header, es su propia pantalla completa).
+  if (!isLoadingWorkspace && !workspaceError && !currentProjectId) {
+    return <ProjectPickerView projects={projects} onSelectProject={selectProject} onLogout={logout} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex font-sans antialiased">
       {/* Sidebar Navigation */}
@@ -1059,6 +1115,7 @@ export default function App() {
           currentProject={currentProject}
           projects={projects}
           onSelectProject={handleSelectProjectFromHeader}
+          onViewAllProjects={clearCurrentProject}
           notifications={notifications}
           onMarkNotificationAsRead={handleMarkNotificationAsRead}
           onClearAllNotifications={handleClearAllNotifications}
@@ -1088,11 +1145,13 @@ export default function App() {
               <p className="mt-1 text-xs text-rose-700">{workspaceError}</p>
             </div>
           )}
+
           {/* M01: Dashboard */}
           {!isLoadingWorkspace && !workspaceError && activeModule === 'dashboard' && (
             <DashboardView
-              projects={projects}
+              projects={currentProject ? [currentProject] : []}
               reports={reports}
+              currentProjectId={currentProjectId}
               onSelectProjectDetail={handleSelectProjectDetail}
               onSelectReportDetail={handleNavigateToReport}
               onOpenNewReport={() => handleOpenNewReport(currentProjectId)}
@@ -1166,6 +1225,7 @@ export default function App() {
               onOpenNewReport={handleOpenNewReport}
               onSelectReport={handleNavigateToReport}
               onToggleProjectAutoAlerts={handleToggleProjectAutoAlerts}
+              onToggleProjectActive={handleToggleProjectActive}
               onUpdateProjectApplicableTypes={handleUpdateProjectApplicableTypes}
               onUpdateProjectVigencia={handleUpdateProjectVigencia}
               onToggleAlertRuleActive={handleToggleAlertActive}
@@ -1180,6 +1240,7 @@ export default function App() {
             <AlertsView
               alerts={alerts}
               projects={projects}
+              currentProjectId={currentProjectId}
               contacts={contacts}
               onToggleAlertActive={handleToggleAlertActive}
               onAddNewAlert={handleAddNewAlert}
@@ -1213,7 +1274,7 @@ export default function App() {
           {!isLoadingWorkspace && !workspaceError && activeModule === 'drive_links' && <DriveLinksView />}
 
           {!isLoadingWorkspace && !workspaceError && activeModule === 'seguimiento' && (
-            <SeguimientoModule projects={projects} />
+            <SeguimientoModule currentProjectId={currentProjectId} />
           )}
 
           {!isLoadingWorkspace && !workspaceError && activeModule === 'peticiones' && (
@@ -1222,6 +1283,7 @@ export default function App() {
               empresas={empresas}
               areasConsolida={areasConsolida}
               projects={projects}
+              currentProjectId={currentProjectId}
               peticionesConfig={peticionesConfig}
               onSavePeticionesConfig={handleSavePeticionesConfig}
             />
@@ -1232,6 +1294,7 @@ export default function App() {
             <UsersManagementView
               users={authorizedUsers}
               currentUserEmail={user.email}
+              projects={projects.map((p) => ({ id: p.id, name: p.name }))}
               onAddUser={handleAddAuthorizedUser}
               onUpdateUser={handleUpdateAuthorizedUser}
               onRemoveUser={handleRemoveAuthorizedUser}

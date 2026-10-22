@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../server/google-drive.js';
 import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEmail, buildStepReturnEmailHtml, type EmailAttachment } from '../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
-import { isAdminRequest, canEditModuleRequest } from '../server/admin-auth.js';
+import { isAdminRequest, canEditModuleRequest, getAccessibleProjectIds } from '../server/admin-auth.js';
 import { logEmailSend } from '../server/email-log.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
@@ -981,7 +981,17 @@ export default async function handler(request: VercelRequest, response: VercelRe
     }
 
     if (request.method === 'GET') {
-      const idRows = await sql`SELECT informe_id AS id FROM informes`;
+      const reportsProjectId = request.query.projectId ? Number(request.query.projectId) : null;
+      if (reportsProjectId !== null) {
+        const accessibleIds = await getAccessibleProjectIds(request, sql);
+        if (accessibleIds !== 'all' && !accessibleIds.includes(reportsProjectId)) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes acceso a ese proyecto.'] });
+        }
+      }
+      const idRows = await sql`
+        SELECT informe_id AS id FROM informes
+        WHERE ${reportsProjectId === null} OR proyecto_id = ${reportsProjectId}
+      `;
       const reports = await fetchReportsByIds(sql, idRows.map((r: any) => r.id));
       reports.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       return response.status(200).json({ data: reports, meta: { total: reports.length }, errors: [] });

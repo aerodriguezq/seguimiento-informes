@@ -16,6 +16,7 @@ import { SemaforoBadge } from '../common/SemaforoBadge';
 import { ScheduleFrequencyField } from '../alerts/ScheduleFrequencyField';
 import { SeguimientoCronograma } from './SeguimientoCronograma';
 import { ErrorBoundary } from '../common/ErrorBoundary';
+import { useAuth } from '../../auth/AuthContext';
 import {
   ArrowLeft,
   Building2,
@@ -50,6 +51,7 @@ interface ProjectDetailViewProps {
   onOpenNewReport: (projectId: string) => void;
   onSelectReport: (reportId: string) => void;
   onToggleProjectAutoAlerts: (projectId: string) => void;
+  onToggleProjectActive: (projectId: string) => void;
   onUpdateProjectApplicableTypes: (projectId: string, newTypeIds: string[]) => void;
   onToggleAlertRuleActive: (alertId: string) => void;
   onAddNewAlertRule: (draft: {
@@ -75,6 +77,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onOpenNewReport,
   onSelectReport,
   onToggleProjectAutoAlerts,
+  onToggleProjectActive,
   onUpdateProjectApplicableTypes,
   onToggleAlertRuleActive,
   onAddNewAlertRule,
@@ -82,6 +85,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onUpdateProjectVigencia,
   canEditSeguimiento,
 }) => {
+  const { user } = useAuth();
   const [isEditingVigencia, setIsEditingVigencia] = useState(false);
   const [vigenciaStart, setVigenciaStart] = useState(project.startDate);
   const [vigenciaEnd, setVigenciaEnd] = useState(project.endDate);
@@ -274,6 +278,35 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
           {/* Right Action Controls: Automatic Alerts Switch & New Report Button */}
           <div className="flex flex-wrap items-center gap-3 shrink-0 pt-2 lg:pt-0">
+            {/* Activo/Inactivo: decide si aparece en la pantalla de tarjetas tras iniciar sesión */}
+            {user?.isAdmin && (
+              <div className="flex items-center gap-2.5 px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg">
+                <div className="text-left">
+                  <span className="text-[11px] text-slate-500 block leading-tight">
+                    Proyecto
+                  </span>
+                  <span className="text-xs font-bold text-slate-800">
+                    {project.active ? 'Activo' : 'Inactivo'}
+                  </span>
+                </div>
+                <button
+                  id="toggle-project-active-btn"
+                  type="button"
+                  onClick={() => onToggleProjectActive(project.id)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    project.active ? 'bg-indigo-600' : 'bg-slate-300'
+                  }`}
+                  title={project.active ? 'Ocultar de la pantalla de tarjetas' : 'Mostrar en la pantalla de tarjetas'}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                      project.active ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            )}
+
             {/* Automatic Alerts Toggle (Sección 6) */}
             <div className="flex items-center gap-2.5 px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg">
               <div className="text-left">

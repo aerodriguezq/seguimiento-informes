@@ -23,6 +23,7 @@ interface HeaderProps {
   currentProject: Project | null;
   projects: Project[];
   onSelectProject: (projectId: string) => void;
+  onViewAllProjects: () => void;
   notifications: SystemNotification[];
   onMarkNotificationAsRead: (id: string) => void;
   onClearAllNotifications: () => void;
@@ -36,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
   currentProject,
   projects,
   onSelectProject,
+  onViewAllProjects,
   notifications,
   onMarkNotificationAsRead,
   onClearAllNotifications,
@@ -126,6 +128,16 @@ export const Header: React.FC<HeaderProps> = ({
                     </button>
                   ))}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onViewAllProjects();
+                    setShowProjectSelector(false);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-50 border-t border-slate-100 mt-1"
+                >
+                  Ver todos los proyectos (tarjetas)
+                </button>
               </div>
             )}
           </div>

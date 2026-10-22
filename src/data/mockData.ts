@@ -135,6 +135,7 @@ export const INITIAL_PROJECTS: Project[] = [
     startDate: '2024-03-01',
     endDate: '2027-12-31',
     budget: '$ 148.500.000.000 COP',
+    active: true,
   },
   {
     id: 'proj-2',
@@ -147,6 +148,7 @@ export const INITIAL_PROJECTS: Project[] = [
     startDate: '2023-08-15',
     endDate: '2026-11-30',
     budget: '$ 32.400.000.000 COP',
+    active: true,
   },
   {
     id: 'proj-3',
@@ -159,6 +161,7 @@ export const INITIAL_PROJECTS: Project[] = [
     startDate: '2024-01-10',
     endDate: '2028-06-30',
     budget: '$ 210.000.000.000 COP',
+    active: true,
   },
   {
     id: 'proj-4',
@@ -171,6 +174,7 @@ export const INITIAL_PROJECTS: Project[] = [
     startDate: '2025-06-01',
     endDate: '2026-12-31',
     budget: '$ 18.250.000.000 COP',
+    active: true,
   },
   {
     id: 'proj-5',
@@ -183,6 +187,7 @@ export const INITIAL_PROJECTS: Project[] = [
     startDate: '2022-10-01',
     endDate: '2026-10-15',
     budget: '$ 45.800.000.000 COP',
+    active: true,
   },
 ];
 

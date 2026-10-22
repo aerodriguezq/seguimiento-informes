@@ -40,3 +40,27 @@ export async function canEditModuleRequest(
   const level = (row.permissions ?? {})[moduleKey];
   return level === undefined || level === null || level === 'edit';
 }
+
+// Admin ve todos los proyectos. Si no, revisa usuario_proyectos: sin
+// ninguna fila para este email significa "todos" (mismo criterio
+// "permitido salvo restricción explícita" que canEditModuleRequest arriba)
+// -- así nadie pierde acceso por defecto; el admin restringe a alguien
+// insertando filas específicas para su email desde Usuarios.
+export async function getAccessibleProjectIds(
+  request: { headers: { cookie?: string } },
+  sql: SqlClient,
+): Promise<'all' | number[]> {
+  const sessionId = readCookie(request, 'app_session');
+  if (!sessionId) return [];
+  const [row] = (await sql`
+    SELECT u.email, u.es_admin AS "isAdmin"
+    FROM app_sesiones s
+    JOIN usuarios_autorizados u ON u.email = s.email
+    WHERE s.session_id = ${sessionId} AND s.expires_at > NOW() AND u.activo = TRUE
+  `) as any[];
+  if (!row) return [];
+  if (row.isAdmin) return 'all';
+  const rows = (await sql`SELECT proyecto_id AS id FROM usuario_proyectos WHERE email = ${row.email}`) as any[];
+  if (rows.length === 0) return 'all';
+  return rows.map((r) => Number(r.id));
+}

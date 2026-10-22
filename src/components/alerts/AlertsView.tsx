@@ -22,6 +22,7 @@ import {
 interface AlertsViewProps {
   alerts: ScheduledAlert[];
   projects: Project[];
+  currentProjectId: string;
   contacts: Contact[];
   onToggleAlertActive: (alertId: string) => void;
   onAddNewAlert: (draft: {
@@ -48,6 +49,7 @@ interface AlertsViewProps {
 export const AlertsView: React.FC<AlertsViewProps> = ({
   alerts,
   projects,
+  currentProjectId,
   contacts,
   onToggleAlertActive,
   onAddNewAlert,
@@ -57,13 +59,12 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
-  const [filterProject, setFilterProject] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [editingAlertId, setEditingAlertId] = useState<string | null>(null);
 
   // Form states for new/edit rule
   const [name, setName] = useState('');
-  const [projectId, setProjectId] = useState(projects[0]?.id || '');
+  const [projectId, setProjectId] = useState(currentProjectId || projects[0]?.id || '');
   const [schedule, setSchedule] = useState('5 días antes del vencimiento');
   const [time, setTime] = useState('08:00 AM');
   const [type, setType] = useState<'Preventiva' | 'Vencimiento' | 'Seguimiento' | 'Confirmación'>('Preventiva');
@@ -75,7 +76,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
     setEditingAlertId(null);
     setEditingAlert(null);
     setName('');
-    setProjectId(projects[0]?.id || '');
+    setProjectId(currentProjectId || projects[0]?.id || '');
     setSchedule('5 días antes del vencimiento');
     setTime('08:00 AM');
     setType('Preventiva');
@@ -88,7 +89,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
     setEditingAlertId(alert.id);
     setEditingAlert(alert);
     setName(alert.name);
-    setProjectId(alert.projectId || projects[0]?.id || '');
+    setProjectId(alert.projectId || currentProjectId || projects[0]?.id || '');
     setSchedule(alert.schedule);
     setTime(alert.time);
     setType(alert.type);
@@ -117,7 +118,6 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
       }
     }
     if (filterType !== 'all' && a.type !== filterType) return false;
-    if (filterProject !== 'all' && a.projectId !== filterProject) return false;
     return true;
   });
 
@@ -207,19 +207,6 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto">
-          <select
-            value={filterProject}
-            onChange={(e) => setFilterProject(e.target.value)}
-            className="px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none text-slate-800"
-          >
-            <option value="all">Todos los proyectos</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}

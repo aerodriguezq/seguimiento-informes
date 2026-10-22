@@ -320,9 +320,10 @@ export const PeticionesView: React.FC<{
   empresas: Empresa[];
   areasConsolida: AreaConsolida[];
   projects: Project[];
+  currentProjectId: string;
   peticionesConfig: PeticionesConfig;
   onSavePeticionesConfig: (driveRootFolderUrl: string) => Promise<void>;
-}> = ({ contacts, empresas, areasConsolida, projects, peticionesConfig, onSavePeticionesConfig }) => {
+}> = ({ contacts, empresas, areasConsolida, projects, currentProjectId, peticionesConfig, onSavePeticionesConfig }) => {
   const { user, canEdit } = useAuth();
   const editable = canEdit('peticiones');
   const isAdmin = !!user?.isAdmin;
@@ -352,7 +353,7 @@ export const PeticionesView: React.FC<{
 
   const fetchPeticiones = async () => {
     try {
-      const res = await fetch('/api/catalogs?kind=peticiones');
+      const res = await fetch(`/api/catalogs?kind=peticiones&projectId=${currentProjectId}`);
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible cargar las peticiones.');
       setPeticiones(payload.data);
@@ -365,8 +366,11 @@ export const PeticionesView: React.FC<{
   };
 
   useEffect(() => {
+    if (!currentProjectId) return;
+    setIsLoading(true);
     fetchPeticiones();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProjectId]);
 
   const filtered = useMemo(() => {
     if (!peticiones) return [];
@@ -388,7 +392,11 @@ export const PeticionesView: React.FC<{
     const lastFromData = (peticiones ?? []).find((p) => p.correoPersonaAsignada)?.correoPersonaAsignada;
     setEditingId(null);
     setEditingRadicado(null);
-    setForm({ ...EMPTY_FORM, correoPersonaAsignada: lastFromData || getLastCorreoAdicional() });
+    setForm({
+      ...EMPTY_FORM,
+      proyectoIds: currentProjectId ? [currentProjectId] : [],
+      correoPersonaAsignada: lastFromData || getLastCorreoAdicional(),
+    });
     setFormError('');
     setUploadError('');
     setIsFormOpen(true);

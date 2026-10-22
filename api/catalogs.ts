@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { canEditModuleRequest } from '../server/admin-auth.js';
+import { canEditModuleRequest, getAccessibleProjectIds } from '../server/admin-auth.js';
 import { sendEmail, buildPeticionAssignedEmailHtml } from '../server/google-gmail.js';
 import { ensureDriveFolder, uploadDriveFile, extractDriveFolderId } from '../server/google-drive.js';
 import { logEmailSend } from '../server/email-log.js';
@@ -319,6 +319,13 @@ export default async function handler(
     }
 
     if (request.method === 'GET' && request.query.kind === 'peticiones') {
+      const peticionesProjectId = request.query.projectId ? Number(request.query.projectId) : null;
+      if (peticionesProjectId !== null) {
+        const accessibleIds = await getAccessibleProjectIds(request, sql);
+        if (accessibleIds !== 'all' && !accessibleIds.includes(peticionesProjectId)) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes acceso a ese proyecto.'] });
+        }
+      }
       const rows = (await sql`
         SELECT p.peticion_id AS id, p.radicado, p.empresa_id AS "empresaId", COALESCE(e.nombre, '') AS "empresaName",
           TO_CHAR(p.fecha_radicacion, 'YYYY-MM-DD') AS "fechaRadicacion",
@@ -331,6 +338,9 @@ export default async function handler(
           p.documento_respuesta_nombre AS "documentoRespuestaNombre", p.documento_respuesta_drive_url AS "documentoRespuestaUrl",
           p.created_at AS "createdAt"
         FROM peticiones p LEFT JOIN empresas e ON e.empresa_id = p.empresa_id
+        WHERE ${peticionesProjectId === null} OR EXISTS (
+          SELECT 1 FROM peticion_proyectos pp WHERE pp.peticion_id = p.peticion_id AND pp.proyecto_id = ${peticionesProjectId}
+        )
         ORDER BY COALESCE(p.fecha_radicacion, p.created_at::date) DESC, p.peticion_id DESC
       `) as any[];
       const responsableRows = (await sql`
@@ -352,7 +362,11 @@ export default async function handler(
     if (request.method === 'GET') {
       const isAdmin = await isAdminRequest(request, sql);
       const authorizedUsers = isAdmin
-        ? await sql`SELECT email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions FROM usuarios_autorizados ORDER BY created_at ASC`
+        ? await sql`
+            SELECT u.email, u.nombre AS name, u.es_admin AS "isAdmin", u.activo AS active, u.permisos AS permissions,
+              (SELECT ARRAY_AGG(up.proyecto_id) FROM usuario_proyectos up WHERE up.email = u.email) AS "projectIds"
+            FROM usuarios_autorizados u ORDER BY u.created_at ASC
+          `
         : [];
       const sweeps = isAdmin ? await fetchSweepConfig(sql) : [];
       const emailLog = isAdmin ? await fetchEmailLog(sql) : [];
@@ -753,6 +767,10 @@ export default async function handler(
           // Cambiar el correo invalida las sesiones activas de esa cuenta: tendrá que
           // volver a iniciar sesión (con el correo nuevo, si es que ya es el suyo).
           await sql`DELETE FROM app_sesiones WHERE email = ${email}`;
+          // usuario_proyectos referencia el email sin ON UPDATE CASCADE -- se
+          // actualiza a mano antes de renombrar, si no la UPDATE de abajo
+          // fallaría por la llave foránea.
+          await sql`UPDATE usuario_proyectos SET email = ${nextEmail} WHERE email = ${email}`;
         }
       }
 
@@ -763,7 +781,26 @@ export default async function handler(
           WHERE email = ${email}
           RETURNING email, nombre AS name, es_admin AS "isAdmin", activo AS active, permisos AS permissions
         `;
-        return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+
+        // Acceso a proyectos: projectIds ausente en el body no toca nada;
+        // null o [] = acceso a todos (se borran las filas, el criterio de
+        // getAccessibleProjectIds trata "sin filas" como "todos"); un array
+        // con ids = acceso restringido a esos proyectos.
+        let projectIds: number[] | null | undefined;
+        if (has('projectIds')) {
+          await sql`DELETE FROM usuario_proyectos WHERE email = ${nextEmail}`;
+          const ids = Array.isArray(body.projectIds) ? body.projectIds.map(Number).filter((n: number) => Number.isInteger(n)) : [];
+          if (ids.length > 0) {
+            for (const projectId of ids) {
+              await sql`INSERT INTO usuario_proyectos (email, proyecto_id) VALUES (${nextEmail}, ${projectId}) ON CONFLICT DO NOTHING`;
+            }
+            projectIds = ids;
+          } else {
+            projectIds = null;
+          }
+        }
+
+        return response.status(200).json({ data: { ...rows[0], ...(projectIds !== undefined ? { projectIds } : {}) }, meta: {}, errors: [] });
       } catch (error) {
         if ((error as { code?: string })?.code === '23505') {
           return response.status(409).json({ data: null, meta: {}, errors: ['Ya existe un usuario autorizado con ese correo.'] });

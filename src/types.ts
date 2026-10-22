@@ -74,6 +74,7 @@ export interface Project {
   startDate: string;
   endDate: string;
   budget?: string;
+  active: boolean;
 }
 
 export interface ScheduledAlert {

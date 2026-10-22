@@ -38,6 +38,7 @@ const STAGE_BAR_COLOR: Record<ReportStatus, string> = {
 interface DashboardViewProps {
   projects: Project[];
   reports: Report[];
+  currentProjectId: string;
   onSelectProjectDetail: (projectId: string) => void;
   onSelectReportDetail: (reportId: string) => void;
   onOpenNewReport: () => void;
@@ -48,6 +49,7 @@ interface DashboardViewProps {
 export const DashboardView: React.FC<DashboardViewProps> = ({
   projects,
   reports,
+  currentProjectId,
   onSelectProjectDetail,
   onSelectReportDetail,
   onOpenNewReport,
@@ -57,15 +59,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [seguimientoKpis, setSeguimientoKpis] = useState<Record<string, SeguimientoKpi> | null>(null);
 
   useEffect(() => {
+    if (!currentProjectId) return;
     let cancelled = false;
-    fetch('/api/projects?seguimiento=kpisResumen')
+    fetch(`/api/projects?seguimiento=kpisResumen&projectId=${currentProjectId}`)
       .then((res) => res.json())
       .then((payload) => {
         if (!cancelled && payload?.data) setSeguimientoKpis(payload.data);
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, []);
+  }, [currentProjectId]);
   const currentDateLabel = new Intl.DateTimeFormat('es-CO', {
     day: 'numeric',
     month: 'long',
