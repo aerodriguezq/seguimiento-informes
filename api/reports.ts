@@ -1019,6 +1019,17 @@ export default async function handler(request: VercelRequest, response: VercelRe
         return response.status(400).json({ data: null, meta: {}, errors: ['Faltan campos obligatorios para crear el informe.'] });
       }
 
+      const [activeSuspension] = (await sql`
+        SELECT modificatorio_id FROM proyecto_modificatorios
+        WHERE proyecto_id = ${projectId} AND tipo = 'Suspensión'
+          AND fecha_inicial <= CURRENT_DATE
+          AND (fecha_final IS NULL OR fecha_final >= CURRENT_DATE)
+        LIMIT 1
+      `) as any[];
+      if (activeSuspension) {
+        return response.status(409).json({ data: null, meta: {}, errors: ['El proyecto está suspendido -- no se pueden crear informes nuevos mientras dure la suspensión.'] });
+      }
+
       let reportId: number;
       try {
         reportId = await createReportRow(sql, { projectId, typeId, month, year, status, observations, userName });

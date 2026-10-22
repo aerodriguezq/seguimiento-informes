@@ -47,6 +47,8 @@ interface ReportsListViewProps {
   onReportsImported: () => Promise<void>;
   onQuickChangeStatus?: (reportId: string, newStatus: ReportStatus) => void;
   initialFilterStatus?: string;
+  expectedTotalReports?: number | null;
+  isCurrentProjectSuspended?: boolean;
 }
 
 export const ReportsListView: React.FC<ReportsListViewProps> = ({
@@ -60,6 +62,8 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
   onOpenNewReport,
   onReportsImported,
   initialFilterStatus = 'all',
+  expectedTotalReports = null,
+  isCurrentProjectSuspended = false,
 }) => {
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const countPendientes = reports.filter((r) => r.status === 'Pendientes Evidencias').length;
@@ -67,6 +71,10 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
   const countEntregados = reports.filter((r) => r.status === 'Entregado a Of. Proyectos').length;
   const totalReports = reports.length;
   const activeAlerts = alerts.filter((alert) => alert.active).length;
+  const latestReport = useMemo(() => {
+    if (reports.length === 0) return null;
+    return [...reports].sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1))[0];
+  }, [reports]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState('all');
@@ -191,6 +199,12 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
           <p className="text-xs text-slate-500 mt-0.5">
             Monitoreo y trazabilidad de informes, estados contractuales, responsables y fechas de vencimiento.
           </p>
+          {latestReport && (
+            <p className="text-xs font-semibold text-indigo-700 mt-1.5">
+              Vamos en el informe {totalReports}
+              {expectedTotalReports ? ` de ${expectedTotalReports}` : ''} · {latestReport.month} {latestReport.year}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-2.5">
@@ -216,7 +230,9 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
             id="reports-new-report-btn"
             type="button"
             onClick={onOpenNewReport}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-2xs transition-colors cursor-pointer"
+            disabled={isCurrentProjectSuspended}
+            title={isCurrentProjectSuspended ? 'El proyecto está suspendido -- no se pueden crear informes nuevos.' : undefined}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-2xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-indigo-600"
           >
             <Plus className="w-4 h-4" />
             <span>Nuevo Informe</span>

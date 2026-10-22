@@ -75,6 +75,10 @@ export interface Project {
   endDate: string;
   budget?: string;
   active: boolean;
+  objetivoGeneral: string | null;
+  municipios: string | null;
+  supervisor: string | null;
+  valorInicial: number | null;
 }
 
 export interface ScheduledAlert {

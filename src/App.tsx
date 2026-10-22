@@ -17,6 +17,7 @@ import {
   EmailCandidate,
   ReturnAttachmentInput,
 } from './types';
+import { Modificatorio, isProjectSuspended, expectedReportMonths } from './utils/projectStatus';
 import {
   getSemaforoStatus,
 } from './data/mockData';
@@ -88,6 +89,21 @@ function mapReport(report: any): Report {
     fechaEntregaReal: report.fechaEntregaReal ?? undefined,
     fechaRevision: report.fechaRevision ?? undefined,
     stageInstances: report.stageInstances,
+  };
+}
+
+function mapModificatorio(m: any): Modificatorio {
+  return {
+    id: String(m.id),
+    proyectoId: String(m.proyectoId),
+    numero: m.numero,
+    tipo: m.tipo,
+    fechaInicial: m.fechaInicial || null,
+    fechaFinal: m.fechaFinal || null,
+    valorInicial: m.valorInicial !== null && m.valorInicial !== undefined ? Number(m.valorInicial) : null,
+    valorActual: m.valorActual !== null && m.valorActual !== undefined ? Number(m.valorActual) : null,
+    titulo: m.titulo || null,
+    nota: m.nota || null,
   };
 }
 
@@ -165,6 +181,7 @@ export default function App() {
   const [areasConsolida, setAreasConsolida] = useState<AreaConsolida[]>([]);
   const [peticionesConfig, setPeticionesConfig] = useState<PeticionesConfig>({ driveRootFolderId: null, driveRootFolderUrl: null });
   const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
+  const [currentProjectModificatorios, setCurrentProjectModificatorios] = useState<Modificatorio[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
@@ -233,6 +250,10 @@ export default function App() {
           startDate: string | null;
           endDate: string | null;
           active: boolean;
+          objetivoGeneral: string | null;
+          municipios: string | null;
+          supervisor: string | null;
+          valorInicial: number | string | null;
         }) => ({
           id: String(project.id),
           name: project.name,
@@ -244,6 +265,10 @@ export default function App() {
           startDate: project.startDate || '',
           endDate: project.endDate || '',
           active: project.active !== false,
+          objetivoGeneral: project.objetivoGeneral || null,
+          municipios: project.municipios || null,
+          supervisor: project.supervisor || null,
+          valorInicial: project.valorInicial !== null && project.valorInicial !== undefined ? Number(project.valorInicial) : null,
         }));
 
         setProjects(loadedProjects);
@@ -293,22 +318,26 @@ export default function App() {
     if (!currentProjectId) {
       setReports([]);
       setAlerts([]);
+      setCurrentProjectModificatorios([]);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const [reportsResponse, alertsResponse] = await Promise.all([
+        const [reportsResponse, alertsResponse, modificatoriosResponse] = await Promise.all([
           fetch(`/api/reports?projectId=${currentProjectId}`),
           fetch(`/api/alerts?projectId=${currentProjectId}`),
+          fetch(`/api/projects?modificatorios=list&projectId=${currentProjectId}`),
         ]);
         const reportsPayload = await reportsResponse.json();
         const alertsPayload = await alertsResponse.json();
+        const modificatoriosPayload = await modificatoriosResponse.json();
         if (!reportsResponse.ok) throw new Error(reportsPayload.errors?.[0] || 'No fue posible consultar los informes.');
         if (!alertsResponse.ok) throw new Error(alertsPayload.errors?.[0] || 'No fue posible consultar las alertas.');
         if (cancelled) return;
         setReports(reportsPayload.data.map(mapReport));
         setAlerts(alertsPayload.data.map(mapAlert));
+        setCurrentProjectModificatorios(modificatoriosResponse.ok ? modificatoriosPayload.data.map(mapModificatorio) : []);
       } catch (error) {
         if (!cancelled) {
           showToast(error instanceof Error ? error.message : 'No fue posible cargar los informes y alertas de este proyecto.', 'info');
@@ -321,6 +350,8 @@ export default function App() {
   }, [currentProjectId]);
 
   const currentProject = projects.find((p) => p.id === currentProjectId) || null;
+  const isCurrentProjectSuspended = isProjectSuspended(currentProjectModificatorios);
+  const currentProjectExpectedMonths = currentProject ? expectedReportMonths(currentProject, currentProjectModificatorios) : null;
 
   // Counts for sidebar
   const pendingReportsCount = reports.filter((r) => r.status !== 'Enviado').length;
@@ -405,6 +436,52 @@ export default function App() {
     if (alertsResponse.ok) {
       setAlerts(alertsPayload.data.map(mapAlert));
     }
+  };
+
+  const refetchModificatorios = async () => {
+    const response = await fetch(`/api/projects?modificatorios=list&projectId=${currentProjectId}`);
+    const payload = await response.json();
+    if (response.ok) {
+      setCurrentProjectModificatorios(payload.data.map(mapModificatorio));
+    }
+  };
+
+  const handleCreateModificatorio = async (data: {
+    numero: string; tipo: string; fechaInicial?: string; fechaFinal?: string;
+    valorInicial?: number | null; valorActual?: number | null; titulo?: string; nota?: string;
+  }) => {
+    const response = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'modificatorioCreate', data: { projectId: Number(currentProjectId), ...data } }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el modificatorio.');
+    await refetchModificatorios();
+    showToast('Modificatorio guardado.', 'success');
+  };
+
+  const handleUpdateModificatorio = async (id: string, data: Partial<{
+    numero: string; tipo: string; fechaInicial: string | null; fechaFinal: string | null;
+    valorInicial: number | null; valorActual: number | null; titulo: string | null; nota: string | null;
+  }>) => {
+    const response = await fetch('/api/projects', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'modificatorioUpdate', id: Number(id), data }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el modificatorio.');
+    await refetchModificatorios();
+    showToast('Modificatorio actualizado.', 'success');
+  };
+
+  const handleDeleteModificatorio = async (id: string) => {
+    const response = await fetch(`/api/projects?modificatorio=${id}`, { method: 'DELETE' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el modificatorio.');
+    await refetchModificatorios();
+    showToast('Modificatorio eliminado.', 'success');
   };
 
   const handleSubmitNewReport = async (input: {
@@ -701,6 +778,28 @@ export default function App() {
       showToast('Vigencia del proyecto actualizada.', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'No fue posible actualizar la vigencia.', 'info');
+    }
+  };
+
+  const handleUpdateProjectInfo = async (projectId: string, updates: {
+    objetivoGeneral?: string; municipios?: string; supervisor?: string; valorInicial?: number | null;
+  }) => {
+    try {
+      const response = await fetch('/api/projects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: projectId, ...updates }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar la información del proyecto.');
+      setProjects((prev) =>
+        prev.map((p) => (p.id === projectId
+          ? { ...p, objetivoGeneral: payload.data.objetivoGeneral ?? null, municipios: payload.data.municipios ?? null, supervisor: payload.data.supervisor ?? null, valorInicial: payload.data.valorInicial !== null && payload.data.valorInicial !== undefined ? Number(payload.data.valorInicial) : null }
+          : p))
+      );
+      showToast('Información del proyecto actualizada.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible actualizar la información del proyecto.', 'info');
     }
   };
 
@@ -1123,6 +1222,7 @@ export default function App() {
         currentProjectId={currentProjectId}
         projects={projects}
         reports={reports}
+        isCurrentProjectSuspended={isCurrentProjectSuspended}
       />
 
       {/* Main Workspace Column */}
@@ -1139,6 +1239,7 @@ export default function App() {
           onNavigateToReport={handleNavigateToReport}
           onOpenNewReport={() => handleOpenNewReport(currentProjectId)}
           onOpenSearch={() => setIsSearchOpen(true)}
+          isCurrentProjectSuspended={isCurrentProjectSuspended}
         />
 
         {/* Dynamic Main Content Container */}
@@ -1168,6 +1269,7 @@ export default function App() {
               onOpenNewReport={() => handleOpenNewReport(currentProjectId)}
               onViewAllReports={handleViewAllReports}
               onOpenSeguimiento={() => goToModule('seguimiento')}
+              isCurrentProjectSuspended={isCurrentProjectSuspended}
             />
           )}
 
@@ -1184,6 +1286,8 @@ export default function App() {
               onOpenNewReport={() => handleOpenNewReport(currentProjectId)}
               onReportsImported={handleRefetchReports}
               initialFilterStatus={reportsFilterStatus}
+              expectedTotalReports={currentProjectExpectedMonths}
+              isCurrentProjectSuspended={isCurrentProjectSuspended}
             />
           )}
 
@@ -1239,10 +1343,15 @@ export default function App() {
               onToggleProjectActive={handleToggleProjectActive}
               onUpdateProjectApplicableTypes={handleUpdateProjectApplicableTypes}
               onUpdateProjectVigencia={handleUpdateProjectVigencia}
+              onUpdateProjectInfo={handleUpdateProjectInfo}
               onToggleAlertRuleActive={handleToggleAlertActive}
               onAddNewAlertRule={handleAddNewAlert}
               onViewAllReports={() => handleViewAllReports()}
               canEditSeguimiento={canEdit('seguimiento')}
+              modificatorios={currentProjectModificatorios}
+              onCreateModificatorio={handleCreateModificatorio}
+              onUpdateModificatorio={handleUpdateModificatorio}
+              onDeleteModificatorio={handleDeleteModificatorio}
             />
           )}
 

@@ -317,6 +317,12 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
     LEFT JOIN proyectos p ON p.proyecto_id = a.proyecto_id
     LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = a.informe_id AND ipi.paso_id = a.paso_id
     WHERE a.activa = TRUE AND a.informe_id IS NOT NULL AND a.paso_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM proyecto_modificatorios m
+        WHERE m.proyecto_id = a.proyecto_id AND m.tipo = 'Suspensión'
+          AND m.fecha_inicial <= CURRENT_DATE
+          AND (m.fecha_final IS NULL OR m.fecha_final >= CURRENT_DATE)
+      )
   `) as any[];
 
   let sentCount = 0;
@@ -399,6 +405,12 @@ async function handleCronSweep(sql: SqlClient): Promise<{ evaluated: number; sen
     LEFT JOIN proyectos p ON p.proyecto_id = a.proyecto_id
     WHERE a.activa = TRUE AND a.informe_id IS NULL
       AND (a.ultimo_disparo IS NULL OR a.ultimo_disparo < NOW() - INTERVAL '1 day')
+      AND NOT EXISTS (
+        SELECT 1 FROM proyecto_modificatorios m
+        WHERE m.proyecto_id = a.proyecto_id AND m.tipo = 'Suspensión'
+          AND m.fecha_inicial <= CURRENT_DATE
+          AND (m.fecha_final IS NULL OR m.fecha_final >= CURRENT_DATE)
+      )
   `) as any[];
 
   let sentCount = 0;

@@ -29,6 +29,7 @@ interface SidebarProps {
   currentProjectId: string;
   projects: Project[];
   reports: Report[];
+  isCurrentProjectSuspended: boolean;
 }
 
 type LeafNode = {
@@ -39,6 +40,8 @@ type LeafNode = {
   badge?: number | string;
   badgeColor?: string;
   visible: boolean;
+  disabled?: boolean;
+  disabledTitle?: string;
 };
 type GroupNode = {
   kind: 'group';
@@ -88,6 +91,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentProjectId,
   projects,
   reports,
+  isCurrentProjectSuspended,
 }) => {
   const { user, canView } = useAuth();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['informes']));
@@ -180,6 +184,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               label: '+ Radicar Nuevo Informe',
               icon: PlusCircle,
               visible: canView('reports'),
+              disabled: isCurrentProjectSuspended,
+              disabledTitle: 'El proyecto está suspendido -- no se pueden crear informes nuevos.',
             },
             {
               kind: 'leaf',
@@ -288,19 +294,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (node.kind === 'leaf') {
       const Icon = node.icon;
       const isActive = activeModule === node.id;
+      const isDisabled = Boolean(node.disabled);
       return (
         <button
           key={node.id}
           id={`sidebar-nav-${node.id}`}
           type="button"
-          onClick={() => onSelectModule(node.id)}
-          title={isCollapsed ? node.label : undefined}
+          disabled={isDisabled}
+          onClick={() => !isDisabled && onSelectModule(node.id)}
+          title={isDisabled ? node.disabledTitle : isCollapsed ? node.label : undefined}
           style={isCollapsed ? undefined : { paddingLeft: `${12 + depth * 16}px` }}
-          className={`w-full flex items-center rounded-lg text-xs font-medium transition-all group cursor-pointer ${
+          className={`w-full flex items-center rounded-lg text-xs font-medium transition-all group ${
+            isDisabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
+          } ${
             isCollapsed ? 'justify-center py-2.5' : 'justify-between pr-3 py-2.5'
           } ${
             isActive
               ? 'bg-indigo-600 text-white font-semibold shadow-xs'
+              : isDisabled
+              ? 'text-slate-400'
               : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
           }`}
         >
@@ -418,7 +430,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-xs">
               <div className="flex items-center justify-between text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
                 <span>Proyecto en Pantalla</span>
-                <span className="text-emerald-400 font-mono">Activo</span>
+                <span className={`font-mono ${isCurrentProjectSuspended ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  {isCurrentProjectSuspended ? 'Suspendido' : 'Activo'}
+                </span>
               </div>
               <div className="font-bold text-white truncate">{currentProject.name}</div>
               <div className="text-[11px] text-slate-400 font-mono truncate">

@@ -29,6 +29,7 @@ interface HeaderProps {
   onClearAllNotifications: () => void;
   onNavigateToReport: (reportId: string) => void;
   onOpenNewReport: () => void;
+  isCurrentProjectSuspended: boolean;
   onOpenSearch: () => void;
 }
 
@@ -42,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   onClearAllNotifications,
   onNavigateToReport,
   onOpenNewReport,
+  isCurrentProjectSuspended,
   onOpenSearch,
 }) => {
   const { user, logout } = useAuth();
@@ -85,8 +87,13 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="text-xs text-slate-500 block leading-none font-normal">
                   Proyecto activo
                 </span>
-                <span className="font-semibold text-slate-900 truncate">
+                <span className="font-semibold text-slate-900 truncate flex items-center gap-1.5">
                   {currentProject ? currentProject.name : 'Todos los proyectos'}
+                  {isCurrentProjectSuspended && (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-rose-100 text-rose-700 shrink-0">
+                      Suspendido
+                    </span>
+                  )}
                 </span>
               </div>
               <ChevronDown className="w-4 h-4 text-slate-500 ml-1 shrink-0" />
@@ -185,7 +192,9 @@ export const Header: React.FC<HeaderProps> = ({
             id="header-quick-new-report-btn"
             type="button"
             onClick={onOpenNewReport}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+            disabled={isCurrentProjectSuspended}
+            title={isCurrentProjectSuspended ? 'El proyecto está suspendido -- no se pueden crear informes nuevos.' : undefined}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-indigo-600"
           >
             <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
             <span>Nuevo Informe</span>

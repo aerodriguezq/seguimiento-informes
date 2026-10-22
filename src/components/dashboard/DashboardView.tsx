@@ -45,6 +45,7 @@ interface DashboardViewProps {
   onOpenNewReport: () => void;
   onViewAllReports: (filterStatus?: ReportStatus | 'vencidos' | 'proximos') => void;
   onOpenSeguimiento: () => void;
+  isCurrentProjectSuspended: boolean;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -56,6 +57,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenNewReport,
   onViewAllReports,
   onOpenSeguimiento,
+  isCurrentProjectSuspended,
 }) => {
   const [seguimientoKpis, setSeguimientoKpis] = useState<Record<string, SeguimientoKpi> | null>(null);
   const [selectedEntregaDetail, setSelectedEntregaDetail] = useState<{
@@ -129,7 +131,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={() => onViewAllReports('vencidos')} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"><Filter className="h-3.5 w-3.5" /> Ver excepciones</button>
-            <button id="dashboard-create-report-btn" type="button" onClick={onOpenNewReport} className="inline-flex items-center gap-2 rounded-lg bg-indigo-700 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-indigo-800"><Plus className="h-3.5 w-3.5" /> Nuevo informe</button>
+            <button
+              id="dashboard-create-report-btn"
+              type="button"
+              onClick={onOpenNewReport}
+              disabled={isCurrentProjectSuspended}
+              title={isCurrentProjectSuspended ? 'El proyecto está suspendido -- no se pueden crear informes nuevos.' : undefined}
+              className="inline-flex items-center gap-2 rounded-lg bg-indigo-700 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-indigo-700"
+            ><Plus className="h-3.5 w-3.5" /> Nuevo informe</button>
           </div>
         </div>
 

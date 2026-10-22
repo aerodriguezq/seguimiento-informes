@@ -752,6 +752,106 @@ export default async function handler(
       }
     }
 
+    // Modificatorios del contrato (adiciones, prórrogas, suspensiones) --
+    // van antes de los genéricos de abajo porque usan los mismos métodos
+    // HTTP, distinguidos por kind/query.
+    if (request.method === 'GET' && request.query.modificatorios === 'list') {
+      const projectId = Number(request.query.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      const rows = await sql`
+        SELECT modificatorio_id AS id, proyecto_id AS "proyectoId", numero, tipo,
+          TO_CHAR(fecha_inicial, 'YYYY-MM-DD') AS "fechaInicial", TO_CHAR(fecha_final, 'YYYY-MM-DD') AS "fechaFinal",
+          valor_inicial AS "valorInicial", valor_actual AS "valorActual", titulo, nota
+        FROM proyecto_modificatorios WHERE proyecto_id = ${projectId}
+        ORDER BY fecha_inicial ASC NULLS LAST, modificatorio_id ASC
+      `;
+      return response.status(200).json({ data: rows, meta: { total: rows.length }, errors: [] });
+    }
+
+    if (request.method === 'POST' && request.body?.kind === 'modificatorioCreate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const { projectId, numero, tipo, fechaInicial, fechaFinal, valorInicial, valorActual, titulo, nota } = request.body?.data ?? {};
+      const pid = Number(projectId);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      if (!numero || !String(numero).trim()) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El número del modificatorio es obligatorio.'] });
+      }
+      if (!tipo || !String(tipo).trim()) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El tipo del modificatorio es obligatorio.'] });
+      }
+      const rows = await sql`
+        INSERT INTO proyecto_modificatorios
+          (proyecto_id, numero, tipo, fecha_inicial, fecha_final, valor_inicial, valor_actual, titulo, nota)
+        VALUES (
+          ${pid}, ${String(numero).trim()}, ${String(tipo).trim()},
+          ${fechaInicial || null}, ${fechaFinal || null},
+          ${valorInicial === undefined || valorInicial === null || valorInicial === '' ? null : Number(valorInicial)},
+          ${valorActual === undefined || valorActual === null || valorActual === '' ? null : Number(valorActual)},
+          ${titulo || null}, ${nota || null}
+        )
+        RETURNING modificatorio_id AS id, proyecto_id AS "proyectoId", numero, tipo,
+          TO_CHAR(fecha_inicial, 'YYYY-MM-DD') AS "fechaInicial", TO_CHAR(fecha_final, 'YYYY-MM-DD') AS "fechaFinal",
+          valor_inicial AS "valorInicial", valor_actual AS "valorActual", titulo, nota
+      `;
+      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'PATCH' && request.body?.kind === 'modificatorioUpdate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const modId = Number(request.body?.id);
+      if (!Number.isInteger(modId) || modId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del modificatorio es obligatorio.'] });
+      }
+      const current = (await sql`SELECT * FROM proyecto_modificatorios WHERE modificatorio_id = ${modId}`) as any[];
+      if (!current[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Modificatorio no encontrado.'] });
+      }
+      const body = request.body?.data ?? {};
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+      const numero = has('numero') ? String(body.numero).trim() : current[0].numero;
+      const tipo = has('tipo') ? String(body.tipo).trim() : current[0].tipo;
+      const fechaInicial = has('fechaInicial') ? (body.fechaInicial || null) : current[0].fecha_inicial;
+      const fechaFinal = has('fechaFinal') ? (body.fechaFinal || null) : current[0].fecha_final;
+      const valorInicial = has('valorInicial') ? (body.valorInicial === null || body.valorInicial === '' ? null : Number(body.valorInicial)) : current[0].valor_inicial;
+      const valorActual = has('valorActual') ? (body.valorActual === null || body.valorActual === '' ? null : Number(body.valorActual)) : current[0].valor_actual;
+      const titulo = has('titulo') ? (body.titulo || null) : current[0].titulo;
+      const nota = has('nota') ? (body.nota || null) : current[0].nota;
+
+      const rows = await sql`
+        UPDATE proyecto_modificatorios
+        SET numero = ${numero}, tipo = ${tipo}, fecha_inicial = ${fechaInicial}, fecha_final = ${fechaFinal},
+          valor_inicial = ${valorInicial}, valor_actual = ${valorActual}, titulo = ${titulo}, nota = ${nota}
+        WHERE modificatorio_id = ${modId}
+        RETURNING modificatorio_id AS id, proyecto_id AS "proyectoId", numero, tipo,
+          TO_CHAR(fecha_inicial, 'YYYY-MM-DD') AS "fechaInicial", TO_CHAR(fecha_final, 'YYYY-MM-DD') AS "fechaFinal",
+          valor_inicial AS "valorInicial", valor_actual AS "valorActual", titulo, nota
+      `;
+      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'DELETE' && request.query.modificatorio) {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const modId = Number(request.query.modificatorio);
+      if (!Number.isInteger(modId) || modId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del modificatorio es obligatorio.'] });
+      }
+      const deleted = await sql`DELETE FROM proyecto_modificatorios WHERE modificatorio_id = ${modId} RETURNING modificatorio_id AS id`;
+      if (!deleted[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Modificatorio no encontrado.'] });
+      }
+      return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+    }
+
     if (request.method === 'DELETE') {
       const projectId = Number(request.query.id);
 
@@ -802,8 +902,15 @@ export default async function handler(
 
       const hasAutoAlerts = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'autoAlertsEnabled');
       const hasActive = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'active');
+      const hasObjetivo = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'objetivoGeneral');
+      const hasMunicipios = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'municipios');
+      const hasSupervisor = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'supervisor');
+      const hasValorInicial = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'valorInicial');
 
-      const currentProjects = await sql`SELECT fecha_inicio, fecha_fin, alertas_automaticas, activo FROM proyectos WHERE proyecto_id = ${projectId}`;
+      const currentProjects = await sql`
+        SELECT fecha_inicio, fecha_fin, alertas_automaticas, activo, objetivo_general, municipios, supervisor, valor_inicial
+        FROM proyectos WHERE proyecto_id = ${projectId}
+      `;
       if (!currentProjects[0]) {
         return response.status(404).json({ data: null, meta: {}, errors: ['Proyecto no encontrado.'] });
       }
@@ -812,12 +919,21 @@ export default async function handler(
       const nextEndDate = hasEndDate ? (endDate || null) : currentProjects[0].fecha_fin;
       const nextAutoAlerts = hasAutoAlerts ? Boolean(request.body.autoAlertsEnabled) : currentProjects[0].alertas_automaticas;
       const nextActive = hasActive ? Boolean(request.body.active) : currentProjects[0].activo;
+      const nextObjetivo = hasObjetivo ? (request.body.objetivoGeneral || null) : currentProjects[0].objetivo_general;
+      const nextMunicipios = hasMunicipios ? (request.body.municipios || null) : currentProjects[0].municipios;
+      const nextSupervisor = hasSupervisor ? (request.body.supervisor || null) : currentProjects[0].supervisor;
+      const nextValorInicial = hasValorInicial
+        ? (request.body.valorInicial === null || request.body.valorInicial === '' ? null : Number(request.body.valorInicial))
+        : currentProjects[0].valor_inicial;
 
       const updatedProjects = await sql`
         UPDATE proyectos
-        SET fecha_inicio = ${nextStartDate}, fecha_fin = ${nextEndDate}, alertas_automaticas = ${nextAutoAlerts}, activo = ${nextActive}
+        SET fecha_inicio = ${nextStartDate}, fecha_fin = ${nextEndDate}, alertas_automaticas = ${nextAutoAlerts}, activo = ${nextActive},
+          objetivo_general = ${nextObjetivo}, municipios = ${nextMunicipios}, supervisor = ${nextSupervisor}, valor_inicial = ${nextValorInicial}
         WHERE proyecto_id = ${projectId}
-        RETURNING proyecto_id AS id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate", alertas_automaticas AS "autoAlertsEnabled", activo AS active
+        RETURNING proyecto_id AS id, TO_CHAR(fecha_inicio, 'YYYY-MM-DD') AS "startDate", TO_CHAR(fecha_fin, 'YYYY-MM-DD') AS "endDate",
+          alertas_automaticas AS "autoAlertsEnabled", activo AS active,
+          objetivo_general AS "objetivoGeneral", municipios, supervisor, valor_inicial AS "valorInicial"
       `;
 
       // "Tipos de Informe Aplicables": antes esto solo actualizaba estado
@@ -922,6 +1038,10 @@ export default async function handler(
           ...project,
           company_name: company.trim(),
           applicable_type_ids: [],
+          objetivoGeneral: null,
+          municipios: null,
+          supervisor: null,
+          valorInicial: null,
         },
         meta: {},
         errors: [],
@@ -945,6 +1065,10 @@ export default async function handler(
         p.alertas_automaticas AS "autoAlertsEnabled",
         TO_CHAR(p.fecha_inicio, 'YYYY-MM-DD') AS "startDate",
         TO_CHAR(p.fecha_fin, 'YYYY-MM-DD') AS "endDate",
+        p.objetivo_general AS "objetivoGeneral",
+        p.municipios,
+        p.supervisor,
+        p.valor_inicial AS "valorInicial",
         e.empresa_id AS company_id,
         e.nombre AS company_name,
         COALESCE(
