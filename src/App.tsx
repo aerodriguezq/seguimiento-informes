@@ -21,6 +21,7 @@ import {
   getSemaforoStatus,
 } from './data/mockData';
 import { Header } from './components/layout/Header';
+import { SearchCommandModal } from './components/layout/SearchCommandModal';
 import { Sidebar } from './components/layout/Sidebar';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { ReportsListView } from './components/reports/ReportsListView';
@@ -183,8 +184,20 @@ export default function App() {
   };
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [reportsFilterStatus, setReportsFilterStatus] = useState<string>('all');
-  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ id: string; text: string; type: 'success' | 'info' } | null>(null);
+
+  // Atajo global ⌘K / Ctrl+K para abrir la búsqueda, desde cualquier pantalla.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const showToast = (text: string, type: 'success' | 'info' = 'success') => {
     setToastMessage({ id: String(Date.now()), text, type });
@@ -1106,6 +1119,7 @@ export default function App() {
         pendingReportsCount={pendingReportsCount}
         urgentReportsCount={urgentReportsCount}
         activeAlertsCount={activeAlertsCount}
+        currentProject={currentProject}
       />
 
       {/* Main Workspace Column */}
@@ -1121,13 +1135,7 @@ export default function App() {
           onClearAllNotifications={handleClearAllNotifications}
           onNavigateToReport={handleNavigateToReport}
           onOpenNewReport={() => handleOpenNewReport(currentProjectId)}
-          onSearchGlobal={(q) => {
-            setGlobalSearchQuery(q);
-            if (activeModule !== 'reports' && q.trim()) {
-              goToModule('reports');
-            }
-          }}
-          searchQuery={globalSearchQuery}
+          onOpenSearch={() => setIsSearchOpen(true)}
         />
 
         {/* Dynamic Main Content Container */}
@@ -1312,6 +1320,16 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* Búsqueda global (⌘K / Ctrl+K) */}
+      <SearchCommandModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        reports={reports}
+        projects={projects}
+        onSelectReport={handleNavigateToReport}
+        onSelectProject={handleSelectProjectDetail}
+      />
 
       {/* M04: Detalle de Informe Modal / Drawer */}
       {activeReportForModal && (

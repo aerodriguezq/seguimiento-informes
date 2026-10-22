@@ -29,8 +29,7 @@ interface HeaderProps {
   onClearAllNotifications: () => void;
   onNavigateToReport: (reportId: string) => void;
   onOpenNewReport: () => void;
-  onSearchGlobal: (query: string) => void;
-  searchQuery: string;
+  onOpenSearch: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -43,8 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   onClearAllNotifications,
   onNavigateToReport,
   onOpenNewReport,
-  onSearchGlobal,
-  searchQuery,
+  onOpenSearch,
 }) => {
   const { user, logout } = useAuth();
   const currentDateLabel = new Intl.DateTimeFormat('es-CO', {
@@ -54,6 +52,7 @@ export const Header: React.FC<HeaderProps> = ({
   }).format(new Date());
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProjectSelector, setShowProjectSelector] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [activeNotifTab, setActiveNotifTab] = useState<'all' | 'critical' | 'unread'>('all');
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -151,17 +150,22 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Center: Global Quick Search */}
-        <div className="hidden md:flex flex-1 max-w-md items-center relative">
-          <Search className="w-4 h-4 absolute left-3 text-slate-400 pointer-events-none" />
-          <input
+        {/* Center: Global Quick Search (abre el modal de búsqueda ⌘K) */}
+        <div className="hidden md:flex flex-1 max-w-md items-center">
+          <button
             id="global-search-input"
-            type="text"
-            value={searchQuery}
-            onChange={(e) => onSearchGlobal(e.target.value)}
-            placeholder="Buscar por consecutivo, tipo, proyecto, responsable..."
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-100/70 hover:bg-slate-100 focus:bg-white border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 rounded-lg outline-none transition-all"
-          />
+            type="button"
+            onClick={onOpenSearch}
+            className="w-full flex items-center justify-between gap-2 px-3.5 py-1.5 text-xs text-slate-500 bg-slate-100/80 hover:bg-slate-100 border border-slate-200/80 rounded-lg transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span className="truncate">Buscar por consecutivo, tipo, proyecto...</span>
+            </span>
+            <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-500 bg-white rounded border border-slate-200 shrink-0">
+              ⌘K
+            </kbd>
+          </button>
         </div>
 
         {/* Right Controls: Date indicator, Quick New Report, Notifications, User profile */}
@@ -354,23 +358,46 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* User badge */}
-          <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-            <div className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs font-bold flex items-center justify-center">
-              {(user.name || user.email).slice(0, 2).toUpperCase()}
-            </div>
-            <div className="hidden xl:block text-left text-xs">
-              <div className="font-semibold text-slate-800 leading-none">{user.name || user.email}</div>
-              <div className="text-[10px] text-slate-400 mt-0.5">{user.isAdmin ? 'Administrador' : 'Usuario autorizado'}</div>
-            </div>
+          {/* User profile menu */}
+          <div className="relative pl-2 border-l border-slate-200">
             <button
               type="button"
-              onClick={logout}
-              title="Cerrar sesión"
-              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded-md transition-colors"
+              onClick={() => setShowProfileMenu(!showProfileMenu)}
+              className="flex items-center gap-2 p-1 rounded-lg hover:bg-slate-100 transition-colors"
+              aria-label="Menú de usuario"
             >
-              <LogOut className="w-3.5 h-3.5" />
+              <div className="w-7 h-7 rounded-full bg-slate-900 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                {(user.name || user.email).slice(0, 2).toUpperCase()}
+              </div>
+              <div className="hidden xl:block text-left text-xs">
+                <div className="font-semibold text-slate-800 leading-none">{user.name || user.email}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">{user.isAdmin ? 'Administrador' : 'Usuario autorizado'}</div>
+              </div>
+              <ChevronDown className="hidden xl:block w-3.5 h-3.5 text-slate-400 shrink-0" />
             </button>
+
+            {showProfileMenu && (
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                <div className="px-3.5 py-2.5 border-b border-slate-100">
+                  <div className="font-semibold text-xs text-slate-900 truncate">{user.name || 'Sin nombre'}</div>
+                  <div className="text-[11px] text-slate-500 truncate">{user.email}</div>
+                  <div className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">
+                    {user.isAdmin ? 'Administrador' : 'Usuario autorizado'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    logout();
+                  }}
+                  className="w-full px-3.5 py-2 text-left text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-2"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  Cerrar sesión
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

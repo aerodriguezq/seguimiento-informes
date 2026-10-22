@@ -16,8 +16,10 @@ import {
   ChevronRight,
   Inbox,
   ShieldCheck,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
-import { ActiveModule } from '../../types';
+import { ActiveModule, Project } from '../../types';
 import { useAuth } from '../../auth/AuthContext';
 
 interface SidebarProps {
@@ -26,6 +28,7 @@ interface SidebarProps {
   pendingReportsCount: number;
   urgentReportsCount: number;
   activeAlertsCount: number;
+  currentProject: Project | null;
 }
 
 type LeafNode = {
@@ -67,9 +70,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   pendingReportsCount,
   urgentReportsCount,
   activeAlertsCount,
+  currentProject,
 }) => {
   const { user, canView } = useAuth();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['proyectos', 'informes', 'admin']));
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   const toggleGroup = (id: string) => {
     setExpandedGroups((prev) => {
@@ -226,22 +231,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
           id={`sidebar-nav-${node.id}`}
           type="button"
           onClick={() => onSelectModule(node.id)}
-          style={{ paddingLeft: `${12 + depth * 16}px` }}
-          className={`w-full flex items-center justify-between pr-3 py-2.5 rounded-lg text-xs font-medium transition-all group cursor-pointer ${
+          title={isCollapsed ? node.label : undefined}
+          style={isCollapsed ? undefined : { paddingLeft: `${12 + depth * 16}px` }}
+          className={`w-full flex items-center rounded-lg text-xs font-medium transition-all group cursor-pointer ${
+            isCollapsed ? 'justify-center py-2.5' : 'justify-between pr-3 py-2.5'
+          } ${
             isActive
               ? 'bg-indigo-600 text-white font-semibold shadow-xs'
               : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
           }`}
         >
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className={`flex items-center min-w-0 ${isCollapsed ? '' : 'gap-2.5'}`}>
             <Icon
               className={`w-4 h-4 shrink-0 transition-colors ${
                 isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'
               }`}
             />
-            <span className="truncate">{node.label}</span>
+            {!isCollapsed && <span className="truncate">{node.label}</span>}
           </div>
-          {node.badge !== undefined && node.badge > 0 && (
+          {!isCollapsed && node.badge !== undefined && node.badge > 0 && (
             <span
               className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
                 isActive ? 'bg-white/20 text-white' : node.badgeColor
@@ -256,6 +264,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     const visibleChildren = node.children.map((child) => renderNode(child, depth + 1)).filter(Boolean);
     if (visibleChildren.length === 0) return null;
+
+    // Colapsado: sin jerarquía de grupos posible (no hay espacio para label
+    // ni chevron) -- se listan los hijos directo, iguales a cualquier otro
+    // ícono de la barra.
+    if (isCollapsed) {
+      return <div key={node.id} className="space-y-1">{visibleChildren}</div>;
+    }
 
     const Icon = node.icon;
     const isOpen = expandedGroups.has(node.id);
@@ -281,26 +296,70 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <aside
       id="app-sidebar-nav"
-      className="w-64 bg-slate-900 text-slate-200 shrink-0 flex flex-col justify-between h-screen sticky top-0 border-r border-slate-800 z-40 select-none"
+      className={`${isCollapsed ? 'w-18' : 'w-64'} bg-slate-900 text-slate-200 shrink-0 flex flex-col justify-between h-screen sticky top-0 border-r border-slate-800 z-40 select-none transition-all duration-200`}
     >
       {/* Top branding */}
       <div className="flex-1 min-h-0 flex flex-col">
-        <div className="px-5 py-5 border-b border-slate-800 flex items-center gap-3">
+        <div className={`py-5 border-b border-slate-800 flex items-center gap-3 ${isCollapsed ? 'px-3 justify-center' : 'px-5'}`}>
           <div className="w-9 h-9 rounded-xl overflow-hidden shrink-0 shadow-md shadow-indigo-900/30">
             <img src="/logo.svg" alt="" className="w-full h-full object-cover" />
           </div>
-          <div className="min-w-0">
-            <h1 className="font-bold text-sm text-white tracking-tight leading-tight truncate">
-              Seguimiento & Alertas
-            </h1>
-            <p className="text-[11px] text-slate-400 truncate">
-              Gestión Operacional de Informes
-            </p>
-          </div>
+          {!isCollapsed && (
+            <div className="min-w-0 flex-1">
+              <h1 className="font-bold text-sm text-white tracking-tight leading-tight truncate">
+                Seguimiento & Alertas
+              </h1>
+              <p className="text-[11px] text-slate-400 truncate">
+                Gestión Operacional de Informes
+              </p>
+            </div>
+          )}
+          {!isCollapsed && (
+            <button
+              type="button"
+              onClick={() => setIsCollapsed(true)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+              title="Colapsar barra lateral"
+              aria-label="Colapsar barra lateral"
+            >
+              <PanelLeftClose className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
+        {isCollapsed && (
+          <div className="px-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setIsCollapsed(false)}
+              className="w-full flex items-center justify-center p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+              title="Expandir barra lateral"
+              aria-label="Expandir barra lateral"
+            >
+              <PanelLeftOpen className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Proyecto en Pantalla: aclara de inmediato a qué proyecto queda
+            acotada toda la app (ver remasterización de acceso por proyecto). */}
+        {!isCollapsed && currentProject && (
+          <div className="px-3 pt-3">
+            <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-xs">
+              <div className="flex items-center justify-between text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                <span>Proyecto en Pantalla</span>
+                <span className="text-emerald-400 font-mono">Activo</span>
+              </div>
+              <div className="font-bold text-white truncate">{currentProject.name}</div>
+              <div className="text-[11px] text-slate-400 font-mono truncate">
+                BPIN: {currentProject.bpin}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Operational Quick Alert Pill */}
-        {urgentReportsCount > 0 && (
+        {!isCollapsed && urgentReportsCount > 0 && (
           <div className="mx-3 mt-3 px-3 py-2 rounded-lg bg-rose-950/60 border border-rose-800/60 text-xs text-rose-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping shrink-0" />
