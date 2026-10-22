@@ -130,6 +130,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       setIsSavingVigencia(false);
     }
   };
+  const [infoTab, setInfoTab] = useState<'general' | 'valor'>('general');
   const [isEditingInfo, setIsEditingInfo] = useState(false);
   const [infoObjetivo, setInfoObjetivo] = useState(project.objetivoGeneral ?? '');
   const [infoMunicipios, setInfoMunicipios] = useState(project.municipios ?? '');
@@ -588,80 +589,146 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-          <div>
-            <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
-              <Building2 className="w-3.5 h-3.5" /> Ejecutor
-            </span>
-            <div className="font-semibold text-slate-800">{project.company}</div>
-          </div>
+        {/* Pestañas: separan los datos generales del detalle financiero,
+            que antes solo era visible en modo edición (Valor Inicial). */}
+        <div className="flex items-center gap-2 border-b border-slate-200 pb-1 text-xs">
+          <button
+            type="button"
+            onClick={() => setInfoTab('general')}
+            className={`px-3 py-2 font-semibold border-b-2 transition-colors cursor-pointer ${
+              infoTab === 'general'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            General
+          </button>
+          <button
+            type="button"
+            onClick={() => setInfoTab('valor')}
+            className={`px-3 py-2 font-semibold border-b-2 transition-colors cursor-pointer ${
+              infoTab === 'valor'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Valor del Proyecto
+          </button>
+        </div>
 
-          <div>
-            <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
-              <UserCog className="w-3.5 h-3.5" /> Supervisor
-            </span>
-            {isEditingInfo ? (
-              <input
-                type="text"
-                value={infoSupervisor}
-                onChange={(e) => setInfoSupervisor(e.target.value)}
-                className="w-full px-2 py-1 border border-slate-200 rounded outline-none focus:border-indigo-500"
-              />
-            ) : (
-              <div className="font-semibold text-slate-800">{project.supervisor || 'Sin definir'}</div>
-            )}
-          </div>
+        {infoTab === 'general' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+            <div>
+              <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
+                <Building2 className="w-3.5 h-3.5" /> Ejecutor
+              </span>
+              <div className="font-semibold text-slate-800">{project.company}</div>
+            </div>
 
-          <div>
-            <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
-              <MapPin className="w-3.5 h-3.5" /> Municipios
-            </span>
-            {isEditingInfo ? (
-              <input
-                type="text"
-                value={infoMunicipios}
-                onChange={(e) => setInfoMunicipios(e.target.value)}
-                className="w-full px-2 py-1 border border-slate-200 rounded outline-none focus:border-indigo-500"
-              />
-            ) : (
-              <div className="font-semibold text-slate-800">{project.municipios || 'Sin definir'}</div>
-            )}
-          </div>
-
-          <div>
-            <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
-              <Wallet className="w-3.5 h-3.5" /> Valor Actual
-            </span>
-            <div className="font-semibold text-slate-800">{formatCurrency(valorActual)}</div>
-            {isEditingInfo && (
-              <div className="mt-1.5">
-                <label className="text-[10px] text-slate-400 block mb-0.5">Valor inicial del contrato</label>
+            <div>
+              <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
+                <UserCog className="w-3.5 h-3.5" /> Supervisor
+              </span>
+              {isEditingInfo ? (
                 <input
-                  type="number"
-                  value={infoValorInicial}
-                  onChange={(e) => setInfoValorInicial(e.target.value)}
+                  type="text"
+                  value={infoSupervisor}
+                  onChange={(e) => setInfoSupervisor(e.target.value)}
                   className="w-full px-2 py-1 border border-slate-200 rounded outline-none focus:border-indigo-500"
                 />
+              ) : (
+                <div className="font-semibold text-slate-800">{project.supervisor || 'Sin definir'}</div>
+              )}
+            </div>
+
+            <div>
+              <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
+                <MapPin className="w-3.5 h-3.5" /> Municipios
+              </span>
+              {isEditingInfo ? (
+                <input
+                  type="text"
+                  value={infoMunicipios}
+                  onChange={(e) => setInfoMunicipios(e.target.value)}
+                  className="w-full px-2 py-1 border border-slate-200 rounded outline-none focus:border-indigo-500"
+                />
+              ) : (
+                <div className="font-semibold text-slate-800">{project.municipios || 'Sin definir'}</div>
+              )}
+            </div>
+
+            <div className="sm:col-span-2 lg:col-span-3">
+              <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
+                <Target className="w-3.5 h-3.5" /> Objetivo General
+              </span>
+              {isEditingInfo ? (
+                <textarea
+                  value={infoObjetivo}
+                  onChange={(e) => setInfoObjetivo(e.target.value)}
+                  rows={2}
+                  className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-indigo-500"
+                />
+              ) : (
+                <div className="text-slate-700 leading-relaxed">{project.objetivoGeneral || 'Sin definir'}</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
+                  <Wallet className="w-3.5 h-3.5" /> Valor Inicial del Contrato
+                </span>
+                {isEditingInfo ? (
+                  <input
+                    type="number"
+                    value={infoValorInicial}
+                    onChange={(e) => setInfoValorInicial(e.target.value)}
+                    placeholder="Ej: 1480000000"
+                    className="w-full px-2 py-1 border border-slate-200 rounded outline-none focus:border-indigo-500"
+                  />
+                ) : (
+                  <div className="font-semibold text-slate-800">{formatCurrency(project.valorInicial)}</div>
+                )}
+              </div>
+
+              <div>
+                <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
+                  <Wallet className="w-3.5 h-3.5" /> Valor Actual
+                </span>
+                <div className="font-semibold text-slate-800">{formatCurrency(valorActual)}</div>
+                <span className="text-[10px] text-slate-400">
+                  {latestAdicion ? `Incluye la Adición ${latestAdicion.numero}` : 'Igual al valor inicial -- sin Adiciones registradas'}
+                </span>
+              </div>
+            </div>
+
+            {modificatorios.some((m) => m.tipo === 'Adición') && (
+              <div>
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide block mb-1.5">
+                  Historial de Adiciones
+                </span>
+                <div className="space-y-1.5">
+                  {modificatorios
+                    .filter((m) => m.tipo === 'Adición')
+                    .map((m) => (
+                      <div
+                        key={m.id}
+                        className="flex items-center justify-between gap-2 p-2 bg-emerald-50/60 border border-emerald-200/80 rounded-lg"
+                      >
+                        <span className="font-mono font-bold text-slate-800">{m.numero}</span>
+                        <span className="text-slate-600">{m.fechaInicial || 'Sin fecha'}</span>
+                        <span className="font-semibold text-emerald-800">
+                          {formatCurrency(m.valorInicial)} → {formatCurrency(m.valorActual)}
+                        </span>
+                      </div>
+                    ))}
+                </div>
               </div>
             )}
           </div>
-
-          <div className="sm:col-span-2 lg:col-span-3">
-            <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
-              <Target className="w-3.5 h-3.5" /> Objetivo General
-            </span>
-            {isEditingInfo ? (
-              <textarea
-                value={infoObjetivo}
-                onChange={(e) => setInfoObjetivo(e.target.value)}
-                rows={2}
-                className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-indigo-500"
-              />
-            ) : (
-              <div className="text-slate-700 leading-relaxed">{project.objetivoGeneral || 'Sin definir'}</div>
-            )}
-          </div>
-        </div>
+        )}
       </div>
 
       {/* 2.6 MODIFICATORIOS DEL CONTRATO */}
