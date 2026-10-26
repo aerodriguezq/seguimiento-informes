@@ -138,6 +138,7 @@ function mapConvenioParticipante(p: any): ConvenioParticipante {
     proyectoId: String(p.proyectoId),
     nombre: p.nombre,
     rol: p.rol || null,
+    valor: p.valor !== null && p.valor !== undefined ? Number(p.valor) : null,
   };
 }
 
@@ -631,7 +632,7 @@ export default function App() {
     }
   };
 
-  const handleCreateConvenioParticipante = async (data: { nombre: string; rol?: string }) => {
+  const handleCreateConvenioParticipante = async (data: { nombre: string; rol?: string; valor?: number | null }) => {
     const response = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -643,7 +644,7 @@ export default function App() {
     showToast('Participante del convenio guardado.', 'success');
   };
 
-  const handleUpdateConvenioParticipante = async (id: string, data: Partial<{ nombre: string; rol: string | null }>) => {
+  const handleUpdateConvenioParticipante = async (id: string, data: Partial<{ nombre: string; rol: string | null; valor: number | null }>) => {
     const response = await fetch('/api/projects', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

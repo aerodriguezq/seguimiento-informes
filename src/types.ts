@@ -279,6 +279,7 @@ export interface ConvenioParticipante {
   proyectoId: string;
   nombre: string;
   rol: string | null;
+  valor: number | null;
 }
 
 // Subdivisión manual del Valor del Proyecto en N partes por monto (plan de

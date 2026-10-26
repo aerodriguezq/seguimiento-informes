@@ -1030,7 +1030,7 @@ export default async function handler(
         return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
       }
       const rows = await sql`
-        SELECT participante_id AS id, proyecto_id AS "proyectoId", nombre, rol
+        SELECT participante_id AS id, proyecto_id AS "proyectoId", nombre, rol, valor
         FROM proyecto_convenio_participantes WHERE proyecto_id = ${projectId}
         ORDER BY participante_id ASC
       `;
@@ -1041,7 +1041,7 @@ export default async function handler(
       if (!(await canEditModuleRequest(request, sql, 'projects'))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
       }
-      const { projectId, nombre, rol } = request.body?.data ?? {};
+      const { projectId, nombre, rol, valor } = request.body?.data ?? {};
       const pid = Number(projectId);
       if (!Number.isInteger(pid) || pid <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
@@ -1050,9 +1050,12 @@ export default async function handler(
         return response.status(400).json({ data: null, meta: {}, errors: ['El nombre del participante es obligatorio.'] });
       }
       const rows = await sql`
-        INSERT INTO proyecto_convenio_participantes (proyecto_id, nombre, rol)
-        VALUES (${pid}, ${String(nombre).trim()}, ${rol && String(rol).trim() ? String(rol).trim() : null})
-        RETURNING participante_id AS id, proyecto_id AS "proyectoId", nombre, rol
+        INSERT INTO proyecto_convenio_participantes (proyecto_id, nombre, rol, valor)
+        VALUES (
+          ${pid}, ${String(nombre).trim()}, ${rol && String(rol).trim() ? String(rol).trim() : null},
+          ${valor === undefined || valor === null || valor === '' ? null : Number(valor)}
+        )
+        RETURNING participante_id AS id, proyecto_id AS "proyectoId", nombre, rol, valor
       `;
       return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
     }
@@ -1073,11 +1076,12 @@ export default async function handler(
       const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
       const nombre = has('nombre') ? String(body.nombre).trim() : current[0].nombre;
       const rol = has('rol') ? (body.rol || null) : current[0].rol;
+      const valor = has('valor') ? (body.valor === null || body.valor === '' ? null : Number(body.valor)) : current[0].valor;
 
       const rows = await sql`
-        UPDATE proyecto_convenio_participantes SET nombre = ${nombre}, rol = ${rol}
+        UPDATE proyecto_convenio_participantes SET nombre = ${nombre}, rol = ${rol}, valor = ${valor}
         WHERE participante_id = ${participanteId}
-        RETURNING participante_id AS id, proyecto_id AS "proyectoId", nombre, rol
+        RETURNING participante_id AS id, proyecto_id AS "proyectoId", nombre, rol, valor
       `;
       return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
     }

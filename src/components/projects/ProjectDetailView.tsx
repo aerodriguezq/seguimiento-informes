@@ -108,8 +108,8 @@ interface ProjectDetailViewProps {
   onUpdateAportante: (id: string, data: Partial<{ nombre: string; monto: number }>) => Promise<void>;
   onDeleteAportante: (id: string) => Promise<void>;
   convenioParticipantes: ConvenioParticipante[];
-  onCreateConvenioParticipante: (data: { nombre: string; rol?: string }) => Promise<void>;
-  onUpdateConvenioParticipante: (id: string, data: Partial<{ nombre: string; rol: string | null }>) => Promise<void>;
+  onCreateConvenioParticipante: (data: { nombre: string; rol?: string; valor?: number | null }) => Promise<void>;
+  onUpdateConvenioParticipante: (id: string, data: Partial<{ nombre: string; rol: string | null; valor: number | null }>) => Promise<void>;
   onDeleteConvenioParticipante: (id: string) => Promise<void>;
 }
 
@@ -396,23 +396,26 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     await onDeleteAportante(id);
   };
 
-  // --- Convenio: entidades participantes (sin montos, solo rol) ---
+  // --- Convenio: entidades participantes, con rol y valor opcionales ---
   const [showConvenioModal, setShowConvenioModal] = useState(false);
   const [editingConvenioId, setEditingConvenioId] = useState<string | null>(null);
   const [cvNombre, setCvNombre] = useState('');
   const [cvRol, setCvRol] = useState('');
+  const [cvValor, setCvValor] = useState('');
   const [isSavingConvenio, setIsSavingConvenio] = useState(false);
 
   const resetConvenioForm = () => {
     setEditingConvenioId(null);
     setCvNombre('');
     setCvRol('');
+    setCvValor('');
   };
 
   const handleStartEditConvenio = (p: ConvenioParticipante) => {
     setEditingConvenioId(p.id);
     setCvNombre(p.nombre);
     setCvRol(p.rol || '');
+    setCvValor(p.valor !== null ? String(p.valor) : '');
     setShowConvenioModal(true);
   };
 
@@ -421,10 +424,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     if (!cvNombre.trim()) return;
     setIsSavingConvenio(true);
     try {
+      const valor = cvValor.trim() === '' ? null : Number(cvValor);
       if (editingConvenioId) {
-        await onUpdateConvenioParticipante(editingConvenioId, { nombre: cvNombre.trim(), rol: cvRol.trim() || null });
+        await onUpdateConvenioParticipante(editingConvenioId, { nombre: cvNombre.trim(), rol: cvRol.trim() || null, valor });
       } else {
-        await onCreateConvenioParticipante({ nombre: cvNombre.trim(), rol: cvRol.trim() || undefined });
+        await onCreateConvenioParticipante({ nombre: cvNombre.trim(), rol: cvRol.trim() || undefined, valor });
       }
       setShowConvenioModal(false);
       resetConvenioForm();
@@ -533,6 +537,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const valorActual = latestAdicion ? latestAdicion.valorActual : project.valorInicial;
   const sumaValorPartes = valorPartes.reduce((acc, p) => acc + p.monto, 0);
   const sumaAportantes = aportantes.reduce((acc, a) => acc + a.monto, 0);
+  const sumaConvenioParticipantes = convenioParticipantes.reduce((acc, p) => acc + (p.valor ?? 0), 0);
 
   const formatCurrency = (value: number | null | undefined) => {
     if (value === null || value === undefined) return 'Sin definir';
@@ -1233,44 +1238,55 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 Todavía no se han agregado participantes del convenio para este proyecto.
               </p>
             ) : (
-              <div className="space-y-1.5">
-                {convenioParticipantes.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-white border border-slate-200 rounded-lg"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span className="font-semibold text-slate-800 truncate">{p.nombre}</span>
-                      {p.rol && (
-                        <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                          {p.rol}
-                        </span>
-                      )}
-                    </div>
-                    {canEdit('projects') && (
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleStartEditConvenio(p)}
-                          className="text-slate-400 hover:text-indigo-600"
-                          title="Editar participante"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteConvenioClick(p.id)}
-                          className="text-slate-400 hover:text-rose-600"
-                          title="Eliminar participante"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+              <>
+                <div className="space-y-1.5">
+                  {convenioParticipantes.map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-white border border-slate-200 rounded-lg"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="font-semibold text-slate-800 truncate">{p.nombre}</span>
+                        {p.rol && (
+                          <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            {p.rol}
+                          </span>
+                        )}
                       </div>
-                    )}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {p.valor !== null && <span className="font-bold text-slate-800">{formatCurrency(p.valor)}</span>}
+                        {canEdit('projects') && (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditConvenio(p)}
+                              className="text-slate-400 hover:text-indigo-600"
+                              title="Editar participante"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteConvenioClick(p.id)}
+                              className="text-slate-400 hover:text-rose-600"
+                              title="Eliminar participante"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {sumaConvenioParticipantes > 0 && (
+                  <div className="mt-2 flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
+                    <span className="text-slate-500">Suma de participantes</span>
+                    <span className="font-bold text-slate-800">{formatCurrency(sumaConvenioParticipantes)}</span>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -2187,6 +2203,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   placeholder="Ej: Ejecutor, Cofinanciador, Supervisor, Beneficiario..."
                   className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
                 />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Valor que aporta (opcional)</label>
+                <CurrencyInput value={cvValor} onChange={setCvValor} placeholder="Ej: 3.000.000.000" />
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
