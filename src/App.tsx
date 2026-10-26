@@ -1651,7 +1651,6 @@ export default function App() {
               onToggleAlertRuleActive={handleToggleAlertActive}
               onAddNewAlertRule={handleAddNewAlert}
               onViewAllReports={() => handleViewAllReports()}
-              canEditSeguimiento={canEdit('seguimiento')}
               modificatorios={currentProjectModificatorios}
               onCreateModificatorio={handleCreateModificatorio}
               onUpdateModificatorio={handleUpdateModificatorio}

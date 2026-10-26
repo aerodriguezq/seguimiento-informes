@@ -25,8 +25,6 @@ import { SemaforoBadge } from '../common/SemaforoBadge';
 import { MunicipiosMultiSelect } from '../common/MunicipiosMultiSelect';
 import { CurrencyInput } from '../common/CurrencyInput';
 import { ScheduleFrequencyField } from '../alerts/ScheduleFrequencyField';
-import { SeguimientoCronograma } from './SeguimientoCronograma';
-import { ErrorBoundary } from '../common/ErrorBoundary';
 import { useAuth } from '../../auth/AuthContext';
 import {
   ArrowLeft,
@@ -84,7 +82,6 @@ interface ProjectDetailViewProps {
   onUpdateProjectInfo: (projectId: string, updates: {
     objetivoGeneral?: string; municipios?: string; supervisor?: string; valorInicial?: number | null;
   }) => Promise<void>;
-  canEditSeguimiento: boolean;
   modificatorios: Modificatorio[];
   onCreateModificatorio: (data: {
     numero: string; tipo: string; fechaInicial?: string; fechaFinal?: string;
@@ -130,7 +127,6 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onViewAllReports,
   onUpdateProjectVigencia,
   onUpdateProjectInfo,
-  canEditSeguimiento,
   modificatorios,
   onCreateModificatorio,
   onUpdateModificatorio,
@@ -1508,11 +1504,6 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           </div>
         )}
       </div>
-
-      {/* 3.5 BLOQUE SEGUIMIENTO (extensión de proyecto: cronograma de entregas importado desde Google Sheets) */}
-      <ErrorBoundary fallbackLabel="No fue posible mostrar el Seguimiento de este proyecto.">
-        <SeguimientoCronograma projectId={project.id} canEdit={canEditSeguimiento} />
-      </ErrorBoundary>
 
       {/* 4. BLOQUE ALERTAS PROGRAMADAS (Sección 7) */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
