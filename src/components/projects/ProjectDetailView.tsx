@@ -6,6 +6,7 @@ import {
   ScheduledAlert,
   Contact,
   ReportStatus,
+  ValorParte,
 } from '../../types';
 import {
   calculateDaysRemaining,
@@ -92,6 +93,14 @@ interface ProjectDetailViewProps {
     valorInicial: number | null; valorActual: number | null; titulo: string | null; nota: string | null;
   }>) => Promise<void>;
   onDeleteModificatorio: (id: string) => Promise<void>;
+  valorPartes: ValorParte[];
+  onCreateValorParte: (data: {
+    numero: string; concepto?: string; monto: number; fechaEstimada?: string; estado?: string;
+  }) => Promise<void>;
+  onUpdateValorParte: (id: string, data: Partial<{
+    numero: string; concepto: string | null; monto: number; fechaEstimada: string | null; estado: string;
+  }>) => Promise<void>;
+  onDeleteValorParte: (id: string) => Promise<void>;
 }
 
 export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
@@ -116,6 +125,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onCreateModificatorio,
   onUpdateModificatorio,
   onDeleteModificatorio,
+  valorPartes,
+  onCreateValorParte,
+  onUpdateValorParte,
+  onDeleteValorParte,
 }) => {
   const { user, canEdit } = useAuth();
   const [isEditingVigencia, setIsEditingVigencia] = useState(false);
@@ -256,6 +269,73 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     await onDeleteModificatorio(id);
   };
 
+  // --- Partes del Valor (plan de desembolsos: subdividir el valor en N partes por monto) ---
+  const [showValorParteModal, setShowValorParteModal] = useState(false);
+  const [editingValorParteId, setEditingValorParteId] = useState<string | null>(null);
+  const [vpNumero, setVpNumero] = useState('');
+  const [vpConcepto, setVpConcepto] = useState('');
+  const [vpMonto, setVpMonto] = useState('');
+  const [vpFechaEstimada, setVpFechaEstimada] = useState('');
+  const [vpEstado, setVpEstado] = useState<'Pendiente' | 'Pagado'>('Pendiente');
+  const [isSavingValorParte, setIsSavingValorParte] = useState(false);
+
+  const resetValorParteForm = () => {
+    setEditingValorParteId(null);
+    setVpNumero('');
+    setVpConcepto('');
+    setVpMonto('');
+    setVpFechaEstimada('');
+    setVpEstado('Pendiente');
+  };
+
+  const handleStartEditValorParte = (p: ValorParte) => {
+    setEditingValorParteId(p.id);
+    setVpNumero(p.numero);
+    setVpConcepto(p.concepto || '');
+    setVpMonto(p.monto !== null ? String(p.monto) : '');
+    setVpFechaEstimada(p.fechaEstimada || '');
+    setVpEstado(p.estado);
+    setShowValorParteModal(true);
+  };
+
+  const handleSubmitValorParte = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vpNumero.trim() || vpMonto.trim() === '') return;
+    setIsSavingValorParte(true);
+    try {
+      if (editingValorParteId) {
+        await onUpdateValorParte(editingValorParteId, {
+          numero: vpNumero.trim(),
+          concepto: vpConcepto.trim() || null,
+          monto: Number(vpMonto),
+          fechaEstimada: vpFechaEstimada || null,
+          estado: vpEstado,
+        });
+      } else {
+        await onCreateValorParte({
+          numero: vpNumero.trim(),
+          concepto: vpConcepto.trim() || undefined,
+          monto: Number(vpMonto),
+          fechaEstimada: vpFechaEstimada || undefined,
+          estado: vpEstado,
+        });
+      }
+      setShowValorParteModal(false);
+      resetValorParteForm();
+    } finally {
+      setIsSavingValorParte(false);
+    }
+  };
+
+  const handleToggleValorParteEstado = async (p: ValorParte) => {
+    await onUpdateValorParte(p.id, { estado: p.estado === 'Pagado' ? 'Pendiente' : 'Pagado' });
+  };
+
+  const handleDeleteValorParteClick = async (id: string) => {
+    if (!window.confirm('¿Eliminar esta parte del valor? Esta acción no se puede deshacer.')) return;
+    await onDeleteValorParte(id);
+  };
+
   const [reportFilterStatus, setReportFilterStatus] = useState<string>('all');
   const [reportSearchQuery, setReportSearchQuery] = useState('');
   const [isManagingTypes, setIsManagingTypes] = useState(false);
@@ -349,6 +429,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     .sort((a, b) => (a.fechaInicial ?? '').localeCompare(b.fechaInicial ?? ''))
     .pop();
   const valorActual = latestAdicion ? latestAdicion.valorActual : project.valorInicial;
+  const sumaValorPartes = valorPartes.reduce((acc, p) => acc + p.monto, 0);
 
   const formatCurrency = (value: number | null | undefined) => {
     if (value === null || value === undefined) return 'Sin definir';
@@ -803,6 +884,91 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 </div>
               </div>
             )}
+
+            {/* Partes del Valor: subdivisión manual del valor en N partes
+                por monto (plan de desembolsos) -- independiente de los
+                informes reales de tipo "Desembolso". */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+                  Partes del Valor {valorPartes.length > 0 ? `(${valorPartes.length})` : ''}
+                </span>
+                {canEdit('projects') && (
+                  <button
+                    type="button"
+                    onClick={() => { resetValorParteForm(); setShowValorParteModal(true); }}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+                  >
+                    <Plus className="w-3 h-3" /> Agregar parte
+                  </button>
+                )}
+              </div>
+
+              {valorPartes.length === 0 ? (
+                <p className="text-slate-400 py-3 text-center border border-dashed border-slate-200 rounded-lg">
+                  El valor del proyecto no se ha dividido en partes todavía.
+                </p>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    {valorPartes.map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex flex-wrap items-center justify-between gap-2 p-2 bg-white border border-slate-200 rounded-lg"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-mono font-bold text-slate-800 shrink-0">{p.numero}</span>
+                          {p.concepto && <span className="text-slate-600 truncate">{p.concepto}</span>}
+                          {p.fechaEstimada && <span className="text-slate-400 shrink-0">{p.fechaEstimada}</span>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="font-bold text-slate-800">{formatCurrency(p.monto)}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleValorParteEstado(p)}
+                            className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                              p.estado === 'Pagado' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                            }`}
+                          >
+                            {p.estado}
+                          </button>
+                          {canEdit('projects') && (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditValorParte(p)}
+                                className="text-slate-400 hover:text-indigo-600"
+                                title="Editar parte"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteValorParteClick(p.id)}
+                                className="text-slate-400 hover:text-rose-600"
+                                title="Eliminar parte"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
+                    <span className="text-slate-500">Suma de las partes</span>
+                    <span className="font-bold text-slate-800">{formatCurrency(sumaValorPartes)}</span>
+                  </div>
+                  {valorActual !== null && Math.abs(sumaValorPartes - valorActual) > 0.5 && (
+                    <p className="mt-1 text-[10.5px] text-amber-600">
+                      La suma de las partes ({formatCurrency(sumaValorPartes)}) no coincide con el Valor Actual ({formatCurrency(valorActual)}).
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -1565,6 +1731,98 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSavingModificatorio ? 'Guardando...' : editingModificatorioId ? 'Guardar Cambios' : 'Crear Modificatorio'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Parte del Valor -- crear o editar según editingValorParteId */}
+      {showValorParteModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-indigo-600" />
+                {editingValorParteId ? 'Editar Parte del Valor' : 'Nueva Parte del Valor'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setShowValorParteModal(false); resetValorParteForm(); }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitValorParte} className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Número</label>
+                  <input
+                    type="text"
+                    required
+                    value={vpNumero}
+                    onChange={(e) => setVpNumero(e.target.value)}
+                    placeholder="Ej: Parte 1"
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Monto</label>
+                  <CurrencyInput value={vpMonto} onChange={setVpMonto} placeholder="Ej: 2.000.000.000" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Concepto (opcional)</label>
+                <input
+                  type="text"
+                  value={vpConcepto}
+                  onChange={(e) => setVpConcepto(e.target.value)}
+                  placeholder="Ej: Anticipo, Insumos fase 1..."
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Fecha estimada</label>
+                  <input
+                    type="date"
+                    value={vpFechaEstimada}
+                    onChange={(e) => setVpFechaEstimada(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Estado</label>
+                  <select
+                    value={vpEstado}
+                    onChange={(e) => setVpEstado(e.target.value as 'Pendiente' | 'Pagado')}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  >
+                    <option value="Pendiente">Pendiente</option>
+                    <option value="Pagado">Pagado</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => { setShowValorParteModal(false); resetValorParteForm(); }}
+                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingValorParte}
+                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSavingValorParte ? 'Guardando...' : editingValorParteId ? 'Guardar Cambios' : 'Crear Parte'}
                 </button>
               </div>
             </form>

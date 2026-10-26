@@ -259,3 +259,16 @@ export interface ReturnAttachmentInput {
   mimeType: string;
   contentBase64: string;
 }
+
+// Subdivisión manual del Valor del Proyecto en N partes por monto (plan de
+// desembolsos) -- independiente de los Informes de tipo "Desembolso", que
+// son radicados reales; esto es la planeación de cómo se reparte la plata.
+export interface ValorParte {
+  id: string;
+  proyectoId: string;
+  numero: string;
+  concepto: string | null;
+  monto: number;
+  fechaEstimada: string | null;
+  estado: 'Pendiente' | 'Pagado';
+}

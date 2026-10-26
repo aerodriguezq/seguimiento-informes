@@ -852,6 +852,96 @@ export default async function handler(
       return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
     }
 
+    // Partes del Valor (plan de desembolsos): subdivisión manual del Valor
+    // del Proyecto en N partes por monto, cada una con concepto, fecha
+    // estimada y estado Pendiente/Pagado -- independiente de los informes
+    // reales de tipo "Desembolso".
+    if (request.method === 'GET' && request.query.valorPartes === 'list') {
+      const projectId = Number(request.query.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      const rows = await sql`
+        SELECT parte_id AS id, proyecto_id AS "proyectoId", numero, concepto, monto,
+          TO_CHAR(fecha_estimada, 'YYYY-MM-DD') AS "fechaEstimada", estado
+        FROM proyecto_valor_partes WHERE proyecto_id = ${projectId}
+        ORDER BY fecha_estimada ASC NULLS LAST, parte_id ASC
+      `;
+      return response.status(200).json({ data: rows, meta: { total: rows.length }, errors: [] });
+    }
+
+    if (request.method === 'POST' && request.body?.kind === 'valorParteCreate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const { projectId, numero, concepto, monto, fechaEstimada, estado } = request.body?.data ?? {};
+      const pid = Number(projectId);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      if (!numero || !String(numero).trim()) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El número de la parte es obligatorio.'] });
+      }
+      if (monto === undefined || monto === null || monto === '' || Number.isNaN(Number(monto))) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El monto de la parte es obligatorio.'] });
+      }
+      const rows = await sql`
+        INSERT INTO proyecto_valor_partes (proyecto_id, numero, concepto, monto, fecha_estimada, estado)
+        VALUES (
+          ${pid}, ${String(numero).trim()}, ${concepto || null}, ${Number(monto)},
+          ${fechaEstimada || null}, ${estado && String(estado).trim() ? String(estado).trim() : 'Pendiente'}
+        )
+        RETURNING parte_id AS id, proyecto_id AS "proyectoId", numero, concepto, monto,
+          TO_CHAR(fecha_estimada, 'YYYY-MM-DD') AS "fechaEstimada", estado
+      `;
+      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'PATCH' && request.body?.kind === 'valorParteUpdate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const parteId = Number(request.body?.id);
+      if (!Number.isInteger(parteId) || parteId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la parte es obligatorio.'] });
+      }
+      const current = (await sql`SELECT * FROM proyecto_valor_partes WHERE parte_id = ${parteId}`) as any[];
+      if (!current[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Parte no encontrada.'] });
+      }
+      const body = request.body?.data ?? {};
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+      const numero = has('numero') ? String(body.numero).trim() : current[0].numero;
+      const concepto = has('concepto') ? (body.concepto || null) : current[0].concepto;
+      const monto = has('monto') ? Number(body.monto) : current[0].monto;
+      const fechaEstimada = has('fechaEstimada') ? (body.fechaEstimada || null) : current[0].fecha_estimada;
+      const estado = has('estado') ? String(body.estado).trim() : current[0].estado;
+
+      const rows = await sql`
+        UPDATE proyecto_valor_partes
+        SET numero = ${numero}, concepto = ${concepto}, monto = ${monto}, fecha_estimada = ${fechaEstimada}, estado = ${estado}
+        WHERE parte_id = ${parteId}
+        RETURNING parte_id AS id, proyecto_id AS "proyectoId", numero, concepto, monto,
+          TO_CHAR(fecha_estimada, 'YYYY-MM-DD') AS "fechaEstimada", estado
+      `;
+      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'DELETE' && request.query.valorParte) {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const parteId = Number(request.query.valorParte);
+      if (!Number.isInteger(parteId) || parteId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la parte es obligatorio.'] });
+      }
+      const deleted = await sql`DELETE FROM proyecto_valor_partes WHERE parte_id = ${parteId} RETURNING parte_id AS id`;
+      if (!deleted[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Parte no encontrada.'] });
+      }
+      return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+    }
+
     if (request.method === 'DELETE') {
       const projectId = Number(request.query.id);
 

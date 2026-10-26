@@ -14,6 +14,7 @@ import {
   Empresa,
   Rol,
   AreaConsolida,
+  ValorParte,
   PeticionesConfig,
   EmailCandidate,
   ReturnAttachmentInput,
@@ -108,6 +109,18 @@ function mapModificatorio(m: any): Modificatorio {
   };
 }
 
+function mapValorParte(p: any): ValorParte {
+  return {
+    id: String(p.id),
+    proyectoId: String(p.proyectoId),
+    numero: p.numero,
+    concepto: p.concepto || null,
+    monto: Number(p.monto),
+    fechaEstimada: p.fechaEstimada || null,
+    estado: p.estado === 'Pagado' ? 'Pagado' : 'Pendiente',
+  };
+}
+
 function mapAlert(a: any): ScheduledAlert {
   return {
     id: String(a.id),
@@ -188,6 +201,7 @@ export default function App() {
   const [peticionesConfig, setPeticionesConfig] = useState<PeticionesConfig>({ driveRootFolderId: null, driveRootFolderUrl: null });
   const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
   const [currentProjectModificatorios, setCurrentProjectModificatorios] = useState<Modificatorio[]>([]);
+  const [currentProjectValorPartes, setCurrentProjectValorPartes] = useState<ValorParte[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
@@ -326,25 +340,29 @@ export default function App() {
       setReports([]);
       setAlerts([]);
       setCurrentProjectModificatorios([]);
+      setCurrentProjectValorPartes([]);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const [reportsResponse, alertsResponse, modificatoriosResponse] = await Promise.all([
+        const [reportsResponse, alertsResponse, modificatoriosResponse, valorPartesResponse] = await Promise.all([
           fetch(`/api/reports?projectId=${currentProjectId}`),
           fetch(`/api/alerts?projectId=${currentProjectId}`),
           fetch(`/api/projects?modificatorios=list&projectId=${currentProjectId}`),
+          fetch(`/api/projects?valorPartes=list&projectId=${currentProjectId}`),
         ]);
         const reportsPayload = await reportsResponse.json();
         const alertsPayload = await alertsResponse.json();
         const modificatoriosPayload = await modificatoriosResponse.json();
+        const valorPartesPayload = await valorPartesResponse.json();
         if (!reportsResponse.ok) throw new Error(reportsPayload.errors?.[0] || 'No fue posible consultar los informes.');
         if (!alertsResponse.ok) throw new Error(alertsPayload.errors?.[0] || 'No fue posible consultar las alertas.');
         if (cancelled) return;
         setReports(reportsPayload.data.map(mapReport));
         setAlerts(alertsPayload.data.map(mapAlert));
         setCurrentProjectModificatorios(modificatoriosResponse.ok ? modificatoriosPayload.data.map(mapModificatorio) : []);
+        setCurrentProjectValorPartes(valorPartesResponse.ok ? valorPartesPayload.data.map(mapValorParte) : []);
       } catch (error) {
         if (!cancelled) {
           showToast(error instanceof Error ? error.message : 'No fue posible cargar los informes y alertas de este proyecto.', 'info');
@@ -489,6 +507,50 @@ export default function App() {
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el modificatorio.');
     await refetchModificatorios();
     showToast('Modificatorio eliminado.', 'success');
+  };
+
+  const refetchValorPartes = async () => {
+    const response = await fetch(`/api/projects?valorPartes=list&projectId=${currentProjectId}`);
+    const payload = await response.json();
+    if (response.ok) {
+      setCurrentProjectValorPartes(payload.data.map(mapValorParte));
+    }
+  };
+
+  const handleCreateValorParte = async (data: {
+    numero: string; concepto?: string; monto: number; fechaEstimada?: string; estado?: string;
+  }) => {
+    const response = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'valorParteCreate', data: { projectId: Number(currentProjectId), ...data } }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar la parte.');
+    await refetchValorPartes();
+    showToast('Parte del valor guardada.', 'success');
+  };
+
+  const handleUpdateValorParte = async (id: string, data: Partial<{
+    numero: string; concepto: string | null; monto: number; fechaEstimada: string | null; estado: string;
+  }>) => {
+    const response = await fetch('/api/projects', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'valorParteUpdate', id: Number(id), data }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar la parte.');
+    await refetchValorPartes();
+    showToast('Parte del valor actualizada.', 'success');
+  };
+
+  const handleDeleteValorParte = async (id: string) => {
+    const response = await fetch(`/api/projects?valorParte=${id}`, { method: 'DELETE' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar la parte.');
+    await refetchValorPartes();
+    showToast('Parte del valor eliminada.', 'success');
   };
 
   const handleSubmitNewReport = async (input: {
@@ -1483,6 +1545,10 @@ export default function App() {
               onCreateModificatorio={handleCreateModificatorio}
               onUpdateModificatorio={handleUpdateModificatorio}
               onDeleteModificatorio={handleDeleteModificatorio}
+              valorPartes={currentProjectValorPartes}
+              onCreateValorParte={handleCreateValorParte}
+              onUpdateValorParte={handleUpdateValorParte}
+              onDeleteValorParte={handleDeleteValorParte}
             />
           )}
 
