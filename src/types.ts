@@ -271,6 +271,16 @@ export interface Aportante {
   monto: number;
 }
 
+// Entidades que participan del convenio del proyecto (ej. Ejecutor,
+// Cofinanciador, Supervisor, Beneficiario) -- distinto de Aportantes, que
+// reparte el valor; esto es solo el listado de quién hace parte del convenio.
+export interface ConvenioParticipante {
+  id: string;
+  proyectoId: string;
+  nombre: string;
+  rol: string | null;
+}
+
 // Subdivisión manual del Valor del Proyecto en N partes por monto (plan de
 // desembolsos) -- independiente de los Informes de tipo "Desembolso", que
 // son radicados reales; esto es la planeación de cómo se reparte la plata.

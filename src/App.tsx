@@ -16,6 +16,7 @@ import {
   AreaConsolida,
   ValorParte,
   Aportante,
+  ConvenioParticipante,
   PeticionesConfig,
   EmailCandidate,
   ReturnAttachmentInput,
@@ -131,6 +132,15 @@ function mapAportante(a: any): Aportante {
   };
 }
 
+function mapConvenioParticipante(p: any): ConvenioParticipante {
+  return {
+    id: String(p.id),
+    proyectoId: String(p.proyectoId),
+    nombre: p.nombre,
+    rol: p.rol || null,
+  };
+}
+
 function mapAlert(a: any): ScheduledAlert {
   return {
     id: String(a.id),
@@ -213,6 +223,7 @@ export default function App() {
   const [currentProjectModificatorios, setCurrentProjectModificatorios] = useState<Modificatorio[]>([]);
   const [currentProjectValorPartes, setCurrentProjectValorPartes] = useState<ValorParte[]>([]);
   const [currentProjectAportantes, setCurrentProjectAportantes] = useState<Aportante[]>([]);
+  const [currentProjectConvenioParticipantes, setCurrentProjectConvenioParticipantes] = useState<ConvenioParticipante[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
@@ -353,23 +364,26 @@ export default function App() {
       setCurrentProjectModificatorios([]);
       setCurrentProjectValorPartes([]);
       setCurrentProjectAportantes([]);
+      setCurrentProjectConvenioParticipantes([]);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const [reportsResponse, alertsResponse, modificatoriosResponse, valorPartesResponse, aportantesResponse] = await Promise.all([
+        const [reportsResponse, alertsResponse, modificatoriosResponse, valorPartesResponse, aportantesResponse, convenioResponse] = await Promise.all([
           fetch(`/api/reports?projectId=${currentProjectId}`),
           fetch(`/api/alerts?projectId=${currentProjectId}`),
           fetch(`/api/projects?modificatorios=list&projectId=${currentProjectId}`),
           fetch(`/api/projects?valorPartes=list&projectId=${currentProjectId}`),
           fetch(`/api/projects?aportantes=list&projectId=${currentProjectId}`),
+          fetch(`/api/projects?convenioParticipantes=list&projectId=${currentProjectId}`),
         ]);
         const reportsPayload = await reportsResponse.json();
         const alertsPayload = await alertsResponse.json();
         const modificatoriosPayload = await modificatoriosResponse.json();
         const valorPartesPayload = await valorPartesResponse.json();
         const aportantesPayload = await aportantesResponse.json();
+        const convenioPayload = await convenioResponse.json();
         if (!reportsResponse.ok) throw new Error(reportsPayload.errors?.[0] || 'No fue posible consultar los informes.');
         if (!alertsResponse.ok) throw new Error(alertsPayload.errors?.[0] || 'No fue posible consultar las alertas.');
         if (cancelled) return;
@@ -378,6 +392,7 @@ export default function App() {
         setCurrentProjectModificatorios(modificatoriosResponse.ok ? modificatoriosPayload.data.map(mapModificatorio) : []);
         setCurrentProjectValorPartes(valorPartesResponse.ok ? valorPartesPayload.data.map(mapValorParte) : []);
         setCurrentProjectAportantes(aportantesResponse.ok ? aportantesPayload.data.map(mapAportante) : []);
+        setCurrentProjectConvenioParticipantes(convenioResponse.ok ? convenioPayload.data.map(mapConvenioParticipante) : []);
       } catch (error) {
         if (!cancelled) {
           showToast(error instanceof Error ? error.message : 'No fue posible cargar los informes y alertas de este proyecto.', 'info');
@@ -606,6 +621,46 @@ export default function App() {
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el aportante.');
     await refetchAportantes();
     showToast('Aportante eliminado.', 'success');
+  };
+
+  const refetchConvenioParticipantes = async () => {
+    const response = await fetch(`/api/projects?convenioParticipantes=list&projectId=${currentProjectId}`);
+    const payload = await response.json();
+    if (response.ok) {
+      setCurrentProjectConvenioParticipantes(payload.data.map(mapConvenioParticipante));
+    }
+  };
+
+  const handleCreateConvenioParticipante = async (data: { nombre: string; rol?: string }) => {
+    const response = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'convenioParticipanteCreate', data: { projectId: Number(currentProjectId), ...data } }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el participante.');
+    await refetchConvenioParticipantes();
+    showToast('Participante del convenio guardado.', 'success');
+  };
+
+  const handleUpdateConvenioParticipante = async (id: string, data: Partial<{ nombre: string; rol: string | null }>) => {
+    const response = await fetch('/api/projects', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'convenioParticipanteUpdate', id: Number(id), data }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el participante.');
+    await refetchConvenioParticipantes();
+    showToast('Participante del convenio actualizado.', 'success');
+  };
+
+  const handleDeleteConvenioParticipante = async (id: string) => {
+    const response = await fetch(`/api/projects?convenioParticipante=${id}`, { method: 'DELETE' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el participante.');
+    await refetchConvenioParticipantes();
+    showToast('Participante del convenio eliminado.', 'success');
   };
 
   const handleSubmitNewReport = async (input: {
@@ -1608,6 +1663,10 @@ export default function App() {
               onCreateAportante={handleCreateAportante}
               onUpdateAportante={handleUpdateAportante}
               onDeleteAportante={handleDeleteAportante}
+              convenioParticipantes={currentProjectConvenioParticipantes}
+              onCreateConvenioParticipante={handleCreateConvenioParticipante}
+              onUpdateConvenioParticipante={handleUpdateConvenioParticipante}
+              onDeleteConvenioParticipante={handleDeleteConvenioParticipante}
             />
           )}
 

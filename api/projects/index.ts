@@ -1021,6 +1021,82 @@ export default async function handler(
       return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
     }
 
+    // Convenio: entidades que participan del convenio del proyecto (Ejecutor,
+    // Cofinanciador, Supervisor, Beneficiario, etc.) -- solo el listado de
+    // quién hace parte, sin montos (para eso está Aportantes).
+    if (request.method === 'GET' && request.query.convenioParticipantes === 'list') {
+      const projectId = Number(request.query.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      const rows = await sql`
+        SELECT participante_id AS id, proyecto_id AS "proyectoId", nombre, rol
+        FROM proyecto_convenio_participantes WHERE proyecto_id = ${projectId}
+        ORDER BY participante_id ASC
+      `;
+      return response.status(200).json({ data: rows, meta: { total: rows.length }, errors: [] });
+    }
+
+    if (request.method === 'POST' && request.body?.kind === 'convenioParticipanteCreate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const { projectId, nombre, rol } = request.body?.data ?? {};
+      const pid = Number(projectId);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      if (!nombre || !String(nombre).trim()) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El nombre del participante es obligatorio.'] });
+      }
+      const rows = await sql`
+        INSERT INTO proyecto_convenio_participantes (proyecto_id, nombre, rol)
+        VALUES (${pid}, ${String(nombre).trim()}, ${rol && String(rol).trim() ? String(rol).trim() : null})
+        RETURNING participante_id AS id, proyecto_id AS "proyectoId", nombre, rol
+      `;
+      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'PATCH' && request.body?.kind === 'convenioParticipanteUpdate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const participanteId = Number(request.body?.id);
+      if (!Number.isInteger(participanteId) || participanteId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del participante es obligatorio.'] });
+      }
+      const current = (await sql`SELECT * FROM proyecto_convenio_participantes WHERE participante_id = ${participanteId}`) as any[];
+      if (!current[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Participante no encontrado.'] });
+      }
+      const body = request.body?.data ?? {};
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+      const nombre = has('nombre') ? String(body.nombre).trim() : current[0].nombre;
+      const rol = has('rol') ? (body.rol || null) : current[0].rol;
+
+      const rows = await sql`
+        UPDATE proyecto_convenio_participantes SET nombre = ${nombre}, rol = ${rol}
+        WHERE participante_id = ${participanteId}
+        RETURNING participante_id AS id, proyecto_id AS "proyectoId", nombre, rol
+      `;
+      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'DELETE' && request.query.convenioParticipante) {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const participanteId = Number(request.query.convenioParticipante);
+      if (!Number.isInteger(participanteId) || participanteId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del participante es obligatorio.'] });
+      }
+      const deleted = await sql`DELETE FROM proyecto_convenio_participantes WHERE participante_id = ${participanteId} RETURNING participante_id AS id`;
+      if (!deleted[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Participante no encontrado.'] });
+      }
+      return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+    }
+
     if (request.method === 'DELETE') {
       const projectId = Number(request.query.id);
 
