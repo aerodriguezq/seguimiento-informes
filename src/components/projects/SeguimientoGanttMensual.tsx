@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarRange, ChevronDown, ChevronUp } from 'lucide-react';
 
-type GanttSubactividad = {
+export type GanttSubactividad = {
   actividad: string;
   descripcion: string;
   subActividad: string;
@@ -11,12 +11,12 @@ type GanttSubactividad = {
   ejecutado: number[];
 };
 type ResumenFinanciero = { totalPlanificado: number; planificadoAcumulado: number[]; ejecutadoAcumulado: number[] };
-type GanttData = { meses: string[]; fisico: GanttSubactividad[]; financiero: GanttSubactividad[] | null; resumenFinanciero: ResumenFinanciero | null };
+export type GanttData = { meses: string[]; fisico: GanttSubactividad[]; financiero: GanttSubactividad[] | null; resumenFinanciero: ResumenFinanciero | null };
 
-type Estado = 'cumplida' | 'adelantada' | 'al_dia' | 'atrasada' | 'inicia_este_mes' | 'aun_no_inicia';
-type Bucket = 'atrasada' | 'al_dia' | 'por_iniciar';
+export type Estado = 'cumplida' | 'adelantada' | 'al_dia' | 'atrasada' | 'inicia_este_mes' | 'aun_no_inicia';
+export type Bucket = 'atrasada' | 'al_dia' | 'por_iniciar';
 
-const ESTADO_META: Record<Estado, { label: string; color: string; bg: string; bucket: Bucket }> = {
+export const ESTADO_META: Record<Estado, { label: string; color: string; bg: string; bucket: Bucket }> = {
   cumplida: { label: 'Cumplida', color: '#64748b', bg: '#f1f5f9', bucket: 'al_dia' },
   adelantada: { label: 'Adelantada', color: '#2563eb', bg: '#eff6ff', bucket: 'al_dia' },
   al_dia: { label: 'Al día', color: '#059669', bg: '#ecfdf5', bucket: 'al_dia' },
@@ -34,11 +34,11 @@ const ACCENT = '#0f5c8c';
 const ACCENT_LIGHT = '#e6f0f7';
 const MESES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-function monthLabel(iso: string): string {
+export function monthLabel(iso: string): string {
   const [, m] = iso.split('-');
   return MESES_CORTO[Number(m) - 1] || iso;
 }
-function monthLabelLong(iso: string): string {
+export function monthLabelLong(iso: string): string {
   const [y, m] = iso.split('-');
   return `${monthLabel(iso)} ${y}`;
 }
@@ -50,7 +50,7 @@ function sumAll(arr: number[]): number {
   return arr.reduce((a, b) => a + b, 0);
 }
 
-function computeMonthPosition(meses: string[]): { currentIdx: number; closedCount: number } {
+export function computeMonthPosition(meses: string[]): { currentIdx: number; closedCount: number } {
   if (meses.length === 0) return { currentIdx: 0, closedCount: 0 };
   const now = new Date();
   const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
@@ -59,7 +59,7 @@ function computeMonthPosition(meses: string[]): { currentIdx: number; closedCoun
   return { currentIdx, closedCount: currentIdx };
 }
 
-function computeEstado(s: GanttSubactividad, closedCount: number, currentIdx: number): Estado {
+export function computeEstado(s: GanttSubactividad, closedCount: number, currentIdx: number): Estado {
   const ejecTotal = sumAll(s.ejecutado);
   if (s.meta > 0 && ejecTotal >= s.meta) return 'cumplida';
   const planCum = sumRange(s.plan, closedCount);

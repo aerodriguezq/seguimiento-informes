@@ -4,6 +4,7 @@ import { calculateDaysRemaining, getSemaforoStatus, STATUS_SEQUENCE } from '../.
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
 import { PipelineDashboard } from './PipelineDashboard';
+import { DashboardGanttResumen } from './DashboardGanttResumen';
 import {
   AlertCircle,
   AlertTriangle,
@@ -193,6 +194,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </section>
         )}
       </div>
+
+      {currentProjectId && <DashboardGanttResumen projectId={currentProjectId} onOpenSeguimiento={onOpenSeguimiento} />}
 
       {seguimientoKpis && Object.keys(seguimientoKpis).length > 0 && (
         <section>
