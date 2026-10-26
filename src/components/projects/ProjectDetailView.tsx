@@ -20,6 +20,7 @@ import {
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
 import { MunicipiosMultiSelect } from '../common/MunicipiosMultiSelect';
+import { CurrencyInput } from '../common/CurrencyInput';
 import { ScheduleFrequencyField } from '../alerts/ScheduleFrequencyField';
 import { SeguimientoCronograma } from './SeguimientoCronograma';
 import { ErrorBoundary } from '../common/ErrorBoundary';
@@ -733,12 +734,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   <Wallet className="w-3.5 h-3.5" /> Valor Inicial del Contrato
                 </span>
                 {isEditingInfo ? (
-                  <input
-                    type="number"
+                  <CurrencyInput
                     value={infoValorInicial}
-                    onChange={(e) => setInfoValorInicial(e.target.value)}
-                    placeholder="Ej: 1480000000"
-                    className="w-full px-2 py-1 border border-slate-200 rounded outline-none focus:border-indigo-500"
+                    onChange={setInfoValorInicial}
+                    placeholder="Ej: 1.480.000.000"
+                    className="w-full pl-5 pr-2 py-1 border border-slate-200 rounded outline-none focus:border-indigo-500"
                   />
                 ) : (
                   <div className="font-semibold text-slate-800">{formatCurrency(project.valorInicial)}</div>
@@ -1425,12 +1425,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               {modTipo === 'Adición' && !editingModificatorioId && (
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Monto de la adición</label>
-                  <input
-                    type="number"
+                  <CurrencyInput
                     value={modMontoAdicion}
-                    onChange={(e) => setModMontoAdicion(e.target.value)}
-                    placeholder="Ej: 4116692492"
-                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                    onChange={setModMontoAdicion}
+                    placeholder="Ej: 4.116.692.492"
                   />
                   <p className="mt-1 text-[10.5px] text-slate-400">
                     Se suma al valor actual vigente ({formatCurrency(valorActual)})
@@ -1445,21 +1443,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">Valor inicial (antes)</label>
-                    <input
-                      type="number"
-                      value={modValorInicialEdit}
-                      onChange={(e) => setModValorInicialEdit(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                    />
+                    <CurrencyInput value={modValorInicialEdit} onChange={setModValorInicialEdit} />
                   </div>
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">Valor actual (después)</label>
-                    <input
-                      type="number"
-                      value={modValorActualEdit}
-                      onChange={(e) => setModValorActualEdit(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                    />
+                    <CurrencyInput value={modValorActualEdit} onChange={setModValorActualEdit} />
                   </div>
                   <p className="col-span-2 text-[10.5px] text-slate-400">
                     Corrección directa del registro histórico -- no se recalcula a partir de otras adiciones.
