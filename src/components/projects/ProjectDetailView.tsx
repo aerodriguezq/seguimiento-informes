@@ -167,23 +167,42 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   };
 
   const [showModificatorioModal, setShowModificatorioModal] = useState(false);
+  const [editingModificatorioId, setEditingModificatorioId] = useState<string | null>(null);
   const [modNumero, setModNumero] = useState('');
   const [modTipo, setModTipo] = useState<'Adición' | 'Prórroga' | 'Suspensión'>('Adición');
   const [modFechaInicial, setModFechaInicial] = useState('');
   const [modFechaFinal, setModFechaFinal] = useState('');
   const [modMontoAdicion, setModMontoAdicion] = useState('');
+  const [modValorInicialEdit, setModValorInicialEdit] = useState('');
+  const [modValorActualEdit, setModValorActualEdit] = useState('');
   const [modTitulo, setModTitulo] = useState('');
   const [modNota, setModNota] = useState('');
   const [isSavingModificatorio, setIsSavingModificatorio] = useState(false);
 
   const resetModificatorioForm = () => {
+    setEditingModificatorioId(null);
     setModNumero('');
     setModTipo('Adición');
     setModFechaInicial('');
     setModFechaFinal('');
     setModMontoAdicion('');
+    setModValorInicialEdit('');
+    setModValorActualEdit('');
     setModTitulo('');
     setModNota('');
+  };
+
+  const handleStartEditModificatorio = (m: Modificatorio) => {
+    setEditingModificatorioId(m.id);
+    setModNumero(m.numero);
+    setModTipo(m.tipo as 'Adición' | 'Prórroga' | 'Suspensión');
+    setModFechaInicial(m.fechaInicial || '');
+    setModFechaFinal(m.fechaFinal || '');
+    setModValorInicialEdit(m.valorInicial !== null ? String(m.valorInicial) : '');
+    setModValorActualEdit(m.valorActual !== null ? String(m.valorActual) : '');
+    setModTitulo(m.titulo || '');
+    setModNota(m.nota || '');
+    setShowModificatorioModal(true);
   };
 
   const handleSubmitModificatorio = async (e: React.FormEvent) => {
@@ -191,22 +210,39 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     if (!modNumero.trim()) return;
     setIsSavingModificatorio(true);
     try {
-      // Una Adición SUMA al valor que ya estaba vigente -- no lo reemplaza.
-      // Se guarda el valor antes y después de esta adición para que el
-      // historial quede trazable, pero quien la radica solo escribe el
-      // monto que se está adicionando.
-      const montoAdicion = modTipo === 'Adición' && modMontoAdicion.trim() !== '' ? Number(modMontoAdicion) : undefined;
-      const valorAntes = valorActual ?? 0;
-      await onCreateModificatorio({
-        numero: modNumero.trim(),
-        tipo: modTipo,
-        fechaInicial: modFechaInicial || undefined,
-        fechaFinal: modFechaFinal || undefined,
-        valorInicial: montoAdicion !== undefined ? valorAntes : undefined,
-        valorActual: montoAdicion !== undefined ? valorAntes + montoAdicion : undefined,
-        titulo: modTipo === 'Suspensión' ? modTitulo.trim() || undefined : undefined,
-        nota: modTipo === 'Suspensión' ? modNota.trim() || undefined : undefined,
-      });
+      if (editingModificatorioId) {
+        // Al editar se corrige el registro histórico directo (incluye
+        // valorInicial/valorActual tal cual, sin recalcular la cadena de
+        // adiciones) -- a diferencia de crear, donde se guía con el monto
+        // para no repetir el error de cargar un valor actual menor al inicial.
+        await onUpdateModificatorio(editingModificatorioId, {
+          numero: modNumero.trim(),
+          tipo: modTipo,
+          fechaInicial: modFechaInicial || null,
+          fechaFinal: modFechaFinal || null,
+          valorInicial: modTipo === 'Adición' && modValorInicialEdit.trim() !== '' ? Number(modValorInicialEdit) : null,
+          valorActual: modTipo === 'Adición' && modValorActualEdit.trim() !== '' ? Number(modValorActualEdit) : null,
+          titulo: modTipo === 'Suspensión' ? modTitulo.trim() || null : null,
+          nota: modTipo === 'Suspensión' ? modNota.trim() || null : null,
+        });
+      } else {
+        // Una Adición SUMA al valor que ya estaba vigente -- no lo reemplaza.
+        // Se guarda el valor antes y después de esta adición para que el
+        // historial quede trazable, pero quien la radica solo escribe el
+        // monto que se está adicionando.
+        const montoAdicion = modTipo === 'Adición' && modMontoAdicion.trim() !== '' ? Number(modMontoAdicion) : undefined;
+        const valorAntes = valorActual ?? 0;
+        await onCreateModificatorio({
+          numero: modNumero.trim(),
+          tipo: modTipo,
+          fechaInicial: modFechaInicial || undefined,
+          fechaFinal: modFechaFinal || undefined,
+          valorInicial: montoAdicion !== undefined ? valorAntes : undefined,
+          valorActual: montoAdicion !== undefined ? valorAntes + montoAdicion : undefined,
+          titulo: modTipo === 'Suspensión' ? modTitulo.trim() || undefined : undefined,
+          nota: modTipo === 'Suspensión' ? modNota.trim() || undefined : undefined,
+        });
+      }
       setShowModificatorioModal(false);
       resetModificatorioForm();
     } finally {
@@ -821,14 +857,24 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                     </td>
                     {canEdit('projects') && (
                       <td className="py-3 px-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteModificatorioClick(m.id)}
-                          className="text-rose-500 hover:text-rose-700"
-                          title="Eliminar modificatorio"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="inline-flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditModificatorio(m)}
+                            className="text-slate-400 hover:text-indigo-600"
+                            title="Editar modificatorio"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteModificatorioClick(m.id)}
+                            className="text-rose-500 hover:text-rose-700"
+                            title="Eliminar modificatorio"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -1310,14 +1356,14 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         </div>
       )}
 
-      {/* New Modificatorio Modal */}
+      {/* Modal de Modificatorio -- crear o editar según editingModificatorioId */}
       {showModificatorioModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-indigo-600" />
-                Nuevo Modificatorio
+                {editingModificatorioId ? 'Editar Modificatorio' : 'Nuevo Modificatorio'}
               </h3>
               <button
                 type="button"
@@ -1376,7 +1422,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 </div>
               </div>
 
-              {modTipo === 'Adición' && (
+              {modTipo === 'Adición' && !editingModificatorioId && (
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Monto de la adición</label>
                   <input
@@ -1391,6 +1437,32 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                     {modMontoAdicion.trim() !== '' && !Number.isNaN(Number(modMontoAdicion))
                       ? ` -- nuevo valor actual: ${formatCurrency((valorActual ?? 0) + Number(modMontoAdicion))}`
                       : '.'}
+                  </p>
+                </div>
+              )}
+
+              {modTipo === 'Adición' && editingModificatorioId && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Valor inicial (antes)</label>
+                    <input
+                      type="number"
+                      value={modValorInicialEdit}
+                      onChange={(e) => setModValorInicialEdit(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Valor actual (después)</label>
+                    <input
+                      type="number"
+                      value={modValorActualEdit}
+                      onChange={(e) => setModValorActualEdit(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <p className="col-span-2 text-[10.5px] text-slate-400">
+                    Corrección directa del registro histórico -- no se recalcula a partir de otras adiciones.
                   </p>
                 </div>
               )}
@@ -1432,7 +1504,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   disabled={isSavingModificatorio}
                   className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isSavingModificatorio ? 'Guardando...' : 'Crear Modificatorio'}
+                  {isSavingModificatorio ? 'Guardando...' : editingModificatorioId ? 'Guardar Cambios' : 'Crear Modificatorio'}
                 </button>
               </div>
             </form>
