@@ -884,10 +884,14 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        )}
 
+        {infoTab === 'desembolso' && (
+          <div className="text-xs space-y-5">
             {/* Partes del Valor: subdivisión manual del valor en N partes
                 por monto (plan de desembolsos) -- independiente de los
-                informes reales de tipo "Desembolso". */}
+                informes reales de tipo "Desembolso" listados más abajo. */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
@@ -969,16 +973,16 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 </>
               )}
             </div>
-          </div>
-        )}
 
-        {infoTab === 'desembolso' && (
-          <div className="text-xs">
-            {desembolsoReports.length === 0 ? (
-              <p className="py-6 text-center text-slate-400">
-                No hay informes de tipo "Desembolso" radicados para este proyecto todavía.
-              </p>
-            ) : (
+            <div className="pt-4 border-t border-slate-100">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide block mb-1.5">
+                Informes de Desembolso Radicados
+              </span>
+              {desembolsoReports.length === 0 ? (
+                <p className="py-6 text-center text-slate-400">
+                  No hay informes de tipo "Desembolso" radicados para este proyecto todavía.
+                </p>
+              ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
@@ -1012,6 +1016,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 </table>
               </div>
             )}
+            </div>
           </div>
         )}
       </div>
