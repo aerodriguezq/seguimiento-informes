@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, X, MapPin, CheckCheck } from 'lucide-react';
-import { MUNICIPIOS_COLOMBIA, MunicipioColombia } from '../../data/municipiosColombia';
+import { MUNICIPIOS_COLOMBIA, MunicipioColombia, municipioLabel } from '../../data/municipiosColombia';
 
 function stripAccents(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -29,6 +29,11 @@ type DepartmentGroup = { departamento: string; municipios: MunicipioColombia[] }
 // que se filtra en vivo mientras se escribe y las selecciones quedan como
 // chips removibles, igual al patrón de "Áreas Intervienen" en Peticiones
 // pero con cuadro de búsqueda porque ahí la lista es de miles, no de unas pocas.
+//
+// Se identifica cada municipio por su "etiqueta" (municipioLabel): el
+// nombre solo si es único en el catálogo, o "Nombre (Departamento)" cuando
+// hay más de uno igual (ej. tres "Córdoba" distintos) -- así la selección y
+// las llaves de React nunca chocan entre sí.
 //
 // Dos modos de coincidencia a la vez: por nombre de municipio (rankeado --
 // primero los que EMPIEZAN con lo escrito, luego los que solo lo contienen)
@@ -62,8 +67,8 @@ export const MunicipiosMultiSelect: React.FC<MunicipiosMultiSelectProps> = ({
     if (q.length < MIN_QUERY_LENGTH) {
       // Sin búsqueda (o muy corta todavía): prioriza los ya seleccionados
       // para que sea fácil revisarlos, y completa con los primeros del catálogo.
-      const selected = MUNICIPIOS_COLOMBIA.filter((m) => selectedSet.has(m.municipio));
-      const rest = MUNICIPIOS_COLOMBIA.filter((m) => !selectedSet.has(m.municipio)).slice(0, DEFAULT_LIST_SIZE - selected.length);
+      const selected = MUNICIPIOS_COLOMBIA.filter((m) => selectedSet.has(municipioLabel(m)));
+      const rest = MUNICIPIOS_COLOMBIA.filter((m) => !selectedSet.has(municipioLabel(m))).slice(0, DEFAULT_LIST_SIZE - selected.length);
       return { departmentGroups: [] as DepartmentGroup[], municipioMatches: [...selected, ...rest] };
     }
 
@@ -98,21 +103,22 @@ export const MunicipiosMultiSelect: React.FC<MunicipiosMultiSelectProps> = ({
     return { departmentGroups: groups, municipioMatches: nameMatches.slice(0, MAX_MUNICIPIO_MATCHES) };
   }, [query, selectedSet]);
 
-  const toggle = (municipio: string) => {
-    if (selectedSet.has(municipio)) {
-      onChange(value.filter((v) => v !== municipio));
+  const toggle = (m: MunicipioColombia) => {
+    const label = municipioLabel(m);
+    if (selectedSet.has(label)) {
+      onChange(value.filter((v) => v !== label));
     } else {
-      onChange([...value, municipio]);
+      onChange([...value, label]);
     }
   };
 
-  const remove = (municipio: string) => {
-    onChange(value.filter((v) => v !== municipio));
+  const remove = (label: string) => {
+    onChange(value.filter((v) => v !== label));
   };
 
   const addAllFromDepartment = (group: DepartmentGroup) => {
-    const names = group.municipios.map((m) => m.municipio);
-    const merged = new Set([...value, ...names]);
+    const labels = group.municipios.map(municipioLabel);
+    const merged = new Set([...value, ...labels]);
     onChange(Array.from(merged));
   };
 
@@ -122,18 +128,18 @@ export const MunicipiosMultiSelect: React.FC<MunicipiosMultiSelectProps> = ({
     <div ref={containerRef} className="relative">
       {value.length > 0 && (
         <div className="mb-1.5 flex flex-wrap gap-1.5">
-          {value.map((m) => (
+          {value.map((label) => (
             <span
-              key={m}
+              key={label}
               className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[11px] font-medium text-indigo-800"
             >
               <MapPin className="w-2.5 h-2.5" />
-              {m}
+              {label}
               <button
                 type="button"
-                onClick={() => remove(m)}
+                onClick={() => remove(label)}
                 className="ml-0.5 text-indigo-400 hover:text-indigo-700"
-                aria-label={`Quitar ${m}`}
+                aria-label={`Quitar ${label}`}
               >
                 <X className="w-3 h-3" />
               </button>
@@ -150,6 +156,7 @@ export const MunicipiosMultiSelect: React.FC<MunicipiosMultiSelectProps> = ({
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setIsOpen(true)}
           placeholder={placeholder}
+          autoComplete="off"
           className="w-full pl-8 pr-2 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 text-xs"
         />
       </div>
@@ -165,7 +172,7 @@ export const MunicipiosMultiSelect: React.FC<MunicipiosMultiSelectProps> = ({
           )}
 
           {departmentGroups.map((group) => {
-            const allSelected = group.municipios.every((m) => selectedSet.has(m.municipio));
+            const allSelected = group.municipios.every((m) => selectedSet.has(municipioLabel(m)));
             return (
               <div key={group.departamento} className="border-b border-slate-100">
                 <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-50">
@@ -183,12 +190,13 @@ export const MunicipiosMultiSelect: React.FC<MunicipiosMultiSelectProps> = ({
                   </button>
                 </div>
                 {group.municipios.map((m) => {
-                  const checked = selectedSet.has(m.municipio);
+                  const label = municipioLabel(m);
+                  const checked = selectedSet.has(label);
                   return (
                     <button
-                      key={m.municipio}
+                      key={label}
                       type="button"
-                      onClick={() => toggle(m.municipio)}
+                      onClick={() => toggle(m)}
                       className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-50 ${checked ? 'bg-indigo-50/60' : ''}`}
                     >
                       <span className={checked ? 'font-semibold text-indigo-800' : 'text-slate-800'}>{m.municipio}</span>
@@ -201,12 +209,13 @@ export const MunicipiosMultiSelect: React.FC<MunicipiosMultiSelectProps> = ({
           })}
 
           {municipioMatches.map((m) => {
-            const checked = selectedSet.has(m.municipio);
+            const label = municipioLabel(m);
+            const checked = selectedSet.has(label);
             return (
               <button
-                key={m.municipio}
+                key={label}
                 type="button"
-                onClick={() => toggle(m.municipio)}
+                onClick={() => toggle(m)}
                 className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-50 ${checked ? 'bg-indigo-50/60' : ''}`}
               >
                 <span className="truncate">

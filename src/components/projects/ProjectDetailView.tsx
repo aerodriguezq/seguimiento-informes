@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Project,
   Report,
@@ -138,6 +138,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const [infoSupervisor, setInfoSupervisor] = useState(project.supervisor ?? '');
   const [infoValorInicial, setInfoValorInicial] = useState(project.valorInicial !== null ? String(project.valorInicial) : '');
   const [isSavingInfo, setIsSavingInfo] = useState(false);
+  const selectedMunicipios = useMemo(
+    () => (infoMunicipios ? infoMunicipios.split(',').map((s) => s.trim()).filter(Boolean) : []),
+    [infoMunicipios]
+  );
 
   const handleSaveInfo = async () => {
     setIsSavingInfo(true);
@@ -648,7 +652,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               </span>
               {isEditingInfo ? (
                 <MunicipiosMultiSelect
-                  value={infoMunicipios ? infoMunicipios.split(',').map((s) => s.trim()).filter(Boolean) : []}
+                  value={selectedMunicipios}
                   onChange={(next) => setInfoMunicipios(next.join(', '))}
                 />
               ) : project.municipios ? (

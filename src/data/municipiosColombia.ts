@@ -203,7 +203,6 @@ export const MUNICIPIOS_COLOMBIA: MunicipioColombia[] = [
   { municipio: 'Charta', departamento: 'Santander' },
   { municipio: 'Chía', departamento: 'Cundinamarca' },
   { municipio: 'Chibolo', departamento: 'Magdalena' },
-  { municipio: 'Chibolo', departamento: 'Magdalena' },
   { municipio: 'Chigorodó', departamento: 'Antioquia' },
   { municipio: 'Chima', departamento: 'Santander' },
   { municipio: 'Chimá', departamento: 'Córdoba' },
@@ -1113,3 +1112,19 @@ export const MUNICIPIOS_COLOMBIA: MunicipioColombia[] = [
   { municipio: 'Zipaquirá', departamento: 'Cundinamarca' },
   { municipio: 'Zona Bananera', departamento: 'Magdalena' },
 ];
+
+// 64 nombres de municipio se repiten en más de un departamento (ej. hay tres
+// "Córdoba": Bolívar, Nariño y Quindío) -- usar solo el nombre como
+// identificador/llave para esos casos mezclaba la selección entre
+// municipios distintos. Esta cuenta decide cuándo hace falta aclarar el
+// departamento y cuándo el nombre solo ya es inequívoco.
+const NOMBRE_COUNT = MUNICIPIOS_COLOMBIA.reduce<Record<string, number>>((acc, m) => {
+  acc[m.municipio] = (acc[m.municipio] || 0) + 1;
+  return acc;
+}, {});
+
+// Etiqueta a mostrar/guardar para un municipio: el nombre solo si es único
+// en el catálogo, o "Nombre (Departamento)" si hay más de uno igual.
+export function municipioLabel(m: MunicipioColombia): string {
+  return NOMBRE_COUNT[m.municipio] > 1 ? `${m.municipio} (${m.departamento})` : m.municipio;
+}
