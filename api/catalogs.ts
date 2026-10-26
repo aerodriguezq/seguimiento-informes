@@ -272,6 +272,9 @@ export default async function handler(
       }
 
       if (request.query.kind === 'areaConsolida') {
+        if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+        }
         const areaId = Number(request.query.id);
         if (!Number.isInteger(areaId) || areaId <= 0) {
           return response.status(400).json({ data: null, meta: {}, errors: ['El id del área es obligatorio.'] });
@@ -279,6 +282,78 @@ export default async function handler(
         const deletedArea = await sql`DELETE FROM areas_consolida WHERE area_id = ${areaId} RETURNING area_id AS id`;
         if (!deletedArea[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Área no encontrada.'] });
         return response.status(200).json({ data: deletedArea[0], meta: {}, errors: [] });
+      }
+
+      if (request.query.kind === 'reportType') {
+        if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+        }
+        const typeId = Number(request.query.id);
+        if (!Number.isInteger(typeId) || typeId <= 0) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id del tipo de informe es obligatorio.'] });
+        }
+        const [refs] = (await sql`
+          SELECT
+            (SELECT COUNT(*) FROM informes WHERE tipo_informe_id = ${typeId}) AS "reportRefs",
+            (SELECT COUNT(*) FROM proyecto_tipo_informe WHERE tipo_informe_id = ${typeId}) AS "projectRefs",
+            (SELECT COUNT(*) FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId}) AS "stepRefs"
+        `) as any[];
+        const totalRefs = Number(refs.reportRefs) + Number(refs.projectRefs) + Number(refs.stepRefs);
+        if (totalRefs > 0) {
+          return response.status(409).json({
+            data: null, meta: {},
+            errors: [`No se puede eliminar: este tipo de informe está vinculado a ${totalRefs} registro(s) (informes, proyectos o pasos de flujo).`],
+          });
+        }
+        const deletedType = await sql`DELETE FROM tipos_informe WHERE tipo_informe_id = ${typeId} RETURNING tipo_informe_id AS id`;
+        if (!deletedType[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Tipo de informe no encontrado.'] });
+        return response.status(200).json({ data: deletedType[0], meta: {}, errors: [] });
+      }
+
+      if (request.query.kind === 'company') {
+        if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+        }
+        const companyId = Number(request.query.id);
+        if (!Number.isInteger(companyId) || companyId <= 0) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id de la empresa es obligatorio.'] });
+        }
+        const [refs] = (await sql`
+          SELECT
+            (SELECT COUNT(*) FROM contactos WHERE empresa_id = ${companyId}) AS "contactRefs",
+            (SELECT COUNT(*) FROM proyectos WHERE empresa_id = ${companyId}) AS "projectRefs",
+            (SELECT COUNT(*) FROM peticiones WHERE empresa_id = ${companyId}) AS "peticionRefs"
+        `) as any[];
+        const totalRefs = Number(refs.contactRefs) + Number(refs.projectRefs) + Number(refs.peticionRefs);
+        if (totalRefs > 0) {
+          return response.status(409).json({
+            data: null, meta: {},
+            errors: [`No se puede eliminar: esta empresa está vinculada a ${totalRefs} registro(s) (contactos, proyectos o peticiones).`],
+          });
+        }
+        const deletedCompany = await sql`DELETE FROM empresas WHERE empresa_id = ${companyId} RETURNING empresa_id AS id`;
+        if (!deletedCompany[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Empresa no encontrada.'] });
+        return response.status(200).json({ data: deletedCompany[0], meta: {}, errors: [] });
+      }
+
+      if (request.query.kind === 'role') {
+        if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+        }
+        const roleId = Number(request.query.id);
+        if (!Number.isInteger(roleId) || roleId <= 0) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id del rol es obligatorio.'] });
+        }
+        const [{ contactRefs }] = (await sql`SELECT COUNT(*) AS "contactRefs" FROM contactos WHERE rol_id = ${roleId}`) as any[];
+        if (Number(contactRefs) > 0) {
+          return response.status(409).json({
+            data: null, meta: {},
+            errors: [`No se puede eliminar: este rol está asignado a ${contactRefs} contacto(s).`],
+          });
+        }
+        const deletedRole = await sql`DELETE FROM roles WHERE rol_id = ${roleId} RETURNING rol_id AS id`;
+        if (!deletedRole[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Rol no encontrado.'] });
+        return response.status(200).json({ data: deletedRole[0], meta: {}, errors: [] });
       }
 
       const stepId = Number(request.query.stepId);
@@ -370,7 +445,7 @@ export default async function handler(
         : [];
       const sweeps = isAdmin ? await fetchSweepConfig(sql) : [];
       const emailLog = isAdmin ? await fetchEmailLog(sql) : [];
-      const [reportTypes, contacts, steps, stepContacts, empresas, areasConsolida, peticionesConfigRows] = await Promise.all([
+      const [reportTypes, contacts, steps, stepContacts, empresas, roles, areasConsolida, peticionesConfigRows] = await Promise.all([
         sql`
           SELECT tipo_informe_id AS id, COALESCE(codigo, '') AS code, nombre AS name,
             periodicidad AS periodicity, descripcion AS description, activo AS active
@@ -393,6 +468,7 @@ export default async function handler(
         `,
         sql`SELECT paso_id AS "stepId", contacto_id AS "contactId", es_principal AS "isPrincipal" FROM tipo_informe_paso_contacto`,
         sql`SELECT empresa_id AS id, nombre AS name, COALESCE(codigo, '') AS code FROM empresas ORDER BY nombre ASC`,
+        sql`SELECT rol_id AS id, nombre AS name, activo AS active FROM roles ORDER BY nombre ASC`,
         sql`SELECT area_id AS id, nombre AS name FROM areas_consolida ORDER BY nombre ASC`,
         sql`SELECT drive_root_folder_id AS "driveRootFolderId", drive_root_folder_url AS "driveRootFolderUrl" FROM peticiones_config WHERE id = 1`,
       ]);
@@ -408,7 +484,7 @@ export default async function handler(
         };
       });
 
-      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, emailLog, isAdmin, empresas, areasConsolida, peticionesConfig }, meta: {}, errors: [] });
+      return response.status(200).json({ data: { reportTypes, contacts, reportTypeSteps, authorizedUsers, sweeps, emailLog, isAdmin, empresas, roles, areasConsolida, peticionesConfig }, meta: {}, errors: [] });
     }
 
     if (request.method === 'PATCH') {
@@ -496,6 +572,125 @@ export default async function handler(
         const roleName = has('role') && String(data.role).trim() ? String(data.role).trim() : current[0].role;
         const companyName = has('company') && String(data.company).trim() ? String(data.company).trim() : current[0].company;
         return response.status(200).json({ data: { ...rows[0], role: roleName, company: companyName }, meta: {}, errors: [] });
+      }
+
+      if (body.kind === 'areaConsolida') {
+        if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+        }
+        const areaId = Number(body.areaId);
+        const name = String(body.data?.name ?? '').trim();
+        if (!Number.isInteger(areaId) || areaId <= 0 || !name) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id y el nombre del área son obligatorios.'] });
+        }
+        try {
+          const rows = await sql`
+            UPDATE areas_consolida SET nombre = ${name} WHERE area_id = ${areaId}
+            RETURNING area_id AS id, nombre AS name
+          `;
+          if (!rows[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Área no encontrada.'] });
+          return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+        } catch (error) {
+          if ((error as { code?: string })?.code === '23505') {
+            return response.status(409).json({ data: null, meta: {}, errors: ['Ya existe un área con ese nombre.'] });
+          }
+          throw error;
+        }
+      }
+
+      if (body.kind === 'reportType') {
+        if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+        }
+        const typeId = Number(body.typeId);
+        if (!Number.isInteger(typeId) || typeId <= 0) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id del tipo de informe es obligatorio.'] });
+        }
+        const data = body.data ?? {};
+        const has = (key: string) => Object.prototype.hasOwnProperty.call(data, key);
+        if ((has('code') && !String(data.code).trim()) || (has('name') && !String(data.name).trim())) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['Código y nombre no pueden quedar vacíos.'] });
+        }
+        const current = (await sql`
+          SELECT codigo AS code, nombre AS name, periodicidad AS periodicity, descripcion AS description, activo AS active
+          FROM tipos_informe WHERE tipo_informe_id = ${typeId}
+        `) as any[];
+        if (!current[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Tipo de informe no encontrado.'] });
+        const nextCode = has('code') ? String(data.code).trim().toUpperCase() : current[0].code;
+        const nextName = has('name') ? String(data.name).trim() : current[0].name;
+        const nextPeriodicity = has('periodicity') ? String(data.periodicity) : current[0].periodicity;
+        const nextDescription = has('description') ? String(data.description ?? '').trim() : current[0].description;
+        const nextActive = has('active') ? Boolean(data.active) : current[0].active;
+        try {
+          const rows = await sql`
+            UPDATE tipos_informe SET codigo = ${nextCode}, nombre = ${nextName}, periodicidad = ${nextPeriodicity},
+              descripcion = ${nextDescription}, activo = ${nextActive}
+            WHERE tipo_informe_id = ${typeId}
+            RETURNING tipo_informe_id AS id, codigo AS code, nombre AS name, periodicidad AS periodicity,
+              descripcion AS description, activo AS active
+          `;
+          return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+        } catch (error) {
+          if ((error as { code?: string })?.code === '23505') {
+            return response.status(409).json({ data: null, meta: {}, errors: ['Ya existe un tipo de informe con ese código.'] });
+          }
+          throw error;
+        }
+      }
+
+      if (body.kind === 'company') {
+        if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+        }
+        const companyId = Number(body.companyId);
+        const name = String(body.data?.name ?? '').trim();
+        if (!Number.isInteger(companyId) || companyId <= 0 || !name) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id y el nombre de la empresa son obligatorios.'] });
+        }
+        const hasCode = Object.prototype.hasOwnProperty.call(body.data ?? {}, 'code');
+        const code = hasCode ? (String(body.data.code ?? '').trim().toUpperCase() || null) : undefined;
+        try {
+          const rows = hasCode
+            ? await sql`
+                UPDATE empresas SET nombre = ${name}, codigo = ${code} WHERE empresa_id = ${companyId}
+                RETURNING empresa_id AS id, nombre AS name, COALESCE(codigo, '') AS code
+              `
+            : await sql`
+                UPDATE empresas SET nombre = ${name} WHERE empresa_id = ${companyId}
+                RETURNING empresa_id AS id, nombre AS name, COALESCE(codigo, '') AS code
+              `;
+          if (!rows[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Empresa no encontrada.'] });
+          return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+        } catch (error) {
+          if ((error as { code?: string })?.code === '23505') {
+            return response.status(409).json({ data: null, meta: {}, errors: ['Ya existe una empresa con ese nombre o código.'] });
+          }
+          throw error;
+        }
+      }
+
+      if (body.kind === 'role') {
+        if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+        }
+        const roleId = Number(body.roleId);
+        const name = String(body.data?.name ?? '').trim();
+        if (!Number.isInteger(roleId) || roleId <= 0 || !name) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id y el nombre del rol son obligatorios.'] });
+        }
+        try {
+          const rows = await sql`
+            UPDATE roles SET nombre = ${name} WHERE rol_id = ${roleId}
+            RETURNING rol_id AS id, nombre AS name, activo AS active
+          `;
+          if (!rows[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Rol no encontrado.'] });
+          return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+        } catch (error) {
+          if ((error as { code?: string })?.code === '23505') {
+            return response.status(409).json({ data: null, meta: {}, errors: ['Ya existe un rol con ese nombre.'] });
+          }
+          throw error;
+        }
       }
 
       if (body.kind === 'reportTypeStepOrder') {
@@ -998,6 +1193,9 @@ export default async function handler(
     }
 
     if (kind === 'areaConsolida') {
+      if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+      }
       const name = String(data?.name ?? '').trim();
       if (!name) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El nombre del área es obligatorio.'] });
@@ -1016,7 +1214,57 @@ export default async function handler(
       }
     }
 
+    if (kind === 'company') {
+      if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+      }
+      const name = String(data?.name ?? '').trim();
+      if (!name) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El nombre de la empresa es obligatorio.'] });
+      }
+      const code = String(data?.code ?? '').trim().toUpperCase() || null;
+      try {
+        const rows = await sql`
+          INSERT INTO empresas (empresa_id, nombre, codigo)
+          VALUES (COALESCE((SELECT MAX(empresa_id) FROM empresas), 0) + 1, ${name}, ${code})
+          RETURNING empresa_id AS id, nombre AS name, COALESCE(codigo, '') AS code
+        `;
+        return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+      } catch (error) {
+        if ((error as { code?: string })?.code === '23505') {
+          return response.status(409).json({ data: null, meta: {}, errors: ['Ya existe una empresa con ese nombre o código.'] });
+        }
+        throw error;
+      }
+    }
+
+    if (kind === 'role') {
+      if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+      }
+      const name = String(data?.name ?? '').trim();
+      if (!name) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El nombre del rol es obligatorio.'] });
+      }
+      try {
+        const rows = await sql`
+          INSERT INTO roles (rol_id, nombre)
+          VALUES (COALESCE((SELECT MAX(rol_id) FROM roles), 0) + 1, ${name})
+          RETURNING rol_id AS id, nombre AS name, activo AS active
+        `;
+        return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+      } catch (error) {
+        if ((error as { code?: string })?.code === '23505') {
+          return response.status(409).json({ data: null, meta: {}, errors: ['Ya existe un rol con ese nombre.'] });
+        }
+        throw error;
+      }
+    }
+
     if (kind === 'reportType') {
+      if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+      }
       if (!data?.code || !data?.name || !data?.periodicity) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Código, nombre y periodicidad son obligatorios.'] });
       }
@@ -1035,6 +1283,9 @@ export default async function handler(
     }
 
     if (kind === 'contact') {
+      if (!(await canEditModuleRequest(request, sql, 'lists'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Listas Maestras.'] });
+      }
       if (!data?.name || !data?.email || !data?.role || !data?.company) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Nombre, correo, cargo y empresa son obligatorios.'] });
       }

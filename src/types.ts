@@ -199,6 +199,12 @@ export interface Empresa {
   code: string;
 }
 
+export interface Rol {
+  id: string;
+  name: string;
+  active: boolean;
+}
+
 export interface AreaConsolida {
   id: string;
   name: string;

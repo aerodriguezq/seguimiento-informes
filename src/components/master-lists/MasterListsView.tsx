@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ReportType, Contact, ReportStatus, ReportTypeStep, AreaConsolida, Project } from '../../types';
+import { ReportType, Contact, ReportStatus, ReportTypeStep, AreaConsolida, Project, Empresa, Rol } from '../../types';
 import { MONTHS_LIST, YEARS_LIST } from '../../data/mockData';
 import {
   Database,
@@ -30,6 +30,8 @@ interface MasterListsViewProps {
   reportTypeSteps: ReportTypeStep[];
   projects: Project[];
   onAddReportType: (type: ReportType) => Promise<void>;
+  onUpdateReportType: (typeId: string, updates: Partial<Pick<ReportType, 'code' | 'name' | 'periodicity' | 'description' | 'active'>>) => Promise<void>;
+  onDeleteReportType: (typeId: string) => Promise<void>;
   onAddContact: (contact: Contact) => Promise<void>;
   onUpdateContact: (contactId: string, updates: Partial<Pick<Contact, 'name' | 'email' | 'role' | 'company' | 'phone' | 'active'>>) => Promise<void>;
   onDeleteContact: (contactId: string) => Promise<void>;
@@ -39,7 +41,16 @@ interface MasterListsViewProps {
   onMoveReportTypeStep: (stepId: string, direction: 'up' | 'down') => Promise<void>;
   areasConsolida: AreaConsolida[];
   onAddAreaConsolida: (name: string) => Promise<void>;
+  onUpdateAreaConsolida: (areaId: string, name: string) => Promise<void>;
   onDeleteAreaConsolida: (areaId: string) => Promise<void>;
+  empresas: Empresa[];
+  onAddCompany: (name: string, code: string) => Promise<void>;
+  onUpdateCompany: (companyId: string, updates: { name: string; code?: string }) => Promise<void>;
+  onDeleteCompany: (companyId: string) => Promise<void>;
+  roles: Rol[];
+  onAddRole: (name: string) => Promise<void>;
+  onUpdateRole: (roleId: string, name: string) => Promise<void>;
+  onDeleteRole: (roleId: string) => Promise<void>;
 }
 
 export const MasterListsView: React.FC<MasterListsViewProps> = ({
@@ -48,6 +59,8 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   reportTypeSteps,
   projects,
   onAddReportType,
+  onUpdateReportType,
+  onDeleteReportType,
   onAddContact,
   onUpdateContact,
   onDeleteContact,
@@ -57,7 +70,16 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   onMoveReportTypeStep,
   areasConsolida,
   onAddAreaConsolida,
+  onUpdateAreaConsolida,
   onDeleteAreaConsolida,
+  empresas,
+  onAddCompany,
+  onUpdateCompany,
+  onDeleteCompany,
+  roles,
+  onAddRole,
+  onUpdateRole,
+  onDeleteRole,
 }) => {
   const { canEdit } = useAuth();
   const canEditLists = canEdit('lists');
@@ -86,11 +108,140 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [editStepKeywords, setEditStepKeywords] = useState('');
   const [editStepError, setEditStepError] = useState('');
   const [isSavingStepEdit, setIsSavingStepEdit] = useState(false);
-  const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'periods' | 'areas'>('types');
+  const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'periods' | 'areas' | 'companies'>('types');
   const [newAreaName, setNewAreaName] = useState('');
   const [areaError, setAreaError] = useState('');
   const [isSavingArea, setIsSavingArea] = useState(false);
   const [deletingAreaId, setDeletingAreaId] = useState<string | null>(null);
+  const [editingAreaId, setEditingAreaId] = useState<string | null>(null);
+  const [editAreaName, setEditAreaName] = useState('');
+  const [isSavingAreaEdit, setIsSavingAreaEdit] = useState(false);
+
+  const handleStartEditArea = (area: AreaConsolida) => {
+    setEditingAreaId(area.id);
+    setEditAreaName(area.name);
+  };
+
+  const handleSaveAreaEdit = async (areaId: string) => {
+    if (!editAreaName.trim()) return;
+    setIsSavingAreaEdit(true);
+    try {
+      await onUpdateAreaConsolida(areaId, editAreaName.trim());
+      setEditingAreaId(null);
+    } catch {
+      // El toast de error ya lo muestra App.tsx.
+    } finally {
+      setIsSavingAreaEdit(false);
+    }
+  };
+
+  // --- Empresas ---
+  const [newCompanyName, setNewCompanyName] = useState('');
+  const [newCompanyCode, setNewCompanyCode] = useState('');
+  const [isSavingCompany, setIsSavingCompany] = useState(false);
+  const [companyError, setCompanyError] = useState('');
+  const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
+  const [editCompanyName, setEditCompanyName] = useState('');
+  const [editCompanyCode, setEditCompanyCode] = useState('');
+  const [isSavingCompanyEdit, setIsSavingCompanyEdit] = useState(false);
+  const [deletingCompanyId, setDeletingCompanyId] = useState<string | null>(null);
+
+  const handleAddCompanySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCompanyName.trim()) return;
+    setIsSavingCompany(true);
+    setCompanyError('');
+    try {
+      await onAddCompany(newCompanyName.trim(), newCompanyCode.trim());
+      setNewCompanyName('');
+      setNewCompanyCode('');
+    } catch (error) {
+      setCompanyError(error instanceof Error ? error.message : 'No fue posible agregar la empresa.');
+    } finally {
+      setIsSavingCompany(false);
+    }
+  };
+
+  const handleStartEditCompany = (company: Empresa) => {
+    setEditingCompanyId(company.id);
+    setEditCompanyName(company.name);
+    setEditCompanyCode(company.code);
+  };
+
+  const handleSaveCompanyEdit = async (companyId: string) => {
+    if (!editCompanyName.trim()) return;
+    setIsSavingCompanyEdit(true);
+    try {
+      await onUpdateCompany(companyId, { name: editCompanyName.trim(), code: editCompanyCode.trim() });
+      setEditingCompanyId(null);
+    } catch {
+      // El toast de error ya lo muestra App.tsx.
+    } finally {
+      setIsSavingCompanyEdit(false);
+    }
+  };
+
+  const handleDeleteCompanyClick = async (company: Empresa) => {
+    if (!window.confirm(`¿Eliminar la empresa "${company.name}"? Esto solo es posible si no tiene contactos, proyectos ni peticiones vinculados.`)) return;
+    setDeletingCompanyId(company.id);
+    try {
+      await onDeleteCompany(company.id);
+    } finally {
+      setDeletingCompanyId(null);
+    }
+  };
+
+  // --- Roles ---
+  const [newRoleName, setNewRoleName] = useState('');
+  const [isSavingRole, setIsSavingRole] = useState(false);
+  const [roleError, setRoleError] = useState('');
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [editRoleName, setEditRoleName] = useState('');
+  const [isSavingRoleEdit, setIsSavingRoleEdit] = useState(false);
+  const [deletingRoleId, setDeletingRoleId] = useState<string | null>(null);
+
+  const handleAddRoleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRoleName.trim()) return;
+    setIsSavingRole(true);
+    setRoleError('');
+    try {
+      await onAddRole(newRoleName.trim());
+      setNewRoleName('');
+    } catch (error) {
+      setRoleError(error instanceof Error ? error.message : 'No fue posible agregar el rol.');
+    } finally {
+      setIsSavingRole(false);
+    }
+  };
+
+  const handleStartEditRole = (role: Rol) => {
+    setEditingRoleId(role.id);
+    setEditRoleName(role.name);
+  };
+
+  const handleSaveRoleEdit = async (roleId: string) => {
+    if (!editRoleName.trim()) return;
+    setIsSavingRoleEdit(true);
+    try {
+      await onUpdateRole(roleId, editRoleName.trim());
+      setEditingRoleId(null);
+    } catch {
+      // El toast de error ya lo muestra App.tsx.
+    } finally {
+      setIsSavingRoleEdit(false);
+    }
+  };
+
+  const handleDeleteRoleClick = async (role: Rol) => {
+    if (!window.confirm(`¿Eliminar el rol "${role.name}"? Esto solo es posible si no tiene contactos asignados.`)) return;
+    setDeletingRoleId(role.id);
+    try {
+      await onDeleteRole(role.id);
+    } finally {
+      setDeletingRoleId(null);
+    }
+  };
 
   const handleAddArea = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,11 +270,15 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
-  // New Type Form
+  // New/Edit Type Form -- editingTypeId !== null significa que el modal
+  // está editando ese tipo en vez de crear uno nuevo (mismos campos, mismo
+  // modal, el submit decide a cuál handler llamar).
+  const [editingTypeId, setEditingTypeId] = useState<string | null>(null);
   const [newTypeCode, setNewTypeCode] = useState('');
   const [newTypeName, setNewTypeName] = useState('');
   const [newTypePeriodicity, setNewTypePeriodicity] = useState<'Mensual' | 'Bimestral' | 'Trimestral' | 'Semestral' | 'Anual' | 'Único'>('Mensual');
   const [newTypeDesc, setNewTypeDesc] = useState('');
+  const [deletingTypeId, setDeletingTypeId] = useState<string | null>(null);
 
   // New Contact Form
   const [newContactName, setNewContactName] = useState('');
@@ -163,23 +318,54 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
     e.preventDefault();
     if (!newTypeCode.trim() || !newTypeName.trim()) return;
 
-    const created: ReportType = {
-      id: `rt-${Date.now()}`,
-      code: newTypeCode.trim().toUpperCase(),
-      name: newTypeName.trim(),
-      periodicity: newTypePeriodicity,
-      description: newTypeDesc.trim() || 'Tipo de informe añadido a listas maestras.',
-      active: true,
-    };
     try {
       setFormError('');
-      await onAddReportType(created);
+      if (editingTypeId) {
+        await onUpdateReportType(editingTypeId, {
+          code: newTypeCode.trim().toUpperCase(),
+          name: newTypeName.trim(),
+          periodicity: newTypePeriodicity,
+          description: newTypeDesc.trim(),
+        });
+      } else {
+        await onAddReportType({
+          id: `rt-${Date.now()}`,
+          code: newTypeCode.trim().toUpperCase(),
+          name: newTypeName.trim(),
+          periodicity: newTypePeriodicity,
+          description: newTypeDesc.trim() || 'Tipo de informe añadido a listas maestras.',
+          active: true,
+        });
+      }
       setShowAddModal(false);
+      setEditingTypeId(null);
       setNewTypeCode('');
       setNewTypeName('');
       setNewTypeDesc('');
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'No fue posible guardar el tipo de informe.');
+    }
+  };
+
+  const handleOpenEditType = (type: ReportType) => {
+    setEditingTypeId(type.id);
+    setNewTypeCode(type.code);
+    setNewTypeName(type.name);
+    setNewTypePeriodicity(type.periodicity);
+    setNewTypeDesc(type.description);
+    setFormError('');
+    setShowAddModal(true);
+  };
+
+  const handleDeleteTypeClick = async (type: ReportType) => {
+    if (!window.confirm(`¿Eliminar el tipo de informe "${type.code} - ${type.name}"? Esto solo es posible si no tiene informes, proyectos ni pasos de flujo vinculados.`)) return;
+    setDeletingTypeId(type.id);
+    try {
+      await onDeleteReportType(type.id);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'No fue posible eliminar el tipo de informe.');
+    } finally {
+      setDeletingTypeId(null);
     }
   };
 
@@ -374,7 +560,15 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
         {(activeTab === 'types' || activeTab === 'contacts') && canEditLists && (
           <button
             type="button"
-            onClick={() => setShowAddModal(true)}
+            onClick={() => {
+              setEditingTypeId(null);
+              setNewTypeCode('');
+              setNewTypeName('');
+              setNewTypePeriodicity('Mensual');
+              setNewTypeDesc('');
+              setFormError('');
+              setShowAddModal(true);
+            }}
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-2xs transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -438,7 +632,232 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
           <Briefcase className="w-4 h-4" />
           <span>Áreas Consolida ({areasConsolida.length})</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveTab('companies'); setSearchTerm(''); }}
+          className={`px-4 py-2.5 font-bold border-b-2 transition-colors inline-flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'companies'
+              ? 'border-indigo-600 text-indigo-600'
+              : 'border-transparent text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <Building2 className="w-4 h-4" />
+          <span>Empresas y Roles ({empresas.length + roles.length})</span>
+        </button>
       </div>
+
+      {/* Tab: Empresas y Roles */}
+      {activeTab === 'companies' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="space-y-3">
+            <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-xs">
+              <p className="text-xs text-slate-500 mb-2">Empresas contratistas -- usadas en Proyectos, Contactos y Peticiones (código corto para el radicado).</p>
+              {canEditLists && (
+                <form onSubmit={handleAddCompanySubmit} className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Nueva empresa</label>
+                    <input
+                      type="text"
+                      value={newCompanyName}
+                      onChange={(e) => setNewCompanyName(e.target.value)}
+                      placeholder="Ej: Consorcio Vial Andino"
+                      className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div className="w-20">
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Código</label>
+                    <input
+                      type="text"
+                      value={newCompanyCode}
+                      onChange={(e) => setNewCompanyCode(e.target.value.toUpperCase())}
+                      placeholder="CRI"
+                      className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500 font-mono uppercase"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSavingCompany || !newCompanyName.trim()}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    {isSavingCompany ? 'Agregando...' : 'Agregar'}
+                  </button>
+                </form>
+              )}
+              {companyError && <p className="mt-2 text-xs font-medium text-rose-700">{companyError}</p>}
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 shadow-xs divide-y divide-slate-100">
+              {empresas.length === 0 ? (
+                <div className="flex min-h-24 flex-col items-center justify-center px-6 text-center">
+                  <Building2 className="mb-2 h-5 w-5 text-slate-300" />
+                  <p className="text-sm font-semibold text-slate-700">Sin empresas configuradas todavía</p>
+                </div>
+              ) : (
+                empresas.map((c) =>
+                  editingCompanyId === c.id ? (
+                    <div key={c.id} className="flex items-center gap-2 px-4 py-2.5 text-xs">
+                      <input
+                        type="text"
+                        value={editCompanyName}
+                        onChange={(e) => setEditCompanyName(e.target.value)}
+                        autoFocus
+                        className="flex-1 px-2 py-1 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                      />
+                      <input
+                        type="text"
+                        value={editCompanyCode}
+                        onChange={(e) => setEditCompanyCode(e.target.value.toUpperCase())}
+                        className="w-16 px-2 py-1 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 font-mono uppercase"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveCompanyEdit(c.id)}
+                        disabled={isSavingCompanyEdit || !editCompanyName.trim()}
+                        className="text-emerald-600 hover:text-emerald-800 disabled:opacity-50"
+                        title="Guardar"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingCompanyId(null)}
+                        className="text-slate-400 hover:text-slate-700"
+                        title="Cancelar"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div key={c.id} className="flex items-center justify-between px-4 py-3 text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-semibold text-slate-800 truncate">{c.name}</span>
+                        {c.code && <span className="shrink-0 font-mono text-[10px] font-bold bg-slate-100 px-1.5 py-0.5 rounded">{c.code}</span>}
+                      </div>
+                      {canEditLists && (
+                        <div className="inline-flex items-center gap-2.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditCompany(c)}
+                            className="text-slate-400 hover:text-indigo-600"
+                            title="Editar empresa"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCompanyClick(c)}
+                            disabled={deletingCompanyId === c.id}
+                            className="text-slate-400 hover:text-rose-600 disabled:opacity-50"
+                            title="Eliminar empresa"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                )
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-xs">
+              <p className="text-xs text-slate-500 mb-2">Roles / cargos -- usados al registrar Contactos y Responsables.</p>
+              {canEditLists && (
+                <form onSubmit={handleAddRoleSubmit} className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Nuevo rol</label>
+                    <input
+                      type="text"
+                      value={newRoleName}
+                      onChange={(e) => setNewRoleName(e.target.value)}
+                      placeholder="Ej: Residente Técnico"
+                      className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSavingRole || !newRoleName.trim()}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    {isSavingRole ? 'Agregando...' : 'Agregar'}
+                  </button>
+                </form>
+              )}
+              {roleError && <p className="mt-2 text-xs font-medium text-rose-700">{roleError}</p>}
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 shadow-xs divide-y divide-slate-100">
+              {roles.length === 0 ? (
+                <div className="flex min-h-24 flex-col items-center justify-center px-6 text-center">
+                  <Users className="mb-2 h-5 w-5 text-slate-300" />
+                  <p className="text-sm font-semibold text-slate-700">Sin roles configurados todavía</p>
+                </div>
+              ) : (
+                roles.map((r) =>
+                  editingRoleId === r.id ? (
+                    <div key={r.id} className="flex items-center gap-2 px-4 py-2.5 text-xs">
+                      <input
+                        type="text"
+                        value={editRoleName}
+                        onChange={(e) => setEditRoleName(e.target.value)}
+                        autoFocus
+                        className="flex-1 px-2 py-1 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveRoleEdit(r.id)}
+                        disabled={isSavingRoleEdit || !editRoleName.trim()}
+                        className="text-emerald-600 hover:text-emerald-800 disabled:opacity-50"
+                        title="Guardar"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingRoleId(null)}
+                        className="text-slate-400 hover:text-slate-700"
+                        title="Cancelar"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div key={r.id} className="flex items-center justify-between px-4 py-3 text-xs">
+                      <span className="font-semibold text-slate-800">{r.name}</span>
+                      {canEditLists && (
+                        <div className="inline-flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditRole(r)}
+                            className="text-slate-400 hover:text-indigo-600"
+                            title="Editar rol"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRoleClick(r)}
+                            disabled={deletingRoleId === r.id}
+                            className="text-slate-400 hover:text-rose-600 disabled:opacity-50"
+                            title="Eliminar rol"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                )
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab: Áreas que Consolidan (Peticiones) */}
       {activeTab === 'areas' && (
@@ -477,22 +896,61 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 <p className="text-sm font-semibold text-slate-700">Sin áreas configuradas todavía</p>
               </div>
             ) : (
-              areasConsolida.map((a) => (
-                <div key={a.id} className="flex items-center justify-between px-4 py-3 text-xs">
-                  <span className="font-semibold text-slate-800">{a.name}</span>
-                  {canEditLists && (
+              areasConsolida.map((a) =>
+                editingAreaId === a.id ? (
+                  <div key={a.id} className="flex items-center gap-2 px-4 py-2.5 text-xs">
+                    <input
+                      type="text"
+                      value={editAreaName}
+                      onChange={(e) => setEditAreaName(e.target.value)}
+                      autoFocus
+                      className="flex-1 px-2 py-1 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                    />
                     <button
                       type="button"
-                      onClick={() => handleDeleteArea(a.id)}
-                      disabled={deletingAreaId === a.id}
-                      className="text-slate-400 hover:text-rose-600 disabled:opacity-50"
-                      title="Eliminar área"
+                      onClick={() => handleSaveAreaEdit(a.id)}
+                      disabled={isSavingAreaEdit || !editAreaName.trim()}
+                      className="text-emerald-600 hover:text-emerald-800 disabled:opacity-50"
+                      title="Guardar"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Check className="h-3.5 w-3.5" />
                     </button>
-                  )}
-                </div>
-              ))
+                    <button
+                      type="button"
+                      onClick={() => setEditingAreaId(null)}
+                      className="text-slate-400 hover:text-slate-700"
+                      title="Cancelar"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div key={a.id} className="flex items-center justify-between px-4 py-3 text-xs">
+                    <span className="font-semibold text-slate-800">{a.name}</span>
+                    {canEditLists && (
+                      <div className="inline-flex items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditArea(a)}
+                          className="text-slate-400 hover:text-indigo-600"
+                          title="Editar área"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteArea(a.id)}
+                          disabled={deletingAreaId === a.id}
+                          className="text-slate-400 hover:text-rose-600 disabled:opacity-50"
+                          title="Eliminar área"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              )
             )}
           </div>
         </div>
@@ -527,6 +985,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                   <th className="py-2.5 px-4">Descripción del Alcance</th>
                   <th className="py-2.5 px-4">Estado</th>
                   <th className="py-2.5 px-4 whitespace-nowrap">Flujo de entrega (asunto de correo)</th>
+                  {canEditLists && <th className="py-2.5 px-4 text-right">Acciones</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -549,10 +1008,14 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                         {type.description}
                       </td>
                       <td className="py-3 px-4">
-                        <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          Activo
-                        </span>
+                        {type.active ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            Activo
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-medium">Inactivo</span>
+                        )}
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap">
                         <button
@@ -567,6 +1030,29 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                           {typeSteps.length > 0 ? `${typeSteps.length} paso(s)` : 'Configurar pasos'}
                         </button>
                       </td>
+                      {canEditLists && (
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-2.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditType(type)}
+                              title="Editar tipo de informe"
+                              className="text-slate-400 hover:text-indigo-600"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTypeClick(type)}
+                              disabled={deletingTypeId === type.id}
+                              title="Eliminar tipo de informe"
+                              className="text-slate-400 hover:text-rose-600 disabled:opacity-50"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -723,11 +1209,13 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4 animate-in zoom-in-95">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h3 className="font-bold text-sm text-slate-900">
-                {activeTab === 'types' ? 'Nuevo Tipo de Informe' : 'Nuevo Contacto / Responsable'}
+                {activeTab === 'types'
+                  ? (editingTypeId ? 'Editar Tipo de Informe' : 'Nuevo Tipo de Informe')
+                  : 'Nuevo Contacto / Responsable'}
               </h3>
               <button
                 type="button"
-                onClick={() => setShowAddModal(false)}
+                onClick={() => { setShowAddModal(false); setEditingTypeId(null); }}
                 className="text-slate-400 hover:text-slate-600"
               >
                 <X className="w-4 h-4" />
@@ -804,7 +1292,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                   <button
                     type="button"
-                    onClick={() => setShowAddModal(false)}
+                    onClick={() => { setShowAddModal(false); setEditingTypeId(null); }}
                     className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
                   >
                     Cancelar
@@ -813,7 +1301,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                     type="submit"
                     className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs"
                   >
-                    Guardar Tipo
+                    {editingTypeId ? 'Guardar Cambios' : 'Guardar Tipo'}
                   </button>
                 </div>
               </form>

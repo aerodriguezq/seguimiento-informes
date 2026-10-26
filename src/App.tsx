@@ -12,6 +12,7 @@ import {
   ReportAttachment,
   ReportTypeStep,
   Empresa,
+  Rol,
   AreaConsolida,
   PeticionesConfig,
   EmailCandidate,
@@ -182,6 +183,7 @@ export default function App() {
   const [emailLog, setEmailLog] = useState<EmailLogEntry[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const [roles, setRoles] = useState<Rol[]>([]);
   const [areasConsolida, setAreasConsolida] = useState<AreaConsolida[]>([]);
   const [peticionesConfig, setPeticionesConfig] = useState<PeticionesConfig>({ driveRootFolderId: null, driveRootFolderUrl: null });
   const [alerts, setAlerts] = useState<ScheduledAlert[]>([]);
@@ -286,6 +288,7 @@ export default function App() {
         setEmailLog(catalogsPayload.data.emailLog || []);
         setContacts(catalogsPayload.data.contacts);
         setEmpresas(catalogsPayload.data.empresas || []);
+        setRoles(catalogsPayload.data.roles || []);
         setAreasConsolida(catalogsPayload.data.areasConsolida || []);
         setPeticionesConfig(catalogsPayload.data.peticionesConfig || { driveRootFolderId: null, driveRootFolderUrl: null });
 
@@ -1053,6 +1056,130 @@ export default function App() {
     }
   };
 
+  const handleUpdateAreaConsolida = async (areaId: string, name: string) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'areaConsolida', areaId: Number(areaId), data: { name } }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el área.');
+    setAreasConsolida((prev) => prev.map((a) => (a.id === areaId ? payload.data : a)).sort((a, b) => a.name.localeCompare(b.name)));
+    showToast('Área actualizada.', 'success');
+  };
+
+  const handleUpdateReportType = async (typeId: string, updates: Partial<Pick<ReportType, 'code' | 'name' | 'periodicity' | 'description' | 'active'>>) => {
+    const response = await fetch('/api/catalogs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'reportType', typeId: Number(typeId), data: updates }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el tipo de informe.');
+    setReportTypes((prev) => prev.map((t) => (t.id === typeId ? { ...t, ...payload.data, id: String(payload.data.id) } : t)));
+    showToast('Tipo de informe actualizado.', 'success');
+  };
+
+  const handleDeleteReportType = async (typeId: string) => {
+    const response = await fetch(`/api/catalogs?kind=reportType&id=${Number(typeId)}`, { method: 'DELETE' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el tipo de informe.');
+    setReportTypes((prev) => prev.filter((t) => t.id !== typeId));
+    showToast('Tipo de informe eliminado.', 'success');
+  };
+
+  const handleAddCompany = async (name: string, code: string) => {
+    try {
+      const response = await fetch('/api/catalogs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'company', data: { name, code } }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible agregar la empresa.');
+      setEmpresas((prev) => [...prev, payload.data].sort((a, b) => a.name.localeCompare(b.name)));
+      showToast(`Empresa "${name}" agregada.`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible agregar la empresa.', 'info');
+      throw error;
+    }
+  };
+
+  const handleUpdateCompany = async (companyId: string, updates: { name: string; code?: string }) => {
+    try {
+      const response = await fetch('/api/catalogs', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'company', companyId: Number(companyId), data: updates }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar la empresa.');
+      setEmpresas((prev) => prev.map((e) => (e.id === companyId ? payload.data : e)).sort((a, b) => a.name.localeCompare(b.name)));
+      showToast('Empresa actualizada.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible actualizar la empresa.', 'info');
+      throw error;
+    }
+  };
+
+  const handleDeleteCompany = async (companyId: string) => {
+    try {
+      const response = await fetch(`/api/catalogs?kind=company&id=${Number(companyId)}`, { method: 'DELETE' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar la empresa.');
+      setEmpresas((prev) => prev.filter((e) => e.id !== companyId));
+      showToast('Empresa eliminada.', 'info');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible eliminar la empresa.', 'info');
+    }
+  };
+
+  const handleAddRole = async (name: string) => {
+    try {
+      const response = await fetch('/api/catalogs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'role', data: { name } }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible agregar el rol.');
+      setRoles((prev) => [...prev, payload.data].sort((a, b) => a.name.localeCompare(b.name)));
+      showToast(`Rol "${name}" agregado.`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible agregar el rol.', 'info');
+      throw error;
+    }
+  };
+
+  const handleUpdateRole = async (roleId: string, name: string) => {
+    try {
+      const response = await fetch('/api/catalogs', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'role', roleId: Number(roleId), data: { name } }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el rol.');
+      setRoles((prev) => prev.map((r) => (r.id === roleId ? payload.data : r)).sort((a, b) => a.name.localeCompare(b.name)));
+      showToast('Rol actualizado.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible actualizar el rol.', 'info');
+      throw error;
+    }
+  };
+
+  const handleDeleteRole = async (roleId: string) => {
+    try {
+      const response = await fetch(`/api/catalogs?kind=role&id=${Number(roleId)}`, { method: 'DELETE' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el rol.');
+      setRoles((prev) => prev.filter((r) => r.id !== roleId));
+      showToast('Rol eliminado.', 'info');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'No fue posible eliminar el rol.', 'info');
+    }
+  };
+
   const handleSavePeticionesConfig = async (driveRootFolderUrl: string) => {
     const response = await fetch('/api/catalogs', {
       method: 'POST',
@@ -1391,7 +1518,18 @@ export default function App() {
               onMoveReportTypeStep={handleMoveReportTypeStep}
               areasConsolida={areasConsolida}
               onAddAreaConsolida={handleAddAreaConsolida}
+              onUpdateAreaConsolida={handleUpdateAreaConsolida}
               onDeleteAreaConsolida={handleDeleteAreaConsolida}
+              onUpdateReportType={handleUpdateReportType}
+              onDeleteReportType={handleDeleteReportType}
+              empresas={empresas}
+              onAddCompany={handleAddCompany}
+              onUpdateCompany={handleUpdateCompany}
+              onDeleteCompany={handleDeleteCompany}
+              roles={roles}
+              onAddRole={handleAddRole}
+              onUpdateRole={handleUpdateRole}
+              onDeleteRole={handleDeleteRole}
             />
           )}
 
