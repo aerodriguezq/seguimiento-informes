@@ -19,6 +19,7 @@ import {
 } from '../../utils/projectStatus';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
+import { MunicipiosMultiSelect } from '../common/MunicipiosMultiSelect';
 import { ScheduleFrequencyField } from '../alerts/ScheduleFrequencyField';
 import { SeguimientoCronograma } from './SeguimientoCronograma';
 import { ErrorBoundary } from '../common/ErrorBoundary';
@@ -641,19 +642,26 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               )}
             </div>
 
-            <div>
+            <div className="sm:col-span-2 lg:col-span-3">
               <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
                 <MapPin className="w-3.5 h-3.5" /> Municipios
               </span>
               {isEditingInfo ? (
-                <input
-                  type="text"
-                  value={infoMunicipios}
-                  onChange={(e) => setInfoMunicipios(e.target.value)}
-                  className="w-full px-2 py-1 border border-slate-200 rounded outline-none focus:border-indigo-500"
+                <MunicipiosMultiSelect
+                  value={infoMunicipios ? infoMunicipios.split(',').map((s) => s.trim()).filter(Boolean) : []}
+                  onChange={(next) => setInfoMunicipios(next.join(', '))}
                 />
+              ) : project.municipios ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {project.municipios.split(',').map((s) => s.trim()).filter(Boolean).map((m) => (
+                    <span key={m} className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[11px] font-medium text-indigo-800">
+                      <MapPin className="w-2.5 h-2.5" />
+                      {m}
+                    </span>
+                  ))}
+                </div>
               ) : (
-                <div className="font-semibold text-slate-800">{project.municipios || 'Sin definir'}</div>
+                <div className="font-semibold text-slate-800">Sin definir</div>
               )}
             </div>
 
