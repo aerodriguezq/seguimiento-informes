@@ -171,8 +171,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const [modTipo, setModTipo] = useState<'Adición' | 'Prórroga' | 'Suspensión'>('Adición');
   const [modFechaInicial, setModFechaInicial] = useState('');
   const [modFechaFinal, setModFechaFinal] = useState('');
-  const [modValorInicial, setModValorInicial] = useState('');
-  const [modValorActual, setModValorActual] = useState('');
+  const [modMontoAdicion, setModMontoAdicion] = useState('');
   const [modTitulo, setModTitulo] = useState('');
   const [modNota, setModNota] = useState('');
   const [isSavingModificatorio, setIsSavingModificatorio] = useState(false);
@@ -182,8 +181,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     setModTipo('Adición');
     setModFechaInicial('');
     setModFechaFinal('');
-    setModValorInicial('');
-    setModValorActual('');
+    setModMontoAdicion('');
     setModTitulo('');
     setModNota('');
   };
@@ -193,13 +191,19 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     if (!modNumero.trim()) return;
     setIsSavingModificatorio(true);
     try {
+      // Una Adición SUMA al valor que ya estaba vigente -- no lo reemplaza.
+      // Se guarda el valor antes y después de esta adición para que el
+      // historial quede trazable, pero quien la radica solo escribe el
+      // monto que se está adicionando.
+      const montoAdicion = modTipo === 'Adición' && modMontoAdicion.trim() !== '' ? Number(modMontoAdicion) : undefined;
+      const valorAntes = valorActual ?? 0;
       await onCreateModificatorio({
         numero: modNumero.trim(),
         tipo: modTipo,
         fechaInicial: modFechaInicial || undefined,
         fechaFinal: modFechaFinal || undefined,
-        valorInicial: modTipo === 'Adición' && modValorInicial.trim() !== '' ? Number(modValorInicial) : undefined,
-        valorActual: modTipo === 'Adición' && modValorActual.trim() !== '' ? Number(modValorActual) : undefined,
+        valorInicial: montoAdicion !== undefined ? valorAntes : undefined,
+        valorActual: montoAdicion !== undefined ? valorAntes + montoAdicion : undefined,
         titulo: modTipo === 'Suspensión' ? modTitulo.trim() || undefined : undefined,
         nota: modTipo === 'Suspensión' ? modNota.trim() || undefined : undefined,
       });
@@ -1373,25 +1377,21 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               </div>
 
               {modTipo === 'Adición' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Valor inicial</label>
-                    <input
-                      type="number"
-                      value={modValorInicial}
-                      onChange={(e) => setModValorInicial(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Valor actual</label>
-                    <input
-                      type="number"
-                      value={modValorActual}
-                      onChange={(e) => setModValorActual(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                    />
-                  </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Monto de la adición</label>
+                  <input
+                    type="number"
+                    value={modMontoAdicion}
+                    onChange={(e) => setModMontoAdicion(e.target.value)}
+                    placeholder="Ej: 4116692492"
+                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                  <p className="mt-1 text-[10.5px] text-slate-400">
+                    Se suma al valor actual vigente ({formatCurrency(valorActual)})
+                    {modMontoAdicion.trim() !== '' && !Number.isNaN(Number(modMontoAdicion))
+                      ? ` -- nuevo valor actual: ${formatCurrency((valorActual ?? 0) + Number(modMontoAdicion))}`
+                      : '.'}
+                  </p>
                 </div>
               )}
 
