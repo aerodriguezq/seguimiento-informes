@@ -132,7 +132,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       setIsSavingVigencia(false);
     }
   };
-  const [infoTab, setInfoTab] = useState<'general' | 'valor'>('general');
+  const [infoTab, setInfoTab] = useState<'general' | 'valor' | 'desembolso'>('general');
   const [isEditingInfo, setIsEditingInfo] = useState(false);
   const [infoObjetivo, setInfoObjetivo] = useState(project.objetivoGeneral ?? '');
   const [infoMunicipios, setInfoMunicipios] = useState(project.municipios ?? '');
@@ -270,6 +270,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   // Project-specific reports
   const projectReports = reports.filter((r) => r.projectId === project.id);
   const projectAlerts = alerts.filter((a) => a.projectId === project.id);
+  const desembolsoReports = projectReports.filter((r) => r.typeName === 'Desembolso');
 
   // Quick KPIs for this project
   const countPendientes = projectReports.filter((r) => r.status === 'Pendientes Evidencias').length;
@@ -660,9 +661,20 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           >
             Valor del Proyecto
           </button>
+          <button
+            type="button"
+            onClick={() => setInfoTab('desembolso')}
+            className={`px-3 py-2 font-semibold border-b-2 transition-colors cursor-pointer ${
+              infoTab === 'desembolso'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Desembolso
+          </button>
         </div>
 
-        {infoTab === 'general' ? (
+        {infoTab === 'general' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
             <div>
               <span className="flex items-center gap-1.5 text-slate-500 font-medium mb-1">
@@ -726,7 +738,9 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               )}
             </div>
           </div>
-        ) : (
+        )}
+
+        {infoTab === 'valor' && (
           <div className="space-y-4 text-xs">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
@@ -764,19 +778,72 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 <div className="space-y-1.5">
                   {modificatorios
                     .filter((m) => m.tipo === 'Adición')
-                    .map((m) => (
-                      <div
-                        key={m.id}
-                        className="flex items-center justify-between gap-2 p-2 bg-emerald-50/60 border border-emerald-200/80 rounded-lg"
-                      >
-                        <span className="font-mono font-bold text-slate-800">{m.numero}</span>
-                        <span className="text-slate-600">{m.fechaInicial || 'Sin fecha'}</span>
-                        <span className="font-semibold text-emerald-800">
-                          {formatCurrency(m.valorInicial)} → {formatCurrency(m.valorActual)}
-                        </span>
-                      </div>
-                    ))}
+                    .map((m) => {
+                      const monto = m.valorActual !== null && m.valorInicial !== null ? m.valorActual - m.valorInicial : null;
+                      return (
+                        <div
+                          key={m.id}
+                          className="flex items-center justify-between gap-2 p-2 bg-emerald-50/60 border border-emerald-200/80 rounded-lg"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-slate-800">{m.numero}</span>
+                            <span className="text-slate-600">{m.fechaInicial || 'Sin fecha'}</span>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-bold text-emerald-800">
+                              {monto !== null ? `+ ${formatCurrency(monto)}` : 'Sin definir'}
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              {formatCurrency(m.valorInicial)} → {formatCurrency(m.valorActual)}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {infoTab === 'desembolso' && (
+          <div className="text-xs">
+            {desembolsoReports.length === 0 ? (
+              <p className="py-6 text-center text-slate-400">
+                No hay informes de tipo "Desembolso" radicados para este proyecto todavía.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <th className="py-2 pr-4">Consecutivo</th>
+                      <th className="py-2 pr-4">Período</th>
+                      <th className="py-2 pr-4">Fecha Límite</th>
+                      <th className="py-2 pr-4">Estado</th>
+                      <th className="py-2 pr-4 text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {desembolsoReports.map((report) => (
+                      <tr key={report.id} onClick={() => onSelectReport(report.id)} className="hover:bg-slate-50 cursor-pointer transition-colors group">
+                        <td className="py-2.5 pr-4 font-mono font-bold text-slate-900 group-hover:text-indigo-600">{report.consecutive}</td>
+                        <td className="py-2.5 pr-4 text-slate-700 whitespace-nowrap">{report.month} {report.year}</td>
+                        <td className="py-2.5 pr-4 text-slate-700 whitespace-nowrap">{report.dueDate}</td>
+                        <td className="py-2.5 pr-4"><StatusBadge status={report.status} size="sm" /></td>
+                        <td className="py-2.5 pr-4 text-right">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onSelectReport(report.id); }}
+                            className="px-2 py-0.5 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-md"
+                          >
+                            Ver Detalle
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
@@ -849,7 +916,12 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                     <td className="py-3 px-4 text-slate-700">{m.fechaFinal || '--'}</td>
                     <td className="py-3 px-4 text-slate-600">
                       {m.tipo === 'Adición' && (
-                        <span>{formatCurrency(m.valorInicial)} → {formatCurrency(m.valorActual)}</span>
+                        <span>
+                          {m.valorActual !== null && m.valorInicial !== null && (
+                            <strong className="text-emerald-700">+ {formatCurrency(m.valorActual - m.valorInicial)}</strong>
+                          )}
+                          {' '}({formatCurrency(m.valorInicial)} → {formatCurrency(m.valorActual)})
+                        </span>
                       )}
                       {m.tipo === 'Suspensión' && (
                         <span>{m.titulo}{m.nota ? ` -- ${m.nota}` : ''}</span>
