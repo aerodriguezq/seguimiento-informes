@@ -260,6 +260,17 @@ export interface ReturnAttachmentInput {
   contentBase64: string;
 }
 
+// Quién financia el precio total del contrato y cuánto aporta cada uno (ej.
+// Gobernación, Cooperación Internacional, Contrapartida) -- distinto de
+// Partes del Valor (que reparte el valor en el tiempo como desembolsos);
+// esto reparte el valor por fuente de financiación.
+export interface Aportante {
+  id: string;
+  proyectoId: string;
+  nombre: string;
+  monto: number;
+}
+
 // Subdivisión manual del Valor del Proyecto en N partes por monto (plan de
 // desembolsos) -- independiente de los Informes de tipo "Desembolso", que
 // son radicados reales; esto es la planeación de cómo se reparte la plata.

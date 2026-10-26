@@ -942,6 +942,85 @@ export default async function handler(
       return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
     }
 
+    // Aportantes: quién financia el precio total del contrato y cuánto
+    // aporta cada uno (Gobernación, Cooperación Internacional, Contrapartida,
+    // etc.) -- reparte el valor por fuente de financiación, no en el tiempo.
+    if (request.method === 'GET' && request.query.aportantes === 'list') {
+      const projectId = Number(request.query.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      const rows = await sql`
+        SELECT aportante_id AS id, proyecto_id AS "proyectoId", nombre, monto
+        FROM proyecto_aportantes WHERE proyecto_id = ${projectId}
+        ORDER BY aportante_id ASC
+      `;
+      return response.status(200).json({ data: rows, meta: { total: rows.length }, errors: [] });
+    }
+
+    if (request.method === 'POST' && request.body?.kind === 'aportanteCreate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const { projectId, nombre, monto } = request.body?.data ?? {};
+      const pid = Number(projectId);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      if (!nombre || !String(nombre).trim()) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El nombre del aportante es obligatorio.'] });
+      }
+      if (monto === undefined || monto === null || monto === '' || Number.isNaN(Number(monto))) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El monto del aportante es obligatorio.'] });
+      }
+      const rows = await sql`
+        INSERT INTO proyecto_aportantes (proyecto_id, nombre, monto)
+        VALUES (${pid}, ${String(nombre).trim()}, ${Number(monto)})
+        RETURNING aportante_id AS id, proyecto_id AS "proyectoId", nombre, monto
+      `;
+      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'PATCH' && request.body?.kind === 'aportanteUpdate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const aportanteId = Number(request.body?.id);
+      if (!Number.isInteger(aportanteId) || aportanteId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del aportante es obligatorio.'] });
+      }
+      const current = (await sql`SELECT * FROM proyecto_aportantes WHERE aportante_id = ${aportanteId}`) as any[];
+      if (!current[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Aportante no encontrado.'] });
+      }
+      const body = request.body?.data ?? {};
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+      const nombre = has('nombre') ? String(body.nombre).trim() : current[0].nombre;
+      const monto = has('monto') ? Number(body.monto) : current[0].monto;
+
+      const rows = await sql`
+        UPDATE proyecto_aportantes SET nombre = ${nombre}, monto = ${monto}
+        WHERE aportante_id = ${aportanteId}
+        RETURNING aportante_id AS id, proyecto_id AS "proyectoId", nombre, monto
+      `;
+      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'DELETE' && request.query.aportante) {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const aportanteId = Number(request.query.aportante);
+      if (!Number.isInteger(aportanteId) || aportanteId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del aportante es obligatorio.'] });
+      }
+      const deleted = await sql`DELETE FROM proyecto_aportantes WHERE aportante_id = ${aportanteId} RETURNING aportante_id AS id`;
+      if (!deleted[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Aportante no encontrado.'] });
+      }
+      return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+    }
+
     if (request.method === 'DELETE') {
       const projectId = Number(request.query.id);
 

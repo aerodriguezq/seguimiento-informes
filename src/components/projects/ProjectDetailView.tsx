@@ -7,6 +7,7 @@ import {
   Contact,
   ReportStatus,
   ValorParte,
+  Aportante,
 } from '../../types';
 import {
   calculateDaysRemaining,
@@ -101,6 +102,10 @@ interface ProjectDetailViewProps {
     numero: string; concepto: string | null; monto: number; fechaEstimada: string | null; estado: string;
   }>) => Promise<void>;
   onDeleteValorParte: (id: string) => Promise<void>;
+  aportantes: Aportante[];
+  onCreateAportante: (data: { nombre: string; monto: number }) => Promise<void>;
+  onUpdateAportante: (id: string, data: Partial<{ nombre: string; monto: number }>) => Promise<void>;
+  onDeleteAportante: (id: string) => Promise<void>;
 }
 
 export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
@@ -129,6 +134,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onCreateValorParte,
   onUpdateValorParte,
   onDeleteValorParte,
+  aportantes,
+  onCreateAportante,
+  onUpdateAportante,
+  onDeleteAportante,
 }) => {
   const { user, canEdit } = useAuth();
   const [isEditingVigencia, setIsEditingVigencia] = useState(false);
@@ -336,6 +345,48 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     await onDeleteValorParte(id);
   };
 
+  // --- Aportantes (quién financia el precio total y cuánto) ---
+  const [showAportanteModal, setShowAportanteModal] = useState(false);
+  const [editingAportanteId, setEditingAportanteId] = useState<string | null>(null);
+  const [apNombre, setApNombre] = useState('');
+  const [apMonto, setApMonto] = useState('');
+  const [isSavingAportante, setIsSavingAportante] = useState(false);
+
+  const resetAportanteForm = () => {
+    setEditingAportanteId(null);
+    setApNombre('');
+    setApMonto('');
+  };
+
+  const handleStartEditAportante = (a: Aportante) => {
+    setEditingAportanteId(a.id);
+    setApNombre(a.nombre);
+    setApMonto(String(a.monto));
+    setShowAportanteModal(true);
+  };
+
+  const handleSubmitAportante = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!apNombre.trim() || apMonto.trim() === '') return;
+    setIsSavingAportante(true);
+    try {
+      if (editingAportanteId) {
+        await onUpdateAportante(editingAportanteId, { nombre: apNombre.trim(), monto: Number(apMonto) });
+      } else {
+        await onCreateAportante({ nombre: apNombre.trim(), monto: Number(apMonto) });
+      }
+      setShowAportanteModal(false);
+      resetAportanteForm();
+    } finally {
+      setIsSavingAportante(false);
+    }
+  };
+
+  const handleDeleteAportanteClick = async (id: string) => {
+    if (!window.confirm('¿Eliminar este aportante? Esta acción no se puede deshacer.')) return;
+    await onDeleteAportante(id);
+  };
+
   const [reportFilterStatus, setReportFilterStatus] = useState<string>('all');
   const [reportSearchQuery, setReportSearchQuery] = useState('');
   const [isManagingTypes, setIsManagingTypes] = useState(false);
@@ -430,6 +481,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     .pop();
   const valorActual = latestAdicion ? latestAdicion.valorActual : project.valorInicial;
   const sumaValorPartes = valorPartes.reduce((acc, p) => acc + p.monto, 0);
+  const sumaAportantes = aportantes.reduce((acc, a) => acc + a.monto, 0);
 
   const formatCurrency = (value: number | null | undefined) => {
     if (value === null || value === undefined) return 'Sin definir';
@@ -849,6 +901,83 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   {latestAdicion ? `Incluye la Adición ${latestAdicion.numero}` : 'Igual al valor inicial -- sin Adiciones registradas'}
                 </span>
               </div>
+            </div>
+
+            {/* Aportantes: quién financia el precio total y cuánto aporta
+                cada uno -- distinto de Partes del Valor (reparte en el
+                tiempo), esto reparte por fuente de financiación. */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+                  Aportantes {aportantes.length > 0 ? `(${aportantes.length})` : ''}
+                </span>
+                {canEdit('projects') && (
+                  <button
+                    type="button"
+                    onClick={() => { resetAportanteForm(); setShowAportanteModal(true); }}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+                  >
+                    <Plus className="w-3 h-3" /> Agregar aportante
+                  </button>
+                )}
+              </div>
+
+              {aportantes.length === 0 ? (
+                <p className="text-slate-400 py-3 text-center border border-dashed border-slate-200 rounded-lg">
+                  El precio total no se ha dividido por aportante todavía.
+                </p>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    {aportantes.map((a) => (
+                      <div
+                        key={a.id}
+                        className="flex flex-wrap items-center justify-between gap-2 p-2 bg-white border border-slate-200 rounded-lg"
+                      >
+                        <span className="text-slate-800 font-semibold truncate">{a.nombre}</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="font-bold text-slate-800">{formatCurrency(a.monto)}</span>
+                          {project.valorInicial !== null && project.valorInicial > 0 && (
+                            <span className="text-[10px] text-slate-400">
+                              {((a.monto / project.valorInicial) * 100).toFixed(1)}%
+                            </span>
+                          )}
+                          {canEdit('projects') && (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditAportante(a)}
+                                className="text-slate-400 hover:text-indigo-600"
+                                title="Editar aportante"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAportanteClick(a.id)}
+                                className="text-slate-400 hover:text-rose-600"
+                                title="Eliminar aportante"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
+                    <span className="text-slate-500">Suma de aportantes</span>
+                    <span className="font-bold text-slate-800">{formatCurrency(sumaAportantes)}</span>
+                  </div>
+                  {project.valorInicial !== null && Math.abs(sumaAportantes - project.valorInicial) > 0.5 && (
+                    <p className="mt-1 text-[10.5px] text-amber-600">
+                      La suma de aportantes ({formatCurrency(sumaAportantes)}) no coincide con el Valor Inicial del Contrato ({formatCurrency(project.valorInicial)}).
+                    </p>
+                  )}
+                </>
+              )}
             </div>
 
             {modificatorios.some((m) => m.tipo === 'Adición') && (
@@ -1828,6 +1957,63 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSavingValorParte ? 'Guardando...' : editingValorParteId ? 'Guardar Cambios' : 'Crear Parte'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Aportante -- crear o editar según editingAportanteId */}
+      {showAportanteModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-indigo-600" />
+                {editingAportanteId ? 'Editar Aportante' : 'Nuevo Aportante'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setShowAportanteModal(false); resetAportanteForm(); }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitAportante} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Nombre del aportante</label>
+                <input
+                  type="text"
+                  required
+                  value={apNombre}
+                  onChange={(e) => setApNombre(e.target.value)}
+                  placeholder="Ej: Gobernación de Bolívar, Cooperación Alemana, Contrapartida..."
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Monto que aporta</label>
+                <CurrencyInput value={apMonto} onChange={setApMonto} placeholder="Ej: 3.000.000.000" />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => { setShowAportanteModal(false); resetAportanteForm(); }}
+                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingAportante}
+                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSavingAportante ? 'Guardando...' : editingAportanteId ? 'Guardar Cambios' : 'Crear Aportante'}
                 </button>
               </div>
             </form>
