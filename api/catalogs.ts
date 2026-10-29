@@ -462,8 +462,8 @@ export default async function handler(
         `,
         sql`
           SELECT paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
-            asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
-            palabras_clave AS "palabrasClave"
+            asunto_correo AS "emailSubject", es_final AS "isFinal", requiere_revision AS "requiresReview",
+            dia_inicio AS "diaInicio", dia_limite AS "diaLimite", palabras_clave AS "palabrasClave"
           FROM tipo_informe_pasos ORDER BY tipo_informe_id ASC, proyecto_id ASC NULLS FIRST, orden ASC
         `,
         sql`SELECT paso_id AS "stepId", contacto_id AS "contactId", es_principal AS "isPrincipal" FROM tipo_informe_paso_contacto`,
@@ -738,14 +738,14 @@ export default async function handler(
           projectScope === null
             ? await sql`
                 SELECT paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
-                  asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
-                  palabras_clave AS "palabrasClave"
+                  asunto_correo AS "emailSubject", es_final AS "isFinal", requiere_revision AS "requiresReview",
+                  dia_inicio AS "diaInicio", dia_limite AS "diaLimite", palabras_clave AS "palabrasClave"
                 FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND proyecto_id IS NULL ORDER BY orden ASC
               `
             : await sql`
                 SELECT paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
-                  asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
-                  palabras_clave AS "palabrasClave"
+                  asunto_correo AS "emailSubject", es_final AS "isFinal", requiere_revision AS "requiresReview",
+                  dia_inicio AS "diaInicio", dia_limite AS "diaLimite", palabras_clave AS "palabrasClave"
                 FROM tipo_informe_pasos WHERE tipo_informe_id = ${current.typeId} AND proyecto_id = ${projectScope} ORDER BY orden ASC
               `
         ) as any[];
@@ -885,6 +885,7 @@ export default async function handler(
         const nextName = has('name') ? String(d.name ?? '').trim() : current[0].nombre;
         const nextSubject = has('emailSubject') ? String(d.emailSubject ?? '').trim() : current[0].asunto_correo;
         const nextIsFinal = has('isFinal') ? Boolean(d.isFinal) : current[0].es_final;
+        const nextRequiresReview = has('requiresReview') ? Boolean(d.requiresReview) : current[0].requiere_revision;
         const nextDiaInicio = has('diaInicio') ? (d.diaInicio === null || d.diaInicio === '' ? null : Number(d.diaInicio)) : current[0].dia_inicio;
         const nextDiaLimite = has('diaLimite') ? (d.diaLimite === null || d.diaLimite === '' ? null : Number(d.diaLimite)) : current[0].dia_limite;
         const nextPalabrasClave = has('palabrasClave') ? (String(d.palabrasClave ?? '').trim() || null) : current[0].palabras_clave;
@@ -894,11 +895,12 @@ export default async function handler(
 
         const rows = await sql`
           UPDATE tipo_informe_pasos SET nombre = ${nextName}, asunto_correo = ${nextSubject}, es_final = ${nextIsFinal},
+            requiere_revision = ${nextRequiresReview},
             dia_inicio = ${nextDiaInicio}, dia_limite = ${nextDiaLimite}, palabras_clave = ${nextPalabrasClave}
           WHERE paso_id = ${stepId}
           RETURNING paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
-            asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
-            palabras_clave AS "palabrasClave"
+            asunto_correo AS "emailSubject", es_final AS "isFinal", requiere_revision AS "requiresReview",
+            dia_inicio AS "diaInicio", dia_limite AS "diaLimite", palabras_clave AS "palabrasClave"
         `;
 
         const hasPrincipal = Object.prototype.hasOwnProperty.call(body, 'principalContactId');
@@ -1326,7 +1328,7 @@ export default async function handler(
     }
 
     if (kind === 'reportTypeStep') {
-      const { typeId, projectId, name, emailSubject, isFinal, contactIds, diaInicio, diaLimite, palabrasClave, principalContactId } = data ?? {};
+      const { typeId, projectId, name, emailSubject, isFinal, requiresReview, contactIds, diaInicio, diaLimite, palabrasClave, principalContactId } = data ?? {};
       if (!typeId || !name || !emailSubject || !Array.isArray(contactIds) || contactIds.length === 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Tipo de informe, nombre, asunto de correo y al menos un contacto son obligatorios.'] });
       }
@@ -1340,28 +1342,28 @@ export default async function handler(
       const stepRows = (
         parsedProjectId === null
           ? await sql`
-              INSERT INTO tipo_informe_pasos (paso_id, tipo_informe_id, proyecto_id, orden, nombre, asunto_correo, es_final, dia_inicio, dia_limite, palabras_clave)
+              INSERT INTO tipo_informe_pasos (paso_id, tipo_informe_id, proyecto_id, orden, nombre, asunto_correo, es_final, requiere_revision, dia_inicio, dia_limite, palabras_clave)
               VALUES (
                 COALESCE((SELECT MAX(paso_id) FROM tipo_informe_pasos), 0) + 1,
                 ${typeId}, NULL,
                 COALESCE((SELECT MAX(orden) FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id IS NULL), 0) + 1,
-                ${String(name).trim()}, ${String(emailSubject).trim()}, ${Boolean(isFinal)}, ${parsedDiaInicio}, ${parsedDiaLimite}, ${parsedPalabrasClave}
+                ${String(name).trim()}, ${String(emailSubject).trim()}, ${Boolean(isFinal)}, ${Boolean(requiresReview)}, ${parsedDiaInicio}, ${parsedDiaLimite}, ${parsedPalabrasClave}
               )
               RETURNING paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
-                asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
-                palabras_clave AS "palabrasClave"
+                asunto_correo AS "emailSubject", es_final AS "isFinal", requiere_revision AS "requiresReview",
+                dia_inicio AS "diaInicio", dia_limite AS "diaLimite", palabras_clave AS "palabrasClave"
             `
           : await sql`
-              INSERT INTO tipo_informe_pasos (paso_id, tipo_informe_id, proyecto_id, orden, nombre, asunto_correo, es_final, dia_inicio, dia_limite, palabras_clave)
+              INSERT INTO tipo_informe_pasos (paso_id, tipo_informe_id, proyecto_id, orden, nombre, asunto_correo, es_final, requiere_revision, dia_inicio, dia_limite, palabras_clave)
               VALUES (
                 COALESCE((SELECT MAX(paso_id) FROM tipo_informe_pasos), 0) + 1,
                 ${typeId}, ${parsedProjectId},
                 COALESCE((SELECT MAX(orden) FROM tipo_informe_pasos WHERE tipo_informe_id = ${typeId} AND proyecto_id = ${parsedProjectId}), 0) + 1,
-                ${String(name).trim()}, ${String(emailSubject).trim()}, ${Boolean(isFinal)}, ${parsedDiaInicio}, ${parsedDiaLimite}, ${parsedPalabrasClave}
+                ${String(name).trim()}, ${String(emailSubject).trim()}, ${Boolean(isFinal)}, ${Boolean(requiresReview)}, ${parsedDiaInicio}, ${parsedDiaLimite}, ${parsedPalabrasClave}
               )
               RETURNING paso_id AS id, tipo_informe_id AS "typeId", proyecto_id AS "projectId", orden AS "order", nombre AS name,
-                asunto_correo AS "emailSubject", es_final AS "isFinal", dia_inicio AS "diaInicio", dia_limite AS "diaLimite",
-                palabras_clave AS "palabrasClave"
+                asunto_correo AS "emailSubject", es_final AS "isFinal", requiere_revision AS "requiresReview",
+                dia_inicio AS "diaInicio", dia_limite AS "diaLimite", palabras_clave AS "palabrasClave"
             `
       ) as any[];
       const stepId = stepRows[0].id;

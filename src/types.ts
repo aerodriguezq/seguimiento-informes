@@ -25,6 +25,10 @@ export interface ReportTypeStep {
   name: string;
   emailSubject: string;
   isFinal: boolean;
+  // Si es TRUE, este paso no avanza solo por detección de correo ni por
+  // cualquier persona con edición en Informes -- requiere que el
+  // responsable Principal (o un admin) dé visto bueno u observación.
+  requiresReview: boolean;
   contactIds: string[];
   // Cuál de los contactIds es el responsable principal de este paso -- se
   // vuelve el principal del informe cuando los responsables se calculan

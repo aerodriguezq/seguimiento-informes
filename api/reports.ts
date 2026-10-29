@@ -1,11 +1,32 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../server/google-drive.js';
-import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEmail, buildStepReturnEmailHtml, type EmailAttachment } from '../server/google-gmail.js';
+import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEmail, buildStepReturnEmailHtml, buildStepReviewPendingEmailHtml, type EmailAttachment } from '../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
-import { isAdminRequest, canEditModuleRequest, getAccessibleProjectIds } from '../server/admin-auth.js';
+import { isAdminRequest, canEditModuleRequest, getAccessibleProjectIds, getSessionUser } from '../server/admin-auth.js';
 import { logEmailSend } from '../server/email-log.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
+
+// Un paso con requiere_revision = TRUE solo lo puede resolver (visto bueno u
+// observación) el contacto marcado Principal de ese paso, o un admin como
+// respaldo si el Principal no puede entrar a la app -- nunca cualquier
+// persona con edición en Informes, ni la detección automática de correo.
+async function canActOnReviewStep(
+  request: { headers: { cookie?: string } },
+  sql: SqlClient,
+  stepId: number,
+): Promise<{ allowed: boolean; principalName: string | null }> {
+  const [principal] = (await sql`
+    SELECT c.email, c.nombre AS name FROM tipo_informe_paso_contacto tpc
+    JOIN contactos c ON c.contacto_id = tpc.contacto_id
+    WHERE tpc.paso_id = ${stepId} AND tpc.es_principal = TRUE
+  `) as any[];
+  const session = await getSessionUser(request, sql);
+  if (!session) return { allowed: false, principalName: principal?.name ?? null };
+  if (session.isAdmin) return { allowed: true, principalName: principal?.name ?? null };
+  const allowed = !!principal?.email && String(principal.email).toLowerCase() === session.email.toLowerCase();
+  return { allowed, principalName: principal?.name ?? null };
+}
 
 async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
   const session = (await sql`
@@ -223,20 +244,67 @@ async function createStepAlert(
 ) {
   await upsertStepInstance(sql, reportId, stepId, year, monthName, dynamicStartDate);
 
-  const stepContacts = (await sql`SELECT contacto_id AS "contactId" FROM tipo_informe_paso_contacto WHERE paso_id = ${stepId}`) as any[];
+  const [stepMeta] = (await sql`SELECT requiere_revision AS "requiresReview" FROM tipo_informe_pasos WHERE paso_id = ${stepId}`) as any[];
+  const requiresReview = Boolean(stepMeta?.requiresReview);
+
+  const stepContacts = (await sql`
+    SELECT c.contacto_id AS "contactId", c.nombre AS name, c.email, tpc.es_principal AS "isPrincipal"
+    FROM tipo_informe_paso_contacto tpc JOIN contactos c ON c.contacto_id = tpc.contacto_id
+    WHERE tpc.paso_id = ${stepId}
+  `) as any[];
   if (stepContacts.length === 0) return;
 
+  // Un paso que requiere revisión no manda recordatorios diarios a sus
+  // responsables mientras espera la decisión del Principal -- la alerta se
+  // crea inactiva (el barrido de recordatorios solo manda con activa=TRUE).
+  // En su lugar, se avisa una sola vez al Principal más abajo.
   const insertedAlerts = await sql`
     INSERT INTO alertas (alerta_id, proyecto_id, informe_id, paso_id, nombre, frecuencia, tipo, activa, created_at, updated_at)
     VALUES (
       COALESCE((SELECT MAX(alerta_id) FROM alertas), 0) + 1,
-      ${projectId}, ${reportId}, ${stepId}, ${`Recordatorio: ${stepName}`}, 'Diario hasta la entrega', 'Seguimiento', TRUE, NOW(), NOW()
+      ${projectId}, ${reportId}, ${stepId}, ${`Recordatorio: ${stepName}`}, 'Diario hasta la entrega', 'Seguimiento', ${!requiresReview}, NOW(), NOW()
     )
     RETURNING alerta_id AS id
   `;
   const alertId = insertedAlerts[0].id;
   for (const contact of stepContacts) {
     await sql`INSERT INTO alerta_contacto (alerta_id, contacto_id) VALUES (${alertId}, ${contact.contactId})`;
+  }
+
+  if (requiresReview) {
+    await sendReviewPendingNotice(sql, projectId, stepName, year, monthName, stepContacts);
+  }
+}
+
+async function sendReviewPendingNotice(
+  sql: SqlClient,
+  projectId: number,
+  stepName: string,
+  year: number,
+  monthName: string,
+  stepContacts: Array<{ name: string; email: string | null; isPrincipal: boolean }>,
+) {
+  const principal = stepContacts.find((c) => c.isPrincipal);
+  if (!principal?.email) return;
+  const subject = `[Seguimiento] Revisión pendiente: ${stepName}`;
+  try {
+    const [project] = (await sql`SELECT nombre AS name FROM proyectos WHERE proyecto_id = ${projectId}`) as any[];
+    const accessToken = await getConnectedAccessToken(sql);
+    if (!accessToken) throw new Error('No hay una cuenta de Google conectada para enviar el aviso de revisión.');
+    const html = buildStepReviewPendingEmailHtml({
+      projectName: project?.name || 'Proyecto',
+      periodLabel: `${monthName} ${year}`,
+      stepName,
+      principalName: principal.name,
+    });
+    await sendEmail(accessToken, { to: [principal.email], subject, body: html, html: true });
+    await logEmailSend(sql, { to: [principal.email], subject, kind: 'aviso_revision', success: true });
+  } catch (error) {
+    console.error('No fue posible enviar el aviso de revisión pendiente', error);
+    await logEmailSend(sql, {
+      to: [], subject, kind: 'aviso_revision',
+      success: false, errorMessage: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -847,6 +915,7 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
     LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = i.informe_id AND ipi.paso_id = i.paso_actual_id
     WHERE i.flujo_completado = FALSE AND i.paso_actual_id IS NOT NULL
       AND (ipi.estado_etapa IS NULL OR ipi.estado_etapa <> 'EN_REVISION')
+      AND wp.requiere_revision = FALSE
   `) as any[];
 
   let advanced = 0;
@@ -1124,7 +1193,21 @@ export default async function handler(request: VercelRequest, response: VercelRe
         )
       `;
     } else if (action === 'advance_step') {
+      if (!(await canEditModuleRequest(request, sql, 'reports'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Informes.'] });
+      }
       const { userName: advanceUserName } = request.body ?? {};
+      const [advanceCurrentStep] = (await sql`
+        SELECT wp.paso_id AS id, wp.requiere_revision AS "requiresReview"
+        FROM informes i JOIN tipo_informe_pasos wp ON wp.paso_id = i.paso_actual_id
+        WHERE i.informe_id = ${reportId}
+      `) as any[];
+      if (advanceCurrentStep?.requiresReview) {
+        const { allowed, principalName } = await canActOnReviewStep(request, sql, advanceCurrentStep.id);
+        if (!allowed) {
+          return response.status(403).json({ data: null, meta: {}, errors: [`Este paso requiere revisión -- solo ${principalName || 'el responsable principal'} (o un administrador) puede dar el visto bueno.`] });
+        }
+      }
       try {
         await advanceReportStep(sql, reportId, undefined, advanceUserName);
       } catch (error) {
@@ -1243,7 +1326,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       }
 
       const [currentStep] = report.currentStepId
-        ? ((await sql`SELECT nombre AS name, orden AS "order" FROM tipo_informe_pasos WHERE paso_id = ${report.currentStepId}`) as any[])
+        ? ((await sql`SELECT nombre AS name, orden AS "order", requiere_revision AS "requiresReview" FROM tipo_informe_pasos WHERE paso_id = ${report.currentStepId}`) as any[])
         : [];
       const isReturning = currentStep?.order != null && Number(step.order) < Number(currentStep.order);
       if (!isReturning && !(await isAdminRequest(request, sql))) {
@@ -1251,6 +1334,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
       }
       if (isReturning && !(comment || '').trim()) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Escribe la observación por la cual se devuelve al paso anterior.'] });
+      }
+      // Si el paso ACTUAL (desde el que se devuelve) requiere revisión, solo
+      // su Principal (o un admin) puede generar la observación -- no
+      // cualquiera con edición en Informes, como en el resto de los pasos.
+      if (isReturning && currentStep.requiresReview) {
+        const { allowed, principalName } = await canActOnReviewStep(request, sql, report.currentStepId);
+        if (!allowed) {
+          return response.status(403).json({ data: null, meta: {}, errors: [`Este paso requiere revisión -- solo ${principalName || 'el responsable principal'} (o un administrador) puede generar la observación.`] });
+        }
       }
 
       let clearedStepNames: string[] = [];
@@ -1407,9 +1499,23 @@ export default async function handler(request: VercelRequest, response: VercelRe
       const candidates = await findCandidateEmails(accessToken, contactRows.map((c: any) => c.email), new Date(current.stepStartedAt));
       return response.status(200).json({ data: { candidates }, meta: {}, errors: [] });
     } else if (action === 'confirmCandidateEmail') {
+      if (!(await canEditModuleRequest(request, sql, 'reports'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Informes.'] });
+      }
       const { messageId } = request.body ?? {};
       if (!messageId || typeof messageId !== 'string') {
         return response.status(400).json({ data: null, meta: {}, errors: ['Falta el id del correo a confirmar.'] });
+      }
+      const [confirmCurrentStep] = (await sql`
+        SELECT wp.paso_id AS id, wp.requiere_revision AS "requiresReview"
+        FROM informes i JOIN tipo_informe_pasos wp ON wp.paso_id = i.paso_actual_id
+        WHERE i.informe_id = ${reportId}
+      `) as any[];
+      if (confirmCurrentStep?.requiresReview) {
+        const { allowed, principalName } = await canActOnReviewStep(request, sql, confirmCurrentStep.id);
+        if (!allowed) {
+          return response.status(403).json({ data: null, meta: {}, errors: [`Este paso requiere revisión -- solo ${principalName || 'el responsable principal'} (o un administrador) puede dar el visto bueno.`] });
+        }
       }
       const accessToken = await getConnectedAccessToken(sql);
       if (!accessToken) {

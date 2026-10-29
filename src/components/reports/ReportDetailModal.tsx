@@ -199,6 +199,19 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const flowStepsForType = reportTypeSteps.filter((s) => s.typeId === report.typeId);
   const hasProjectScope = flowStepsForType.some((s) => s.projectId === report.projectId);
   const scopedFlowSteps = flowStepsForType.filter((s) => (hasProjectScope ? s.projectId === report.projectId : s.projectId === null));
+
+  // Si el paso actual "requiere revisión", avanzar o devolver con
+  // observación queda reservado al contacto Principal de ese paso (o a un
+  // admin como respaldo) -- nadie más ve los botones de acción, solo un
+  // aviso de que está en espera de esa decisión.
+  const currentFlowStep = scopedFlowSteps.find((s) => s.id === report.currentStepId);
+  const currentStepPrincipal = currentFlowStep?.principalContactId
+    ? contacts.find((c) => c.id === currentFlowStep.principalContactId)
+    : undefined;
+  const canActOnCurrentReviewStep = !currentFlowStep?.requiresReview
+    || user.isAdmin
+    || (!!currentStepPrincipal?.email && currentStepPrincipal.email.toLowerCase() === user.email.toLowerCase());
+
   const stepContactIds = Array.from(new Set(scopedFlowSteps.flatMap((s) => s.contactIds)));
   const allResponsibleIds = Array.from(new Set([...report.contactIds, ...stepContactIds]));
   const assignedContacts = contacts.filter((c) => allResponsibleIds.includes(c.id));
@@ -573,6 +586,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                       <p className="mt-1 text-sm font-bold text-indigo-950">
                         Paso actual: {report.currentStepName}
                         {report.currentStepIsFinal && <span className="ml-2 text-[11px] font-semibold text-emerald-700">(paso final)</span>}
+                        {currentFlowStep?.requiresReview && <span className="ml-2 text-[11px] font-semibold text-indigo-700">(requiere revisión)</span>}
                       </p>
                       {report.currentStepEmailSubject && (
                         <p className="mt-1 text-xs text-indigo-800">
@@ -583,28 +597,40 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                   )}
                 </div>
                 {!report.isWorkflowCompleted && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleSearchCandidates}
-                      disabled={isSearchingCandidates}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-indigo-300 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                      title="Busca correos parecidos de los responsables, por si el asunto exacto no calzó (ej. un reenvío)"
-                    >
-                      <Search className="w-3.5 h-3.5" />
-                      <span>{isSearchingCandidates ? 'Buscando...' : 'Buscar posibles correos'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleAdvanceStep}
-                      disabled={isAdvancingStep}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                      title="Marca este paso como entregado manualmente"
-                    >
-                      <span>{isAdvancingStep ? 'Actualizando...' : report.currentStepIsFinal ? 'Confirmar entrega final' : 'Confirmar entrega y avanzar'}</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  canActOnCurrentReviewStep ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSearchCandidates}
+                        disabled={isSearchingCandidates}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-indigo-300 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                        title="Busca correos parecidos de los responsables, por si el asunto exacto no calzó (ej. un reenvío)"
+                      >
+                        <Search className="w-3.5 h-3.5" />
+                        <span>{isSearchingCandidates ? 'Buscando...' : 'Buscar posibles correos'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAdvanceStep}
+                        disabled={isAdvancingStep}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                        title="Marca este paso como entregado manualmente"
+                      >
+                        <span>
+                          {isAdvancingStep
+                            ? 'Actualizando...'
+                            : currentFlowStep?.requiresReview
+                              ? (report.currentStepIsFinal ? 'Visto bueno final' : 'Visto bueno y avanzar')
+                              : (report.currentStepIsFinal ? 'Confirmar entrega final' : 'Confirmar entrega y avanzar')}
+                        </span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="max-w-xs text-xs font-semibold text-indigo-800 bg-white border border-indigo-200 rounded-lg px-3 py-2">
+                      ⏳ En espera de revisión -- {currentStepPrincipal?.name || 'el responsable principal'} debe dar el visto bueno o generar una observación.
+                    </p>
+                  )
                 )}
               </div>
 
@@ -871,11 +897,13 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                 </div>
 
                 {scopedFlowSteps.length > 0 && report.currentStepId ? (
-                  (user.isAdmin || canEdit('reports')) && (() => {
+                  (user.isAdmin || canEdit('reports')) && canActOnCurrentReviewStep && (() => {
                     // Quien no es admin solo puede DEVOLVER a un paso anterior
                     // con observación -- mover hacia adelante o a un paso sin
                     // relación queda reservado a administradores (el backend
-                    // aplica la misma regla, esto evita un 403 confuso).
+                    // aplica la misma regla, esto evita un 403 confuso). Si el
+                    // paso actual requiere revisión, llegar hasta aquí ya
+                    // significa que esta persona es el Principal (o un admin).
                     const currentOrder = scopedFlowSteps.find((s) => s.id === report.currentStepId)?.order;
                     const selectableSteps = user.isAdmin
                       ? scopedFlowSteps
@@ -884,7 +912,9 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                     return (
                       <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
                         <span className="text-slate-500 block">
-                          {user.isAdmin ? 'Cambiar paso actual manualmente:' : 'Devolver a un paso anterior con observación:'}
+                          {currentFlowStep?.requiresReview
+                            ? 'Generar observación y devolver a un paso anterior:'
+                            : user.isAdmin ? 'Cambiar paso actual manualmente:' : 'Devolver a un paso anterior con observación:'}
                         </span>
                         <select
                           value={user.isAdmin ? report.currentStepId : ''}

@@ -18,6 +18,7 @@ import {
   Bell,
   GitBranch,
   Flag,
+  ShieldCheck,
   ChevronUp,
   ChevronDown,
   Briefcase,
@@ -35,8 +36,8 @@ interface MasterListsViewProps {
   onAddContact: (contact: Contact) => Promise<void>;
   onUpdateContact: (contactId: string, updates: Partial<Pick<Contact, 'name' | 'email' | 'role' | 'company' | 'phone' | 'active'>>) => Promise<void>;
   onDeleteContact: (contactId: string) => Promise<void>;
-  onAddReportTypeStep: (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => Promise<void>;
-  onEditReportTypeStep: (stepId: string, step: { name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number | null; diaLimite?: number | null; palabrasClave?: string | null }) => Promise<void>;
+  onAddReportTypeStep: (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; requiresReview: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => Promise<void>;
+  onEditReportTypeStep: (stepId: string, step: { name: string; emailSubject: string; isFinal: boolean; requiresReview: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number | null; diaLimite?: number | null; palabrasClave?: string | null }) => Promise<void>;
   onDeleteReportTypeStep: (stepId: string) => Promise<void>;
   onMoveReportTypeStep: (stepId: string, direction: 'up' | 'down') => Promise<void>;
   areasConsolida: AreaConsolida[];
@@ -89,6 +90,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [newStepName, setNewStepName] = useState('');
   const [newStepSubject, setNewStepSubject] = useState('');
   const [newStepIsFinal, setNewStepIsFinal] = useState(false);
+  const [newStepRequiresReview, setNewStepRequiresReview] = useState(false);
   const [newStepContactIds, setNewStepContactIds] = useState<string[]>([]);
   const [newStepPrincipalContactId, setNewStepPrincipalContactId] = useState<string | null>(null);
   const [newStepDiaInicio, setNewStepDiaInicio] = useState('');
@@ -101,6 +103,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [editStepName, setEditStepName] = useState('');
   const [editStepSubject, setEditStepSubject] = useState('');
   const [editStepIsFinal, setEditStepIsFinal] = useState(false);
+  const [editStepRequiresReview, setEditStepRequiresReview] = useState(false);
   const [editStepContactIds, setEditStepContactIds] = useState<string[]>([]);
   const [editStepPrincipalContactId, setEditStepPrincipalContactId] = useState<string | null>(null);
   const [editStepDiaInicio, setEditStepDiaInicio] = useState('');
@@ -461,6 +464,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
         name: newStepName.trim(),
         emailSubject: newStepSubject.trim(),
         isFinal: newStepIsFinal,
+        requiresReview: newStepRequiresReview,
         contactIds: newStepContactIds,
         principalContactId: newStepPrincipalContactId,
         diaInicio: stepsForModalType.length === 0 && newStepDiaInicio !== '' ? Number(newStepDiaInicio) : undefined,
@@ -470,6 +474,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       setNewStepName('');
       setNewStepSubject('');
       setNewStepIsFinal(false);
+      setNewStepRequiresReview(false);
       setNewStepContactIds([]);
       setNewStepPrincipalContactId(null);
       setNewStepDiaInicio('');
@@ -488,6 +493,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
     setEditStepName(step.name);
     setEditStepSubject(step.emailSubject);
     setEditStepIsFinal(step.isFinal);
+    setEditStepRequiresReview(step.requiresReview);
     setEditStepContactIds(step.contactIds);
     setEditStepPrincipalContactId(step.principalContactId ?? null);
     setEditStepDiaInicio(step.diaInicio ? String(step.diaInicio) : '');
@@ -513,6 +519,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
         name: editStepName.trim(),
         emailSubject: editStepSubject.trim(),
         isFinal: editStepIsFinal,
+        requiresReview: editStepRequiresReview,
         contactIds: editStepContactIds,
         principalContactId: editStepPrincipalContactId,
         diaInicio: editStepDiaInicio === '' ? null : Number(editStepDiaInicio),
@@ -1618,6 +1625,15 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                               <input type="checkbox" checked={editStepIsFinal} onChange={(e) => setEditStepIsFinal(e.target.checked)} className="rounded" style={{ accentColor: '#4f46e5' }} />
                               Es el paso final del flujo
                             </label>
+                            <label className="flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={editStepRequiresReview} onChange={(e) => setEditStepRequiresReview(e.target.checked)} className="rounded" style={{ accentColor: '#4f46e5' }} />
+                              Requiere revisión (el Principal debe dar visto bueno u observación)
+                            </label>
+                            {editStepRequiresReview && !editStepPrincipalContactId && (
+                              <p className="text-[10.5px] text-rose-600">
+                                Selecciona un responsable como Principal -- sin él, solo un administrador podrá resolver este paso.
+                              </p>
+                            )}
                             <div>
                               <label className="block text-[10.5px] font-semibold text-slate-500 mb-1">Responsables</label>
                               <div className="max-h-24 overflow-y-auto rounded-md border border-slate-200 p-1.5 space-y-1">
@@ -1675,6 +1691,11 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                                 {step.isFinal && (
                                   <span className="inline-flex shrink-0 items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
                                     <Flag className="h-3 w-3" /> Final
+                                  </span>
+                                )}
+                                {step.requiresReview && (
+                                  <span className="inline-flex shrink-0 items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">
+                                    <ShieldCheck className="h-3 w-3" /> Revisión
                                   </span>
                                 )}
                               </div>
@@ -1891,6 +1912,20 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                       />
                       Este es el paso final (al entregarlo, se cierra el informe)
                     </label>
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={newStepRequiresReview}
+                        onChange={(e) => setNewStepRequiresReview(e.target.checked)}
+                        className="rounded text-indigo-600"
+                      />
+                      Requiere revisión (el Principal debe dar visto bueno u observación)
+                    </label>
+                    {newStepRequiresReview && !newStepPrincipalContactId && (
+                      <p className="text-[10.5px] text-rose-600">
+                        Selecciona un responsable como Principal -- sin él, solo un administrador podrá resolver este paso.
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex items-center justify-end pt-1">

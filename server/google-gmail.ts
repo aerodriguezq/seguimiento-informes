@@ -419,6 +419,53 @@ export function buildStepReturnEmailHtml(options: {
 </div>`;
 }
 
+export function buildStepReviewPendingEmailHtml(options: {
+  projectName: string;
+  periodLabel: string;
+  stepName: string;
+  principalName: string;
+}): string {
+  const escape = (value: string) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c] as string));
+  const bg = '#4338ca';
+  const accent = '#c7d2fe';
+
+  return `<div style="max-width: 480px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dce4ec; border-radius: 8px; font-family: Arial, sans-serif; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+  <div style="background-color: ${bg}; color: #ffffff; padding: 20px; text-align: center;">
+    <div style="font-size: 24px; margin-bottom: 5px;">🔍</div>
+    <h2 style="margin: 0; font-size: 18px; font-weight: bold; color: #ffffff;">Revisión pendiente</h2>
+    <p style="margin: 5px 0 0 0; font-size: 16px; font-weight: 600; color: ${accent};">${escape(options.stepName)}</p>
+  </div>
+
+  <div style="padding: 20px; background-color: #f8fafc;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #334155;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold; width: 45%;">🏢 Proyecto:</td>
+        <td style="padding: 10px 0;">${escape(options.projectName)}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">🗓️ Período:</td>
+        <td style="padding: 10px 0;">${escape(options.periodLabel)}</td>
+      </tr>
+      <tr>
+        <td style="padding: 10px 0; font-weight: bold;">🙋 Responsable principal:</td>
+        <td style="padding: 10px 0;">${escape(options.principalName)}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div style="padding: 16px 20px; background-color: #eef2ff; border-top: 1px solid #e2e8f0;">
+    <p style="margin: 0; font-size: 13px; color: #334155;">Este informe quedó en el paso <strong>"${escape(options.stepName)}"</strong>, que requiere tu revisión. Mientras esté pendiente, los recordatorios automáticos a los demás responsables de este paso quedan en pausa.</p>
+    <p style="margin: 8px 0 0 0; font-size: 13px; color: #334155;">Ingresa a la aplicación de Seguimiento de Informes y, desde el detalle de este informe, da el <strong>visto bueno</strong> para que avance, o genera una <strong>observación</strong> para devolverlo a corrección.</p>
+  </div>
+
+  <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">
+    <p style="font-size: 11px; color: #64748b; margin: 0;">Este mensaje fue enviado automáticamente desde <strong>Seguimiento de Informes</strong>.</p>
+  </div>
+</div>`;
+}
+
 const DRIVE_URL_PATTERN = /https:\/\/(?:drive|docs)\.google\.com\/[^\s"'<>)\]]+/;
 
 function fromBase64Url(value: string) {

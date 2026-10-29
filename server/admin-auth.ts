@@ -41,6 +41,25 @@ export async function canEditModuleRequest(
   return level === undefined || level === null || level === 'edit';
 }
 
+// Para los pasos de flujo "requiere revisión": necesitamos saber QUIÉN está
+// autenticado (no solo si puede editar), para comparar su email contra el
+// contacto Principal del paso -- es la única persona (junto con un admin)
+// que puede dar visto bueno u observación en esos pasos.
+export async function getSessionUser(
+  request: { headers: { cookie?: string } },
+  sql: SqlClient,
+): Promise<{ email: string; isAdmin: boolean } | null> {
+  const sessionId = readCookie(request, 'app_session');
+  if (!sessionId) return null;
+  const [row] = (await sql`
+    SELECT u.email, u.es_admin AS "isAdmin"
+    FROM app_sesiones s
+    JOIN usuarios_autorizados u ON u.email = s.email
+    WHERE s.session_id = ${sessionId} AND s.expires_at > NOW() AND u.activo = TRUE
+  `) as any[];
+  return row ? { email: row.email, isAdmin: Boolean(row.isAdmin) } : null;
+}
+
 // Admin ve todos los proyectos. Si no, revisa usuario_proyectos: sin
 // ninguna fila para este email significa "todos" (mismo criterio
 // "permitido salvo restricción explícita" que canEditModuleRequest arriba)

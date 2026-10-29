@@ -1232,7 +1232,7 @@ export default function App() {
     showToast('Contacto eliminado.', 'success');
   };
 
-  const handleAddReportTypeStep = async (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => {
+  const handleAddReportTypeStep = async (step: { typeId: string; projectId?: string | null; name: string; emailSubject: string; isFinal: boolean; requiresReview: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number; diaLimite?: number; palabrasClave?: string }) => {
     const response = await fetch('/api/catalogs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1244,7 +1244,7 @@ export default function App() {
     showToast(`Paso "${step.name}" agregado al flujo.`, 'success');
   };
 
-  const handleEditReportTypeStep = async (stepId: string, step: { name: string; emailSubject: string; isFinal: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number | null; diaLimite?: number | null; palabrasClave?: string | null }) => {
+  const handleEditReportTypeStep = async (stepId: string, step: { name: string; emailSubject: string; isFinal: boolean; requiresReview: boolean; contactIds: string[]; principalContactId?: string | null; diaInicio?: number | null; diaLimite?: number | null; palabrasClave?: string | null }) => {
     const response = await fetch('/api/catalogs', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
