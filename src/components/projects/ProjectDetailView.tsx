@@ -8,6 +8,7 @@ import {
   ReportStatus,
   ValorParte,
   Aportante,
+  Convenio,
   ConvenioParticipante,
 } from '../../types';
 import {
@@ -104,8 +105,12 @@ interface ProjectDetailViewProps {
   onCreateAportante: (data: { nombre: string; monto: number }) => Promise<void>;
   onUpdateAportante: (id: string, data: Partial<{ nombre: string; monto: number }>) => Promise<void>;
   onDeleteAportante: (id: string) => Promise<void>;
+  convenios: Convenio[];
+  onCreateConvenio: (data: { numero: string; nombre?: string }) => Promise<void>;
+  onUpdateConvenio: (id: string, data: Partial<{ numero: string; nombre: string | null }>) => Promise<void>;
+  onDeleteConvenio: (id: string) => Promise<void>;
   convenioParticipantes: ConvenioParticipante[];
-  onCreateConvenioParticipante: (data: { nombre: string; rol?: string; valor?: number | null }) => Promise<void>;
+  onCreateConvenioParticipante: (data: { convenioId: string; nombre: string; rol?: string; valor?: number | null }) => Promise<void>;
   onUpdateConvenioParticipante: (id: string, data: Partial<{ nombre: string; rol: string | null; valor: number | null }>) => Promise<void>;
   onDeleteConvenioParticipante: (id: string) => Promise<void>;
 }
@@ -139,6 +144,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onCreateAportante,
   onUpdateAportante,
   onDeleteAportante,
+  convenios,
+  onCreateConvenio,
+  onUpdateConvenio,
+  onDeleteConvenio,
   convenioParticipantes,
   onCreateConvenioParticipante,
   onUpdateConvenioParticipante,
@@ -392,48 +401,105 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     await onDeleteAportante(id);
   };
 
-  // --- Convenio: entidades participantes, con rol y valor opcionales ---
-  const [showConvenioModal, setShowConvenioModal] = useState(false);
-  const [editingConvenioId, setEditingConvenioId] = useState<string | null>(null);
+  // --- Convenios: un proyecto puede tener N, cada uno con su propia lista
+  // de participantes (nombre, rol y valor opcionales) ---
+  const [showConvenioFormModal, setShowConvenioFormModal] = useState(false);
+  const [editingConvenioFormId, setEditingConvenioFormId] = useState<string | null>(null);
+  const [convNumero, setConvNumero] = useState('');
+  const [convNombre, setConvNombre] = useState('');
+  const [isSavingConvenioForm, setIsSavingConvenioForm] = useState(false);
+
+  const resetConvenioFormState = () => {
+    setEditingConvenioFormId(null);
+    setConvNumero('');
+    setConvNombre('');
+  };
+
+  const handleOpenNewConvenio = () => {
+    resetConvenioFormState();
+    setShowConvenioFormModal(true);
+  };
+
+  const handleStartEditConvenioForm = (c: Convenio) => {
+    setEditingConvenioFormId(c.id);
+    setConvNumero(c.numero);
+    setConvNombre(c.nombre || '');
+    setShowConvenioFormModal(true);
+  };
+
+  const handleSubmitConvenioForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!convNumero.trim()) return;
+    setIsSavingConvenioForm(true);
+    try {
+      if (editingConvenioFormId) {
+        await onUpdateConvenio(editingConvenioFormId, { numero: convNumero.trim(), nombre: convNombre.trim() || null });
+      } else {
+        await onCreateConvenio({ numero: convNumero.trim(), nombre: convNombre.trim() || undefined });
+      }
+      setShowConvenioFormModal(false);
+      resetConvenioFormState();
+    } finally {
+      setIsSavingConvenioForm(false);
+    }
+  };
+
+  const handleDeleteConvenioEntityClick = async (id: string) => {
+    if (!window.confirm('¿Eliminar este convenio? También se eliminan todos sus participantes. Esta acción no se puede deshacer.')) return;
+    await onDeleteConvenio(id);
+  };
+
+  // --- Participantes de un convenio específico ---
+  const [showParticipanteModal, setShowParticipanteModal] = useState(false);
+  const [participanteConvenioId, setParticipanteConvenioId] = useState<string | null>(null);
+  const [editingParticipanteId, setEditingParticipanteId] = useState<string | null>(null);
   const [cvNombre, setCvNombre] = useState('');
   const [cvRol, setCvRol] = useState('');
   const [cvValor, setCvValor] = useState('');
-  const [isSavingConvenio, setIsSavingConvenio] = useState(false);
+  const [isSavingParticipante, setIsSavingParticipante] = useState(false);
 
-  const resetConvenioForm = () => {
-    setEditingConvenioId(null);
+  const resetParticipanteForm = () => {
+    setEditingParticipanteId(null);
+    setParticipanteConvenioId(null);
     setCvNombre('');
     setCvRol('');
     setCvValor('');
   };
 
-  const handleStartEditConvenio = (p: ConvenioParticipante) => {
-    setEditingConvenioId(p.id);
+  const handleOpenNewParticipante = (convenioId: string) => {
+    resetParticipanteForm();
+    setParticipanteConvenioId(convenioId);
+    setShowParticipanteModal(true);
+  };
+
+  const handleStartEditParticipante = (p: ConvenioParticipante) => {
+    setEditingParticipanteId(p.id);
+    setParticipanteConvenioId(p.convenioId);
     setCvNombre(p.nombre);
     setCvRol(p.rol || '');
     setCvValor(p.valor !== null ? String(p.valor) : '');
-    setShowConvenioModal(true);
+    setShowParticipanteModal(true);
   };
 
-  const handleSubmitConvenio = async (e: React.FormEvent) => {
+  const handleSubmitParticipante = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!cvNombre.trim()) return;
-    setIsSavingConvenio(true);
+    if (!cvNombre.trim() || !participanteConvenioId) return;
+    setIsSavingParticipante(true);
     try {
       const valor = cvValor.trim() === '' ? null : Number(cvValor);
-      if (editingConvenioId) {
-        await onUpdateConvenioParticipante(editingConvenioId, { nombre: cvNombre.trim(), rol: cvRol.trim() || null, valor });
+      if (editingParticipanteId) {
+        await onUpdateConvenioParticipante(editingParticipanteId, { nombre: cvNombre.trim(), rol: cvRol.trim() || null, valor });
       } else {
-        await onCreateConvenioParticipante({ nombre: cvNombre.trim(), rol: cvRol.trim() || undefined, valor });
+        await onCreateConvenioParticipante({ convenioId: participanteConvenioId, nombre: cvNombre.trim(), rol: cvRol.trim() || undefined, valor });
       }
-      setShowConvenioModal(false);
-      resetConvenioForm();
+      setShowParticipanteModal(false);
+      resetParticipanteForm();
     } finally {
-      setIsSavingConvenio(false);
+      setIsSavingParticipante(false);
     }
   };
 
-  const handleDeleteConvenioClick = async (id: string) => {
+  const handleDeleteParticipanteClick = async (id: string) => {
     if (!window.confirm('¿Eliminar este participante del convenio? Esta acción no se puede deshacer.')) return;
     await onDeleteConvenioParticipante(id);
   };
@@ -533,7 +599,6 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const valorActual = latestAdicion ? latestAdicion.valorActual : project.valorInicial;
   const sumaValorPartes = valorPartes.reduce((acc, p) => acc + p.monto, 0);
   const sumaAportantes = aportantes.reduce((acc, a) => acc + a.monto, 0);
-  const sumaConvenioParticipantes = convenioParticipantes.reduce((acc, p) => acc + (p.valor ?? 0), 0);
 
   const formatCurrency = (value: number | null | undefined) => {
     if (value === null || value === undefined) return 'Sin definir';
@@ -1213,76 +1278,126 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         )}
 
         {infoTab === 'convenio' && (
-          <div className="text-xs">
-            <div className="flex items-center justify-between mb-1.5">
+          <div className="text-xs space-y-4">
+            <div className="flex items-center justify-between">
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
-                Participantes del Convenio {convenioParticipantes.length > 0 ? `(${convenioParticipantes.length})` : ''}
+                Convenios {convenios.length > 0 ? `(${convenios.length})` : ''}
               </span>
               {canEdit('projects') && (
                 <button
                   type="button"
-                  onClick={() => { resetConvenioForm(); setShowConvenioModal(true); }}
+                  onClick={handleOpenNewConvenio}
                   className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
                 >
-                  <Plus className="w-3 h-3" /> Agregar participante
+                  <Plus className="w-3 h-3" /> Nuevo convenio
                 </button>
               )}
             </div>
 
-            {convenioParticipantes.length === 0 ? (
+            {convenios.length === 0 ? (
               <p className="text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded-lg">
-                Todavía no se han agregado participantes del convenio para este proyecto.
+                Todavía no se han registrado convenios para este proyecto.
               </p>
             ) : (
-              <>
-                <div className="space-y-1.5">
-                  {convenioParticipantes.map((p) => (
-                    <div
-                      key={p.id}
-                      className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-white border border-slate-200 rounded-lg"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className="font-semibold text-slate-800 truncate">{p.nombre}</span>
-                        {p.rol && (
-                          <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                            {p.rol}
-                          </span>
-                        )}
+              convenios.map((convenio) => {
+                const participantesDelConvenio = convenioParticipantes.filter((p) => p.convenioId === convenio.id);
+                const sumaConvenio = participantesDelConvenio.reduce((acc, p) => acc + (p.valor ?? 0), 0);
+                return (
+                  <div key={convenio.id} className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 bg-slate-50 border-b border-slate-200">
+                      <div className="min-w-0">
+                        <span className="font-bold text-slate-900">{convenio.numero}</span>
+                        {convenio.nombre && <span className="text-slate-500"> — {convenio.nombre}</span>}
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {p.valor !== null && <span className="font-bold text-slate-800">{formatCurrency(p.valor)}</span>}
-                        {canEdit('projects') && (
+                      {canEdit('projects') && (
+                        <div className="flex items-center gap-3 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenNewParticipante(convenio.id)}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+                          >
+                            <Plus className="w-3 h-3" /> Participante
+                          </button>
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => handleStartEditConvenio(p)}
+                              onClick={() => handleStartEditConvenioForm(convenio)}
                               className="text-slate-400 hover:text-indigo-600"
-                              title="Editar participante"
+                              title="Editar convenio"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteConvenioClick(p.id)}
+                              onClick={() => handleDeleteConvenioEntityClick(convenio.id)}
                               className="text-slate-400 hover:text-rose-600"
-                              title="Eliminar participante"
+                              title="Eliminar convenio"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
-                  ))}
-                </div>
-                {sumaConvenioParticipantes > 0 && (
-                  <div className="mt-2 flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
-                    <span className="text-slate-500">Suma de participantes</span>
-                    <span className="font-bold text-slate-800">{formatCurrency(sumaConvenioParticipantes)}</span>
+
+                    <div className="p-3">
+                      {participantesDelConvenio.length === 0 ? (
+                        <p className="text-slate-400 py-3 text-center">Sin participantes todavía.</p>
+                      ) : (
+                        <>
+                          <div className="space-y-1.5">
+                            {participantesDelConvenio.map((p) => (
+                              <div
+                                key={p.id}
+                                className="flex flex-wrap items-center justify-between gap-2 p-2 bg-white border border-slate-200 rounded-lg"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                  <span className="font-semibold text-slate-800 truncate">{p.nombre}</span>
+                                  {p.rol && (
+                                    <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                      {p.rol}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {p.valor !== null && <span className="font-bold text-slate-800">{formatCurrency(p.valor)}</span>}
+                                  {canEdit('projects') && (
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleStartEditParticipante(p)}
+                                        className="text-slate-400 hover:text-indigo-600"
+                                        title="Editar participante"
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteParticipanteClick(p.id)}
+                                        className="text-slate-400 hover:text-rose-600"
+                                        title="Eliminar participante"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {sumaConvenio > 0 && (
+                            <div className="mt-2 flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
+                              <span className="text-slate-500">Suma de participantes</span>
+                              <span className="font-bold text-slate-800">{formatCurrency(sumaConvenio)}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
-                )}
-              </>
+                );
+              })
             )}
           </div>
         )}
@@ -2154,25 +2269,88 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         </div>
       )}
 
-      {/* Modal de Participante del Convenio -- crear o editar según editingConvenioId */}
-      {showConvenioModal && (
+      {/* Modal de Convenio -- crear o editar según editingConvenioFormId */}
+      {showConvenioFormModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                <Users className="w-4 h-4 text-indigo-600" />
-                {editingConvenioId ? 'Editar Participante' : 'Nuevo Participante del Convenio'}
+                <FileText className="w-4 h-4 text-indigo-600" />
+                {editingConvenioFormId ? 'Editar Convenio' : 'Nuevo Convenio'}
               </h3>
               <button
                 type="button"
-                onClick={() => { setShowConvenioModal(false); resetConvenioForm(); }}
+                onClick={() => { setShowConvenioFormModal(false); resetConvenioFormState(); }}
                 className="text-slate-400 hover:text-slate-600"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmitConvenio} className="space-y-3 text-xs">
+            <form onSubmit={handleSubmitConvenioForm} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Número</label>
+                <input
+                  type="text"
+                  required
+                  value={convNumero}
+                  onChange={(e) => setConvNumero(e.target.value)}
+                  placeholder="Ej: Convenio 1, Convenio No. 045-2026..."
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Nombre u objeto (opcional)</label>
+                <input
+                  type="text"
+                  value={convNombre}
+                  onChange={(e) => setConvNombre(e.target.value)}
+                  placeholder="Ej: Convenio de Cofinanciación"
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => { setShowConvenioFormModal(false); resetConvenioFormState(); }}
+                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingConvenioForm}
+                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSavingConvenioForm ? 'Guardando...' : editingConvenioFormId ? 'Guardar Cambios' : 'Crear Convenio'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Participante -- crear o editar según editingParticipanteId */}
+      {showParticipanteModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                <Users className="w-4 h-4 text-indigo-600" />
+                {editingParticipanteId ? 'Editar Participante' : 'Nuevo Participante del Convenio'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setShowParticipanteModal(false); resetParticipanteForm(); }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitParticipante} className="space-y-3 text-xs">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Nombre de la entidad</label>
                 <input
@@ -2204,17 +2382,17 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => { setShowConvenioModal(false); resetConvenioForm(); }}
+                  onClick={() => { setShowParticipanteModal(false); resetParticipanteForm(); }}
                   className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  disabled={isSavingConvenio}
+                  disabled={isSavingParticipante}
                   className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isSavingConvenio ? 'Guardando...' : editingConvenioId ? 'Guardar Cambios' : 'Crear Participante'}
+                  {isSavingParticipante ? 'Guardando...' : editingParticipanteId ? 'Guardar Cambios' : 'Crear Participante'}
                 </button>
               </div>
             </form>

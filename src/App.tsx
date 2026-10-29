@@ -16,6 +16,7 @@ import {
   AreaConsolida,
   ValorParte,
   Aportante,
+  Convenio,
   ConvenioParticipante,
   PeticionesConfig,
   EmailCandidate,
@@ -132,10 +133,19 @@ function mapAportante(a: any): Aportante {
   };
 }
 
+function mapConvenio(c: any): Convenio {
+  return {
+    id: String(c.id),
+    proyectoId: String(c.proyectoId),
+    numero: c.numero,
+    nombre: c.nombre || null,
+  };
+}
+
 function mapConvenioParticipante(p: any): ConvenioParticipante {
   return {
     id: String(p.id),
-    proyectoId: String(p.proyectoId),
+    convenioId: String(p.convenioId),
     nombre: p.nombre,
     rol: p.rol || null,
     valor: p.valor !== null && p.valor !== undefined ? Number(p.valor) : null,
@@ -224,6 +234,7 @@ export default function App() {
   const [currentProjectModificatorios, setCurrentProjectModificatorios] = useState<Modificatorio[]>([]);
   const [currentProjectValorPartes, setCurrentProjectValorPartes] = useState<ValorParte[]>([]);
   const [currentProjectAportantes, setCurrentProjectAportantes] = useState<Aportante[]>([]);
+  const [currentProjectConvenios, setCurrentProjectConvenios] = useState<Convenio[]>([]);
   const [currentProjectConvenioParticipantes, setCurrentProjectConvenioParticipantes] = useState<ConvenioParticipante[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
@@ -365,18 +376,20 @@ export default function App() {
       setCurrentProjectModificatorios([]);
       setCurrentProjectValorPartes([]);
       setCurrentProjectAportantes([]);
+      setCurrentProjectConvenios([]);
       setCurrentProjectConvenioParticipantes([]);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const [reportsResponse, alertsResponse, modificatoriosResponse, valorPartesResponse, aportantesResponse, convenioResponse] = await Promise.all([
+        const [reportsResponse, alertsResponse, modificatoriosResponse, valorPartesResponse, aportantesResponse, conveniosResponse, convenioParticipantesResponse] = await Promise.all([
           fetch(`/api/reports?projectId=${currentProjectId}`),
           fetch(`/api/alerts?projectId=${currentProjectId}`),
           fetch(`/api/projects?modificatorios=list&projectId=${currentProjectId}`),
           fetch(`/api/projects?valorPartes=list&projectId=${currentProjectId}`),
           fetch(`/api/projects?aportantes=list&projectId=${currentProjectId}`),
+          fetch(`/api/projects?convenios=list&projectId=${currentProjectId}`),
           fetch(`/api/projects?convenioParticipantes=list&projectId=${currentProjectId}`),
         ]);
         const reportsPayload = await reportsResponse.json();
@@ -384,7 +397,8 @@ export default function App() {
         const modificatoriosPayload = await modificatoriosResponse.json();
         const valorPartesPayload = await valorPartesResponse.json();
         const aportantesPayload = await aportantesResponse.json();
-        const convenioPayload = await convenioResponse.json();
+        const conveniosPayload = await conveniosResponse.json();
+        const convenioParticipantesPayload = await convenioParticipantesResponse.json();
         if (!reportsResponse.ok) throw new Error(reportsPayload.errors?.[0] || 'No fue posible consultar los informes.');
         if (!alertsResponse.ok) throw new Error(alertsPayload.errors?.[0] || 'No fue posible consultar las alertas.');
         if (cancelled) return;
@@ -393,7 +407,8 @@ export default function App() {
         setCurrentProjectModificatorios(modificatoriosResponse.ok ? modificatoriosPayload.data.map(mapModificatorio) : []);
         setCurrentProjectValorPartes(valorPartesResponse.ok ? valorPartesPayload.data.map(mapValorParte) : []);
         setCurrentProjectAportantes(aportantesResponse.ok ? aportantesPayload.data.map(mapAportante) : []);
-        setCurrentProjectConvenioParticipantes(convenioResponse.ok ? convenioPayload.data.map(mapConvenioParticipante) : []);
+        setCurrentProjectConvenios(conveniosResponse.ok ? conveniosPayload.data.map(mapConvenio) : []);
+        setCurrentProjectConvenioParticipantes(convenioParticipantesResponse.ok ? convenioParticipantesPayload.data.map(mapConvenioParticipante) : []);
       } catch (error) {
         if (!cancelled) {
           showToast(error instanceof Error ? error.message : 'No fue posible cargar los informes y alertas de este proyecto.', 'info');
@@ -624,6 +639,47 @@ export default function App() {
     showToast('Aportante eliminado.', 'success');
   };
 
+  const refetchConvenios = async () => {
+    const response = await fetch(`/api/projects?convenios=list&projectId=${currentProjectId}`);
+    const payload = await response.json();
+    if (response.ok) {
+      setCurrentProjectConvenios(payload.data.map(mapConvenio));
+    }
+  };
+
+  const handleCreateConvenio = async (data: { numero: string; nombre?: string }) => {
+    const response = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'convenioCreate', data: { projectId: Number(currentProjectId), ...data } }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el convenio.');
+    await refetchConvenios();
+    showToast('Convenio guardado.', 'success');
+  };
+
+  const handleUpdateConvenio = async (id: string, data: Partial<{ numero: string; nombre: string | null }>) => {
+    const response = await fetch('/api/projects', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'convenioUpdate', id: Number(id), data }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el convenio.');
+    await refetchConvenios();
+    showToast('Convenio actualizado.', 'success');
+  };
+
+  const handleDeleteConvenio = async (id: string) => {
+    const response = await fetch(`/api/projects?convenio=${id}`, { method: 'DELETE' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el convenio.');
+    await refetchConvenios();
+    await refetchConvenioParticipantes();
+    showToast('Convenio eliminado.', 'success');
+  };
+
   const refetchConvenioParticipantes = async () => {
     const response = await fetch(`/api/projects?convenioParticipantes=list&projectId=${currentProjectId}`);
     const payload = await response.json();
@@ -632,11 +688,11 @@ export default function App() {
     }
   };
 
-  const handleCreateConvenioParticipante = async (data: { nombre: string; rol?: string; valor?: number | null }) => {
+  const handleCreateConvenioParticipante = async (data: { convenioId: string; nombre: string; rol?: string; valor?: number | null }) => {
     const response = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind: 'convenioParticipanteCreate', data: { projectId: Number(currentProjectId), ...data } }),
+      body: JSON.stringify({ kind: 'convenioParticipanteCreate', data: { ...data, convenioId: Number(data.convenioId) } }),
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el participante.');
@@ -1663,6 +1719,10 @@ export default function App() {
               onCreateAportante={handleCreateAportante}
               onUpdateAportante={handleUpdateAportante}
               onDeleteAportante={handleDeleteAportante}
+              convenios={currentProjectConvenios}
+              onCreateConvenio={handleCreateConvenio}
+              onUpdateConvenio={handleUpdateConvenio}
+              onDeleteConvenio={handleDeleteConvenio}
               convenioParticipantes={currentProjectConvenioParticipantes}
               onCreateConvenioParticipante={handleCreateConvenioParticipante}
               onUpdateConvenioParticipante={handleUpdateConvenioParticipante}

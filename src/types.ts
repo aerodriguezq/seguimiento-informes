@@ -271,12 +271,21 @@ export interface Aportante {
   monto: number;
 }
 
-// Entidades que participan del convenio del proyecto (ej. Ejecutor,
-// Cofinanciador, Supervisor, Beneficiario) -- distinto de Aportantes, que
-// reparte el valor; esto es solo el listado de quién hace parte del convenio.
-export interface ConvenioParticipante {
+// Un proyecto puede tener N convenios (ej. Convenio 1, Convenio de
+// Cofinanciación, etc.), cada uno con su propia lista de participantes.
+export interface Convenio {
   id: string;
   proyectoId: string;
+  numero: string;
+  nombre: string | null;
+}
+
+// Entidades que participan de un convenio (ej. Ejecutor, Cofinanciador,
+// Supervisor, Beneficiario) -- distinto de Aportantes, que reparte el valor
+// del proyecto completo; esto es el listado de quién hace parte de CADA convenio.
+export interface ConvenioParticipante {
+  id: string;
+  convenioId: string;
   nombre: string;
   rol: string | null;
   valor: number | null;
