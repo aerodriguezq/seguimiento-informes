@@ -15,6 +15,7 @@ import {
   calculateDaysRemaining,
   getSemaforoStatus,
   getReportEffectiveDueDate,
+  groupReportsByStep,
 } from '../../data/mockData';
 import {
   Modificatorio,
@@ -24,6 +25,7 @@ import {
 } from '../../utils/projectStatus';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
+import { STAGE_LABEL, getStageColorClass } from '../common/stageStatus';
 import { MunicipiosMultiSelect } from '../common/MunicipiosMultiSelect';
 import { CurrencyInput } from '../common/CurrencyInput';
 import { ScheduleFrequencyField } from '../alerts/ScheduleFrequencyField';
@@ -521,11 +523,12 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const projectAlerts = alerts.filter((a) => a.projectId === project.id);
   const desembolsoReports = projectReports.filter((r) => r.typeName === 'Desembolso');
 
-  // Quick KPIs for this project
-  const countPendientes = projectReports.filter((r) => r.status === 'Pendientes Evidencias').length;
-  const countElaboracion = projectReports.filter((r) => r.status === 'Informe en Elaboración').length;
-  const countEntregados = projectReports.filter((r) => r.status === 'Entregado a Of. Proyectos').length;
+  // Quick KPIs for this project -- "En Curso" agrupa todo lo que no se ha
+  // completado, sin depender de en qué estado administrativo fijo quedó
+  // (ese campo no avanza con el flujo de pasos, solo con el envío final).
   const countEnviados = projectReports.filter((r) => r.status === 'Enviado').length;
+  const countEnCurso = projectReports.length - countEnviados;
+  const projectStepBreakdown = groupReportsByStep(projectReports);
 
   const countVencidos = projectReports.filter(
     (r) => getSemaforoStatus(getReportEffectiveDueDate(r), r.status) === 'vencido'
@@ -535,7 +538,8 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   ).length;
   const activeAlertsCount = projectAlerts.filter((a) => a.active).length;
 
-  // Filtered reports for the project table
+  // Filtered reports for the project table -- "Todos los estados" filtra
+  // por el paso REAL del informe, no por los 4 estados fijos.
   const filteredProjectReports = projectReports.filter((report) => {
     if (reportSearchQuery.trim()) {
       const q = reportSearchQuery.toLowerCase();
@@ -550,7 +554,14 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       return getSemaforoStatus(getReportEffectiveDueDate(report), report.status) === 'proximo';
     }
     if (reportFilterStatus !== 'all') {
-      return report.status === reportFilterStatus;
+      const isCompleted = report.isWorkflowCompleted || report.status === 'Enviado';
+      if (reportFilterStatus === 'Flujo completado') {
+        if (!isCompleted) return false;
+      } else if (reportFilterStatus === 'Sin paso asignado') {
+        if (isCompleted || report.currentStepName) return false;
+      } else if (report.currentStepName !== reportFilterStatus) {
+        return false;
+      }
     }
     return true;
   });
@@ -807,11 +818,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
           <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/60">
             <span className="text-[11px] font-medium text-amber-800 flex items-center justify-between">
-              Pendientes
+              En Curso
               <Clock className="w-3.5 h-3.5 text-amber-500" />
             </span>
-            <div className="text-xl font-bold text-amber-900 mt-1">{countPendientes}</div>
-            <span className="text-[10px] text-amber-700">Fase evidencias</span>
+            <div className="text-xl font-bold text-amber-900 mt-1">{countEnCurso}</div>
+            <span className="text-[10px] text-amber-700">Sin completar el flujo</span>
           </div>
 
           <div className="p-3 bg-rose-50 rounded-xl border border-rose-200/80">
@@ -1768,10 +1779,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               className="px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-lg text-slate-700"
             >
               <option value="all">Todos los estados</option>
-              <option value="Pendientes Evidencias">Pendientes Evidencias</option>
-              <option value="Informe en Elaboración">Informe en Elaboración</option>
-              <option value="Entregado a Of. Proyectos">Entregado a Of. Proyectos</option>
-              <option value="Enviado">Enviado</option>
+              {projectStepBreakdown.map((group) => (
+                <option key={group.name} value={group.name}>
+                  {group.name} ({group.count})
+                </option>
+              ))}
               <option value="vencidos">Solo Vencidos</option>
               <option value="proximos">Próximos a vencer</option>
             </select>
@@ -1829,7 +1841,29 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                         <SemaforoBadge status={semaforo} daysRemaining={daysRemaining} />
                       </td>
                       <td className="py-3 px-4">
-                        <StatusBadge status={report.status} size="sm" />
+                        {/* Estado del ciclo -- depende del paso de flujo real
+                            del informe, no de un ciclo genérico de 4 estados */}
+                        {report.isWorkflowCompleted ? (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800 whitespace-nowrap">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Flujo completado
+                          </span>
+                        ) : report.currentStepName ? (
+                          (() => {
+                            const stage = report.stageInstances?.find((s) => s.stepId === report.currentStepId);
+                            const colorClass = stage ? getStageColorClass(stage) : 'bg-slate-100 text-slate-600';
+                            return (
+                              <span
+                                className={`inline-block max-w-44 truncate rounded-full px-2 py-0.5 text-xs whitespace-nowrap ${colorClass}`}
+                                title={`${report.currentStepName}${stage ? ` — ${STAGE_LABEL[stage.status] || stage.status}` : ''}`}
+                              >
+                                {report.currentStepName}
+                              </span>
+                            );
+                          })()
+                        ) : (
+                          <StatusBadge status={report.status} size="sm" />
+                        )}
                       </td>
                       <td className="py-3 px-4 text-slate-700">
                         {primaryContact ? primaryContact.name : 'Sin asignar'}

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Project, Report, ReportStatus } from '../../types';
-import { calculateDaysRemaining, getSemaforoStatus, getReportEffectiveDueDate, STATUS_SEQUENCE } from '../../data/mockData';
+import { Project, Report } from '../../types';
+import { calculateDaysRemaining, getSemaforoStatus, getReportEffectiveDueDate, groupReportsByStep, STEP_GROUP_COLORS } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
 import { PipelineDashboard } from './PipelineDashboard';
@@ -28,15 +28,6 @@ const SEGUIMIENTO_KPI_META: { key: string; label: string; icon: string; color: s
   { key: 'material_vegetal', label: 'Material Vegetal', icon: '🌿', color: '#d97706', bg: '#fffbeb' },
 ];
 
-// Mismos colores que StatusBadge, para que el segmento de la barra combine
-// visualmente con el badge de esa etapa en el resto de la app.
-const STAGE_BAR_COLOR: Record<ReportStatus, string> = {
-  'Pendientes Evidencias': 'bg-amber-500',
-  'Informe en Elaboración': 'bg-blue-500',
-  'Entregado a Of. Proyectos': 'bg-indigo-500',
-  'Enviado': 'bg-emerald-500',
-};
-
 interface DashboardViewProps {
   projects: Project[];
   reports: Report[];
@@ -44,7 +35,7 @@ interface DashboardViewProps {
   onSelectProjectDetail: (projectId: string) => void;
   onSelectReportDetail: (reportId: string) => void;
   onOpenNewReport: () => void;
-  onViewAllReports: (filterStatus?: ReportStatus | 'vencidos' | 'proximos') => void;
+  onViewAllReports: (filterStatus?: string) => void;
   onOpenSeguimiento: () => void;
   isCurrentProjectSuspended: boolean;
 }
@@ -95,10 +86,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const overdue = projectReports.filter(
       (report) => getSemaforoStatus(getReportEffectiveDueDate(report), report.status) === 'vencido',
     ).length;
-    const stages = STATUS_SEQUENCE.map((status) => ({
-      status,
-      count: projectReports.filter((report) => report.status === status).length,
-    }));
+    // Igual que el panorama operativo de Informes: se agrupa por el paso
+    // real de cada informe, no por los 4 estados fijos.
+    const stages = groupReportsByStep(projectReports);
     return {
       project,
       total: projectReports.length,
@@ -109,12 +99,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   });
   const projectsWithReports = projectStats.filter((p) => p.total > 0);
+  // Color por nombre de paso consistente entre la barra de cada proyecto y
+  // la leyenda de abajo -- el orden sale del desglose global (más
+  // frecuente primero), ya que cada proyecto puede tener un flujo distinto.
+  const globalStepOrder = groupReportsByStep(reports).map((g) => g.name);
+  const stepColorFor = (name: string) => STEP_GROUP_COLORS[Math.max(globalStepOrder.indexOf(name), 0) % STEP_GROUP_COLORS.length];
 
   const kpis = [
     { label: 'Total de informes', value: totalReports, note: 'En el período activo', icon: FileText, tone: 'ink', action: () => onViewAllReports() },
     { label: 'Requieren atención', value: vencidos.length, note: 'Vencidos', icon: AlertCircle, tone: 'rose', action: () => onViewAllReports('vencidos') },
     { label: 'Próximos a vencer', value: proximos.length, note: 'En los próximos días', icon: Clock3, tone: 'amber', action: () => onViewAllReports('proximos') },
-    { label: 'Cumplimiento', value: `${compliance}%`, note: `${countEnviados} entregados`, icon: CheckCircle2, tone: 'indigo', action: () => onViewAllReports('Enviado') },
+    { label: 'Cumplimiento', value: `${compliance}%`, note: `${countEnviados} entregados`, icon: CheckCircle2, tone: 'indigo', action: () => onViewAllReports('Flujo completado') },
   ];
 
   return (
@@ -171,11 +166,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <span className="shrink-0 text-slate-500">{total} informe{total === 1 ? '' : 's'}</span>
                   </div>
                   <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
-                    {stages.map(({ status, count }) => count > 0 && (
+                    {stages.map(({ name, count }) => (
                       <div
-                        key={status}
-                        title={`${status}: ${count}`}
-                        className={`h-full ${STAGE_BAR_COLOR[status]}`}
+                        key={name}
+                        title={`${name}: ${count}`}
+                        className={`h-full ${stepColorFor(name)}`}
                         style={{ width: `${(count / total) * 100}%` }}
                       />
                     ))}
@@ -184,10 +179,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               ))}
             </div>
             <div className="mt-4 flex flex-wrap gap-x-3 gap-y-1.5 border-t border-slate-100 pt-3 text-[10px] text-slate-500">
-              {STATUS_SEQUENCE.map((status) => (
-                <span key={status} className="inline-flex items-center gap-1.5">
-                  <span className={`h-2 w-2 rounded-full ${STAGE_BAR_COLOR[status]}`} />
-                  {status}
+              {globalStepOrder.map((name) => (
+                <span key={name} className="inline-flex items-center gap-1.5">
+                  <span className={`h-2 w-2 rounded-full ${stepColorFor(name)}`} />
+                  {name}
                 </span>
               ))}
             </div>

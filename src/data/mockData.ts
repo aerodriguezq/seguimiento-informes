@@ -702,3 +702,54 @@ export const STATUS_SEQUENCE: ReportStatus[] = [
   'Entregado a Of. Proyectos',
   'Enviado',
 ];
+
+export interface ReportStepGroup {
+  name: string;
+  count: number;
+}
+
+// Agrupa informes por el paso REAL en el que están (igual que la columna
+// "Estado del Ciclo"), en vez de los 4 estados administrativos fijos de
+// STATUS_SEQUENCE -- un informe con flujo configurado prácticamente nunca
+// transita por "Informe en Elaboración"/"Entregado a Of. Proyectos" (ese
+// campo se queda en su valor inicial hasta que el flujo se completa), así
+// que cualquier conteo/filtro/gráfico que agrupe por esos 4 valores fijos
+// queda desconectado de en qué paso está cada informe de verdad. Se
+// reutiliza en el panorama operativo, el avance por proyecto del dashboard
+// y los filtros de "estado" de las listas de informes.
+export function groupReportsByStep(
+  reports: Pick<Report, 'currentStepName' | 'isWorkflowCompleted' | 'status'>[],
+): ReportStepGroup[] {
+  const counts = new Map<string, number>();
+  let completed = 0;
+  let unassigned = 0;
+  for (const r of reports) {
+    if (r.isWorkflowCompleted || r.status === 'Enviado') {
+      completed += 1;
+    } else if (r.currentStepName) {
+      counts.set(r.currentStepName, (counts.get(r.currentStepName) ?? 0) + 1);
+    } else {
+      unassigned += 1;
+    }
+  }
+  const groups = Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+  if (completed > 0) groups.push({ name: 'Flujo completado', count: completed });
+  if (unassigned > 0) groups.push({ name: 'Sin paso asignado', count: unassigned });
+  return groups;
+}
+
+// Paleta cíclica para colorear grupos de pasos -- la cantidad de categorías
+// varía según lo configurado en Listas Maestras, así que no hay un color
+// fijo por categoría como con los 4 estados de antes.
+export const STEP_GROUP_COLORS = [
+  'bg-teal-600',
+  'bg-amber-500',
+  'bg-indigo-500',
+  'bg-rose-500',
+  'bg-emerald-500',
+  'bg-violet-500',
+  'bg-sky-500',
+  'bg-orange-500',
+];

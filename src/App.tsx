@@ -450,7 +450,7 @@ export default function App() {
     goToModule('new_report');
   };
 
-  const handleViewAllReports = (filterStatus?: ReportStatus | 'vencidos' | 'proximos') => {
+  const handleViewAllReports = (filterStatus?: string) => {
     setReportsFilterStatus(filterStatus || 'all');
     goToModule('reports');
   };

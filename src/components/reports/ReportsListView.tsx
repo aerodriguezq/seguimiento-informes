@@ -12,6 +12,8 @@ import {
   calculateDaysRemaining,
   getSemaforoStatus,
   getReportEffectiveDueDate,
+  groupReportsByStep,
+  STEP_GROUP_COLORS,
 } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
@@ -35,20 +37,6 @@ import {
   CalendarDays,
   BellRing,
 } from 'lucide-react';
-
-// Paleta cíclica para las barras del panorama operativo -- la cantidad de
-// pasos varía según lo configurado en Listas Maestras, así que no hay un
-// color fijo por categoría como antes (teal/amber/indigo de los 3 estados).
-const STEP_BREAKDOWN_COLORS = [
-  'bg-teal-600',
-  'bg-amber-500',
-  'bg-indigo-500',
-  'bg-rose-500',
-  'bg-emerald-500',
-  'bg-violet-500',
-  'bg-sky-500',
-  'bg-orange-500',
-];
 
 interface ReportsListViewProps {
   reports: Report[];
@@ -81,31 +69,10 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
   isCurrentProjectSuspended = false,
 }) => {
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
-  // El panorama operativo agrupa por el paso REAL en el que está cada
-  // informe (igual que la columna "Estado del Ciclo" de la tabla), no por
-  // los 4 estados administrativos fijos -- cada tipo de informe tiene su
-  // propio flujo con sus propios nombres de paso, así que la cantidad de
-  // categorías varía según lo que esté configurado en Listas Maestras.
-  const stepBreakdown = useMemo(() => {
-    const counts = new Map<string, number>();
-    let completed = 0;
-    let unassigned = 0;
-    for (const r of reports) {
-      if (r.isWorkflowCompleted || r.status === 'Enviado') {
-        completed += 1;
-      } else if (r.currentStepName) {
-        counts.set(r.currentStepName, (counts.get(r.currentStepName) ?? 0) + 1);
-      } else {
-        unassigned += 1;
-      }
-    }
-    const groups = Array.from(counts.entries())
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count);
-    if (completed > 0) groups.push({ name: 'Flujo completado', count: completed });
-    if (unassigned > 0) groups.push({ name: 'Sin paso asignado', count: unassigned });
-    return groups;
-  }, [reports]);
+  // El panorama operativo (y el filtro de "estado" de abajo) agrupan por el
+  // paso REAL en el que está cada informe, no por los 4 estados
+  // administrativos fijos -- ver groupReportsByStep en data/mockData.ts.
+  const stepBreakdown = useMemo(() => groupReportsByStep(reports), [reports]);
   const totalReports = reports.length;
   const activeAlerts = alerts.filter((alert) => alert.active).length;
   const latestReport = useMemo(() => {
@@ -141,13 +108,22 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
         return false;
       }
 
-      // Status filter
+      // Status filter -- "Todos los estados" filtra por el paso REAL del
+      // informe (su nombre, "Flujo completado" o "Sin paso asignado"), no
+      // por los 4 estados fijos (ver groupReportsByStep).
       if (selectedStatus === 'vencidos') {
         if (getSemaforoStatus(getReportEffectiveDueDate(report), report.status) !== 'vencido') return false;
       } else if (selectedStatus === 'proximos') {
         if (getSemaforoStatus(getReportEffectiveDueDate(report), report.status) !== 'proximo') return false;
-      } else if (selectedStatus !== 'all' && report.status !== selectedStatus) {
-        return false;
+      } else if (selectedStatus !== 'all') {
+        const isCompleted = report.isWorkflowCompleted || report.status === 'Enviado';
+        if (selectedStatus === 'Flujo completado') {
+          if (!isCompleted) return false;
+        } else if (selectedStatus === 'Sin paso asignado') {
+          if (isCompleted || report.currentStepName) return false;
+        } else if (report.currentStepName !== selectedStatus) {
+          return false;
+        }
       }
 
       // Semaforo filter
@@ -185,7 +161,7 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
   }, [reports, searchTerm, selectedType, selectedStatus, selectedSemaforo, sortField, sortOrder]);
 
   const handleExportCSV = () => {
-    const headers = ['Consecutivo', 'Proyecto', 'BPIN', 'Tipo', 'Periodo', 'Fecha_Limite', 'Estado', 'Semaforo'];
+    const headers = ['Consecutivo', 'Proyecto', 'BPIN', 'Tipo', 'Periodo', 'Fecha_Limite', 'Paso_Actual', 'Estado', 'Semaforo'];
     const rows = filteredReports.map((r) => [
       r.consecutive,
       `"${r.projectName.replace(/"/g, '""')}"`,
@@ -193,6 +169,7 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
       `"${r.typeName.replace(/"/g, '""')}"`,
       `"${r.month} ${r.year}"`,
       getReportEffectiveDueDate(r),
+      `"${(r.isWorkflowCompleted || r.status === 'Enviado' ? 'Flujo completado' : r.currentStepName || 'Sin paso asignado').replace(/"/g, '""')}"`,
       r.status,
       getSemaforoStatus(getReportEffectiveDueDate(r), r.status),
     ]);
@@ -299,7 +276,7 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
                 </div>
                 <div className="mt-2 h-1.5 rounded-full bg-white/80">
                   <div
-                    className={`h-full rounded-full ${STEP_BREAKDOWN_COLORS[idx % STEP_BREAKDOWN_COLORS.length]}`}
+                    className={`h-full rounded-full ${STEP_GROUP_COLORS[idx % STEP_GROUP_COLORS.length]}`}
                     style={{ width: `${totalReports ? Math.max((group.count / totalReports) * 100, 3) : 0}%` }}
                   />
                 </div>
@@ -361,10 +338,11 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
               className="w-full px-3 py-2 text-xs bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200 rounded-lg outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all text-slate-800"
             >
               <option value="all">Todos los estados</option>
-              <option value="Pendientes Evidencias">Pendientes Evidencias</option>
-              <option value="Informe en Elaboración">Informe en Elaboración</option>
-              <option value="Entregado a Of. Proyectos">Entregado a Of. Proyectos</option>
-              <option value="Enviado">Enviado (Cumplido)</option>
+              {stepBreakdown.map((group) => (
+                <option key={group.name} value={group.name}>
+                  {group.name} ({group.count})
+                </option>
+              ))}
               <option value="vencidos">Solo Vencidos</option>
               <option value="proximos">Solo Próximos a Vencer</option>
             </select>
