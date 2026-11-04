@@ -646,6 +646,18 @@ export const INITIAL_NOTIFICATIONS: SystemNotification[] = [
 ];
 
 // Helper calculations
+
+// El semáforo/días restantes de un informe se mide contra la fecha límite
+// del PASO en el que realmente está (report.stageInstances), no contra la
+// fecha límite final de todo el flujo -- si no, un informe recién empezado
+// se ve con mucho margen aunque el paso en el que está ya esté por vencer.
+// report.dueDate (la fecha final) queda de respaldo cuando no hay un paso
+// activo con fecha límite propia (ej. sin flujo configurado, o completado).
+export function getReportEffectiveDueDate(report: Pick<Report, 'dueDate' | 'currentStepId' | 'stageInstances'>): string {
+  const currentStage = report.stageInstances?.find((s) => s.stepId === report.currentStepId);
+  return currentStage?.dueDate || report.dueDate;
+}
+
 export function calculateDaysRemaining(dueDateStr: string, status: ReportStatus): number {
   if (status === 'Enviado') {
     return 0; // Already fulfilled

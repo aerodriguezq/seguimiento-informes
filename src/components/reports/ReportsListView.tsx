@@ -11,6 +11,7 @@ import {
 import {
   calculateDaysRemaining,
   getSemaforoStatus,
+  getReportEffectiveDueDate,
 } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
@@ -106,16 +107,16 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
 
       // Status filter
       if (selectedStatus === 'vencidos') {
-        if (getSemaforoStatus(report.dueDate, report.status) !== 'vencido') return false;
+        if (getSemaforoStatus(getReportEffectiveDueDate(report), report.status) !== 'vencido') return false;
       } else if (selectedStatus === 'proximos') {
-        if (getSemaforoStatus(report.dueDate, report.status) !== 'proximo') return false;
+        if (getSemaforoStatus(getReportEffectiveDueDate(report), report.status) !== 'proximo') return false;
       } else if (selectedStatus !== 'all' && report.status !== selectedStatus) {
         return false;
       }
 
       // Semaforo filter
       if (selectedSemaforo !== 'all') {
-        const currentSemaforo = getSemaforoStatus(report.dueDate, report.status);
+        const currentSemaforo = getSemaforoStatus(getReportEffectiveDueDate(report), report.status);
         if (currentSemaforo !== selectedSemaforo) return false;
       }
 
@@ -125,11 +126,12 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
         // Un informe ya entregado tiene su fecha límite en el pasado, así que
         // con el orden ascendente simple aparecía primero -- lo cual tapaba
         // los pendientes reales. Los entregados se agrupan siempre al final;
-        // dentro de cada grupo (pendientes / entregados) se ordena por fecha.
+        // dentro de cada grupo (pendientes / entregados) se ordena por fecha
+        // límite del paso actual (no la fecha límite final del flujo).
         const aDelivered = a.isWorkflowCompleted || a.status === 'Enviado';
         const bDelivered = b.isWorkflowCompleted || b.status === 'Enviado';
         if (aDelivered !== bDelivered) return aDelivered ? 1 : -1;
-        const comp = new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+        const comp = new Date(getReportEffectiveDueDate(a)).getTime() - new Date(getReportEffectiveDueDate(b)).getTime();
         return sortOrder === 'asc' ? comp : -comp;
       }
       if (sortField === 'consecutive') {
@@ -154,9 +156,9 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
       r.projectBpin,
       `"${r.typeName.replace(/"/g, '""')}"`,
       `"${r.month} ${r.year}"`,
-      r.dueDate,
+      getReportEffectiveDueDate(r),
       r.status,
-      getSemaforoStatus(r.dueDate, r.status),
+      getSemaforoStatus(getReportEffectiveDueDate(r), r.status),
     ]);
     const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -463,8 +465,9 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
                 </tr>
               ) : (
                 filteredReports.map((report) => {
-                  const daysRemaining = calculateDaysRemaining(report.dueDate, report.status);
-                  const semaforo = getSemaforoStatus(report.dueDate, report.status);
+                  const effectiveDueDate = getReportEffectiveDueDate(report);
+                  const daysRemaining = calculateDaysRemaining(effectiveDueDate, report.status);
+                  const semaforo = getSemaforoStatus(effectiveDueDate, report.status);
                   const assignedContactNames = getContactNames(getAssignedContactIds(report));
 
                   return (
@@ -503,9 +506,10 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
                         </span>
                       </td>
 
-                      {/* Fecha Límite */}
+                      {/* Fecha Límite -- del paso actual, no la fecha final de
+                          todo el flujo (coincide con el semáforo de al lado) */}
                       <td className="py-3.5 px-4 whitespace-nowrap font-medium text-slate-800">
-                        {report.dueDate}
+                        {effectiveDueDate}
                       </td>
 
                       {/* Semáforo */}

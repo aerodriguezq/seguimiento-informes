@@ -25,6 +25,7 @@ import {
 import { Modificatorio, isProjectSuspended, expectedReportMonths } from './utils/projectStatus';
 import {
   getSemaforoStatus,
+  getReportEffectiveDueDate,
 } from './data/mockData';
 import { Header } from './components/layout/Header';
 import { SearchCommandModal } from './components/layout/SearchCommandModal';
@@ -427,7 +428,7 @@ export default function App() {
   // Counts for sidebar
   const pendingReportsCount = reports.filter((r) => r.status !== 'Enviado').length;
   const urgentReportsCount = reports.filter((r) => {
-    const s = getSemaforoStatus(r.dueDate, r.status);
+    const s = getSemaforoStatus(getReportEffectiveDueDate(r), r.status);
     return s === 'vencido' || s === 'proximo';
   }).length;
   const activeAlertsCount = alerts.filter((a) => a.active).length;

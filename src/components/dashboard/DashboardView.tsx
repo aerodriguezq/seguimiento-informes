@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Project, Report, ReportStatus } from '../../types';
-import { calculateDaysRemaining, getSemaforoStatus, STATUS_SEQUENCE } from '../../data/mockData';
+import { calculateDaysRemaining, getSemaforoStatus, getReportEffectiveDueDate, STATUS_SEQUENCE } from '../../data/mockData';
 import { StatusBadge } from '../common/StatusBadge';
 import { SemaforoBadge } from '../common/SemaforoBadge';
 import { PipelineDashboard } from './PipelineDashboard';
@@ -82,10 +82,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     year: 'numeric',
   }).format(new Date());
   const countEnviados = reports.filter((r) => r.status === 'Enviado').length;
-  const vencidos = reports.filter((r) => getSemaforoStatus(r.dueDate, r.status) === 'vencido');
-  const proximos = reports.filter((r) => getSemaforoStatus(r.dueDate, r.status) === 'proximo');
+  const vencidos = reports.filter((r) => getSemaforoStatus(getReportEffectiveDueDate(r), r.status) === 'vencido');
+  const proximos = reports.filter((r) => getSemaforoStatus(getReportEffectiveDueDate(r), r.status) === 'proximo');
   const urgentReports = [...vencidos, ...proximos].sort(
-    (a, b) => calculateDaysRemaining(a.dueDate, a.status) - calculateDaysRemaining(b.dueDate, b.status),
+    (a, b) => calculateDaysRemaining(getReportEffectiveDueDate(a), a.status) - calculateDaysRemaining(getReportEffectiveDueDate(b), b.status),
   );
   const totalReports = reports.length;
   const compliance = totalReports ? Math.round((countEnviados / totalReports) * 100) : 0;
@@ -93,7 +93,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const projectReports = reports.filter((report) => report.projectId === project.id);
     const sent = projectReports.filter((report) => report.status === 'Enviado').length;
     const overdue = projectReports.filter(
-      (report) => getSemaforoStatus(report.dueDate, report.status) === 'vencido',
+      (report) => getSemaforoStatus(getReportEffectiveDueDate(report), report.status) === 'vencido',
     ).length;
     const stages = STATUS_SEQUENCE.map((status) => ({
       status,
@@ -156,7 +156,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <div className={`grid grid-cols-1 gap-5 ${projectsWithReports.length > 0 ? 'xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.85fr)]' : ''}`}>
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_10px_24px_rgba(20,32,43,0.045)]">
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4"><div><div className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-rose-600" /><h3 className="text-sm font-bold text-slate-950">Prioridades de gestión</h3></div><p className="mt-1 text-xs text-slate-500">Elementos que necesitan una acción antes del siguiente corte.</p></div><button type="button" onClick={() => onViewAllReports()} className="hidden items-center gap-1 text-xs font-bold text-indigo-700 hover:text-indigo-900 sm:inline-flex">Ver todos <ArrowUpRight className="h-3.5 w-3.5" /></button></div>
-          {urgentReports.length === 0 ? <div className="flex min-h-56 flex-col items-center justify-center px-6 text-center"><span className="mb-3 rounded-full bg-indigo-50 p-3 text-indigo-700"><CheckCircle2 className="h-5 w-5" /></span><h4 className="text-sm font-bold text-slate-900">Sin excepciones abiertas</h4><p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">No hay informes vencidos o próximos a vencer en la información disponible.</p></div> : <div className="overflow-x-auto"><table className="w-full min-w-170 text-left"><thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-widest text-slate-500"><tr><th className="px-5 py-3">Informe</th><th className="px-3 py-3">Proyecto</th><th className="px-3 py-3">Vencimiento</th><th className="px-3 py-3">Estado</th><th className="px-5 py-3 text-right">Acción</th></tr></thead><tbody className="divide-y divide-slate-100 text-xs">{urgentReports.slice(0, 6).map((report) => { const days = calculateDaysRemaining(report.dueDate, report.status); return <tr key={report.id} onClick={() => onSelectReportDetail(report.id)} className="group cursor-pointer transition hover:bg-slate-50"><td className="px-5 py-3.5"><div className="font-bold text-slate-900">{report.consecutive}</div><div className="mt-0.5 max-w-48 truncate text-[11px] text-slate-500">{report.typeName}</div></td><td className="max-w-48 truncate px-3 py-3.5 font-medium text-slate-700">{report.projectName}</td><td className="px-3 py-3.5"><div className="font-medium text-slate-700">{report.dueDate}</div><div className="mt-1 text-[11px] text-slate-400">{report.month} {report.year}</div></td><td className="px-3 py-3.5"><div className="flex flex-col items-start gap-1"><SemaforoBadge status={getSemaforoStatus(report.dueDate, report.status)} daysRemaining={days} /><StatusBadge status={report.status} size="sm" /></div></td><td className="px-5 py-3.5 text-right"><button type="button" onClick={(event) => { event.stopPropagation(); onSelectReportDetail(report.id); }} className="inline-flex items-center gap-1 font-bold text-indigo-700 hover:text-indigo-900">Gestionar <ChevronRight className="h-3.5 w-3.5" /></button></td></tr>; })}</tbody></table></div>}
+          {urgentReports.length === 0 ? <div className="flex min-h-56 flex-col items-center justify-center px-6 text-center"><span className="mb-3 rounded-full bg-indigo-50 p-3 text-indigo-700"><CheckCircle2 className="h-5 w-5" /></span><h4 className="text-sm font-bold text-slate-900">Sin excepciones abiertas</h4><p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">No hay informes vencidos o próximos a vencer en la información disponible.</p></div> : <div className="overflow-x-auto"><table className="w-full min-w-170 text-left"><thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-widest text-slate-500"><tr><th className="px-5 py-3">Informe</th><th className="px-3 py-3">Proyecto</th><th className="px-3 py-3">Vencimiento</th><th className="px-3 py-3">Estado</th><th className="px-5 py-3 text-right">Acción</th></tr></thead><tbody className="divide-y divide-slate-100 text-xs">{urgentReports.slice(0, 6).map((report) => { const effectiveDueDate = getReportEffectiveDueDate(report); const days = calculateDaysRemaining(effectiveDueDate, report.status); return <tr key={report.id} onClick={() => onSelectReportDetail(report.id)} className="group cursor-pointer transition hover:bg-slate-50"><td className="px-5 py-3.5"><div className="font-bold text-slate-900">{report.consecutive}</div><div className="mt-0.5 max-w-48 truncate text-[11px] text-slate-500">{report.typeName}</div></td><td className="max-w-48 truncate px-3 py-3.5 font-medium text-slate-700">{report.projectName}</td><td className="px-3 py-3.5"><div className="font-medium text-slate-700">{effectiveDueDate}</div><div className="mt-1 text-[11px] text-slate-400">{report.month} {report.year}</div></td><td className="px-3 py-3.5"><div className="flex flex-col items-start gap-1"><SemaforoBadge status={getSemaforoStatus(effectiveDueDate, report.status)} daysRemaining={days} /><StatusBadge status={report.status} size="sm" /></div></td><td className="px-5 py-3.5 text-right"><button type="button" onClick={(event) => { event.stopPropagation(); onSelectReportDetail(report.id); }} className="inline-flex items-center gap-1 font-bold text-indigo-700 hover:text-indigo-900">Gestionar <ChevronRight className="h-3.5 w-3.5" /></button></td></tr>; })}</tbody></table></div>}
         </section>
 
         {projectsWithReports.length > 0 && (

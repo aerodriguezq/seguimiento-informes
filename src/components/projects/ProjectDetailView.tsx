@@ -14,6 +14,7 @@ import {
 import {
   calculateDaysRemaining,
   getSemaforoStatus,
+  getReportEffectiveDueDate,
 } from '../../data/mockData';
 import {
   Modificatorio,
@@ -527,10 +528,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const countEnviados = projectReports.filter((r) => r.status === 'Enviado').length;
 
   const countVencidos = projectReports.filter(
-    (r) => getSemaforoStatus(r.dueDate, r.status) === 'vencido'
+    (r) => getSemaforoStatus(getReportEffectiveDueDate(r), r.status) === 'vencido'
   ).length;
   const countProximos = projectReports.filter(
-    (r) => getSemaforoStatus(r.dueDate, r.status) === 'proximo'
+    (r) => getSemaforoStatus(getReportEffectiveDueDate(r), r.status) === 'proximo'
   ).length;
   const activeAlertsCount = projectAlerts.filter((a) => a.active).length;
 
@@ -543,10 +544,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       if (!matchConsecutive && !matchType) return false;
     }
     if (reportFilterStatus === 'vencidos') {
-      return getSemaforoStatus(report.dueDate, report.status) === 'vencido';
+      return getSemaforoStatus(getReportEffectiveDueDate(report), report.status) === 'vencido';
     }
     if (reportFilterStatus === 'proximos') {
-      return getSemaforoStatus(report.dueDate, report.status) === 'proximo';
+      return getSemaforoStatus(getReportEffectiveDueDate(report), report.status) === 'proximo';
     }
     if (reportFilterStatus !== 'all') {
       return report.status === reportFilterStatus;
@@ -1801,8 +1802,9 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 </tr>
               ) : (
                 filteredProjectReports.map((report) => {
-                  const daysRemaining = calculateDaysRemaining(report.dueDate, report.status);
-                  const semaforo = getSemaforoStatus(report.dueDate, report.status);
+                  const effectiveDueDate = getReportEffectiveDueDate(report);
+                  const daysRemaining = calculateDaysRemaining(effectiveDueDate, report.status);
+                  const semaforo = getSemaforoStatus(effectiveDueDate, report.status);
                   const primaryContact = contacts.find((c) => c.id === report.primaryContactId);
 
                   return (
@@ -1821,7 +1823,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                         {report.month} {report.year}
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap font-medium text-slate-800">
-                        {report.dueDate}
+                        {effectiveDueDate}
                       </td>
                       <td className="py-3 px-4">
                         <SemaforoBadge status={semaforo} daysRemaining={daysRemaining} />

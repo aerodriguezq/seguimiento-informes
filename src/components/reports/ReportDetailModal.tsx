@@ -12,6 +12,7 @@ import {
 import {
   calculateDaysRemaining,
   getSemaforoStatus,
+  getReportEffectiveDueDate,
   STATUS_SEQUENCE,
   MONTHS_LIST,
 } from '../../data/mockData';
@@ -187,14 +188,8 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [returnAttachmentsError, setReturnAttachmentsError] = useState('');
   const [activeTab, setActiveTab] = useState<'timeline' | 'contacts' | 'alerts' | 'attachments' | 'history'>('timeline');
 
-  // El semáforo/días restantes se mide contra la fecha límite del PASO
-  // ACTUAL (ej. paso 1 de 3), no contra la fecha límite final de todo el
-  // informe -- si no, un informe recién empezado se ve con "11 días" de
-  // margen aunque el paso en el que realmente está ya esté por vencer.
-  // report.dueDate (la fecha final) solo se usa de respaldo cuando no hay
-  // un paso activo con fecha límite propia (ej. sin flujo configurado).
   const currentStepInstance = report.stageInstances?.find((s) => s.stepId === report.currentStepId);
-  const effectiveDueDate = currentStepInstance?.dueDate || report.dueDate;
+  const effectiveDueDate = getReportEffectiveDueDate(report);
   const daysRemaining = calculateDaysRemaining(effectiveDueDate, report.status);
   const semaforo = getSemaforoStatus(effectiveDueDate, report.status);
 

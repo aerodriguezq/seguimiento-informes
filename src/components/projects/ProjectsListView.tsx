@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Project, Report, ReportType } from '../../types';
-import { calculateDaysRemaining, getSemaforoStatus } from '../../data/mockData';
+import { calculateDaysRemaining, getSemaforoStatus, getReportEffectiveDueDate } from '../../data/mockData';
 import {
   Search,
   LayoutGrid,
@@ -85,8 +85,8 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     const pReports = reports.filter((r) => r.projectId === projectId);
     const total = pReports.length;
     const sent = pReports.filter((r) => r.status === 'Enviado').length;
-    const overdue = pReports.filter((r) => getSemaforoStatus(r.dueDate, r.status) === 'vencido').length;
-    const upcoming = pReports.filter((r) => getSemaforoStatus(r.dueDate, r.status) === 'proximo').length;
+    const overdue = pReports.filter((r) => getSemaforoStatus(getReportEffectiveDueDate(r), r.status) === 'vencido').length;
+    const upcoming = pReports.filter((r) => getSemaforoStatus(getReportEffectiveDueDate(r), r.status) === 'proximo').length;
     const pending = total - sent;
     const compliancePercent = total > 0 ? Math.round((sent / total) * 100) : 100;
     return {
