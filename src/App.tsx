@@ -1764,6 +1764,7 @@ export default function App() {
               contacts={contacts}
               reportTypeSteps={reportTypeSteps}
               projects={projects}
+              currentProjectId={currentProjectId}
               onAddReportType={handleAddReportType}
               onAddContact={handleAddContact}
               onUpdateContact={handleUpdateContact}

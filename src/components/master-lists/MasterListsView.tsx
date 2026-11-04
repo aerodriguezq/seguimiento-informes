@@ -30,6 +30,7 @@ interface MasterListsViewProps {
   contacts: Contact[];
   reportTypeSteps: ReportTypeStep[];
   projects: Project[];
+  currentProjectId?: string;
   onAddReportType: (type: ReportType) => Promise<void>;
   onUpdateReportType: (typeId: string, updates: Partial<Pick<ReportType, 'code' | 'name' | 'periodicity' | 'description' | 'active'>>) => Promise<void>;
   onDeleteReportType: (typeId: string) => Promise<void>;
@@ -59,6 +60,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   contacts,
   reportTypeSteps,
   projects,
+  currentProjectId,
   onAddReportType,
   onUpdateReportType,
   onDeleteReportType,
@@ -84,6 +86,8 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
 }) => {
   const { canEdit } = useAuth();
   const canEditLists = canEdit('lists');
+  const currentProject = projects.find((p) => p.id === currentProjectId) ?? null;
+  const [showAllTypesForProject, setShowAllTypesForProject] = useState(false);
 
   const [stepsModalTypeId, setStepsModalTypeId] = useState<string | null>(null);
   const [stepsScopeProjectId, setStepsScopeProjectId] = useState<string | null>(null);
@@ -303,11 +307,20 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
   const [togglingContactActiveId, setTogglingContactActiveId] = useState<string | null>(null);
 
-  const filteredTypes = reportTypes.filter(
-    (t) =>
+  // Con un proyecto activo, por defecto solo se listan los tipos de
+  // informe aplicables a ESE proyecto (mismo criterio que el panel "Tipos
+  // de Informe Aplicables" del Detalle de Proyecto: applicableTypeIds
+  // vacío = todos) -- "showAllTypesForProject" es la válvula de escape
+  // para gestionar un tipo que no aplica al proyecto activo sin tener que
+  // cambiar de proyecto.
+  const filteredTypes = reportTypes.filter((t) => {
+    const matchesSearch =
       t.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+      t.name.toLowerCase().includes(searchTerm.toLowerCase());
+    if (!matchesSearch) return false;
+    if (!currentProject || showAllTypesForProject) return true;
+    return currentProject.applicableTypeIds.length === 0 || currentProject.applicableTypeIds.includes(t.id);
+  });
 
   const filteredContacts = contacts.filter(
     (c) =>
@@ -977,9 +990,23 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                 className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
               />
             </div>
-            <span className="text-xs text-slate-400">
-              {filteredTypes.length} tipos activos
-            </span>
+            <div className="flex items-center gap-3 shrink-0">
+              {currentProject && (
+                <label className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 cursor-pointer whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={showAllTypesForProject}
+                    onChange={(e) => setShowAllTypesForProject(e.target.checked)}
+                    className="rounded"
+                    style={{ accentColor: '#4f46e5' }}
+                  />
+                  Mostrar todos (no solo los de {currentProject.name})
+                </label>
+              )}
+              <span className="text-xs text-slate-400">
+                {filteredTypes.length} tipos activos
+              </span>
+            </div>
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-x-auto">
@@ -1029,7 +1056,14 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                           type="button"
                           onClick={() => {
                             setStepsModalTypeId(type.id);
-                            setStepsScopeProjectId(null);
+                            // Por defecto abre en el flujo del proyecto activo
+                            // (si ese proyecto aplica a este tipo) en vez de la
+                            // plantilla general -- es lo que casi siempre se
+                            // quiere editar al entrar desde el proyecto activo.
+                            const appliesToCurrentProject =
+                              currentProject &&
+                              (currentProject.applicableTypeIds.length === 0 || currentProject.applicableTypeIds.includes(type.id));
+                            setStepsScopeProjectId(appliesToCurrentProject ? currentProject.id : null);
                           }}
                           className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100"
                         >
