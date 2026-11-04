@@ -896,32 +896,37 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                   <span className="text-[11px] text-slate-500">Sistema centralizado</span>
                 </div>
 
-                {scopedFlowSteps.length > 0 && report.currentStepId ? (
+                {scopedFlowSteps.length > 0 ? (
                   (user.isAdmin || canEdit('reports')) && canActOnCurrentReviewStep && (() => {
                     // Quien no es admin solo puede DEVOLVER a un paso anterior
-                    // con observación -- mover hacia adelante o a un paso sin
+                    // con observación -- mover hacia adelante, asignar el
+                    // paso inicial (cuando el informe todavía no tiene uno,
+                    // ej. carga masiva histórica) o moverse a uno sin
                     // relación queda reservado a administradores (el backend
-                    // aplica la misma regla, esto evita un 403 confuso). Si el
-                    // paso actual requiere revisión, llegar hasta aquí ya
+                    // aplica la misma regla, esto evita un 403 confuso). Si
+                    // el paso actual requiere revisión, llegar hasta aquí ya
                     // significa que esta persona es el Principal (o un admin).
                     const currentOrder = scopedFlowSteps.find((s) => s.id === report.currentStepId)?.order;
                     const selectableSteps = user.isAdmin
                       ? scopedFlowSteps
                       : scopedFlowSteps.filter((s) => currentOrder != null && s.order < currentOrder);
                     if (selectableSteps.length === 0) return null;
+                    const needsPlaceholder = !user.isAdmin || !report.currentStepId;
                     return (
                       <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
                         <span className="text-slate-500 block">
-                          {currentFlowStep?.requiresReview
-                            ? 'Generar observación y devolver a un paso anterior:'
-                            : user.isAdmin ? 'Cambiar paso actual manualmente:' : 'Devolver a un paso anterior con observación:'}
+                          {!report.currentStepId
+                            ? 'Asignar paso inicial del flujo:'
+                            : currentFlowStep?.requiresReview
+                              ? 'Generar observación y devolver a un paso anterior:'
+                              : user.isAdmin ? 'Cambiar paso actual manualmente:' : 'Devolver a un paso anterior con observación:'}
                         </span>
                         <select
-                          value={user.isAdmin ? report.currentStepId : ''}
+                          value={user.isAdmin ? (report.currentStepId ?? '') : ''}
                           onChange={(e) => { if (e.target.value) handleOpenStepTransition(e.target.value); }}
                           className="w-full mt-1 px-2 py-1 border border-slate-200 rounded text-xs bg-slate-50 font-semibold"
                         >
-                          {!user.isAdmin && <option value="">Seleccionar paso...</option>}
+                          {needsPlaceholder && <option value="">Seleccionar paso...</option>}
                           {[...selectableSteps].sort((a, b) => a.order - b.order).map((s) => (
                             <option key={s.id} value={s.id}>
                               {s.order}. {s.name}
