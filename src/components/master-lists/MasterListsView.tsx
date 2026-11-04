@@ -31,6 +31,7 @@ interface MasterListsViewProps {
   reportTypeSteps: ReportTypeStep[];
   projects: Project[];
   currentProjectId?: string;
+  onUpdateProjectApplicableTypes: (projectId: string, newTypeIds: string[]) => void;
   onAddReportType: (type: ReportType) => Promise<void>;
   onUpdateReportType: (typeId: string, updates: Partial<Pick<ReportType, 'code' | 'name' | 'periodicity' | 'description' | 'active'>>) => Promise<void>;
   onDeleteReportType: (typeId: string) => Promise<void>;
@@ -61,6 +62,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   reportTypeSteps,
   projects,
   currentProjectId,
+  onUpdateProjectApplicableTypes,
   onAddReportType,
   onUpdateReportType,
   onDeleteReportType,
@@ -322,6 +324,22 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
     if (!currentProject || showAllTypesForProject) return true;
     return currentProject.applicableTypeIds.length === 0 || currentProject.applicableTypeIds.includes(t.id);
   });
+
+  // Mismo modelo de selección que el editor de "Tipos de Informe Aplicables"
+  // del Detalle de Proyecto: applicableTypeIds vacío = todos aplican. Si el
+  // proyecto está en ese estado "todos" y se destilda un tipo, se vuelve
+  // explícito con el resto del catálogo (menos ese); si ya es explícito,
+  // solo se agrega o quita el id tocado.
+  const handleToggleProjectType = (project: Project, typeId: string) => {
+    const allowsAll = project.applicableTypeIds.length === 0;
+    const isApplicable = allowsAll || project.applicableTypeIds.includes(typeId);
+    const newTypeIds = allowsAll
+      ? reportTypes.filter((t) => t.id !== typeId).map((t) => t.id)
+      : isApplicable
+        ? project.applicableTypeIds.filter((id) => id !== typeId)
+        : [...project.applicableTypeIds, typeId];
+    onUpdateProjectApplicableTypes(project.id, newTypeIds);
+  };
 
   const filteredContacts = contacts.filter(
     (c) =>
@@ -1029,6 +1047,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
               </div>
               <p className="px-4 pb-2 text-[11px] text-slate-500">
                 "Todos" significa que el proyecto no tiene tipos restringidos -- el catálogo completo le aplica automáticamente.
+                {canEditLists && ' Haz clic en una celda para habilitar o quitar ese tipo para ese proyecto.'}
               </p>
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
@@ -1065,12 +1084,26 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                             {reportTypes.map((t) => {
                               const isApplicable = allowsAll || p.applicableTypeIds.includes(t.id);
                               return (
-                                <td key={t.id} className="py-2.5 px-3 text-center">
-                                  {isApplicable ? (
-                                    <Check className="w-3.5 h-3.5 text-indigo-600 inline" />
-                                  ) : (
-                                    <span className="text-slate-300">—</span>
-                                  )}
+                                <td key={t.id} className="py-1.5 px-2 text-center">
+                                  <button
+                                    type="button"
+                                    disabled={!canEditLists}
+                                    onClick={() => handleToggleProjectType(p, t.id)}
+                                    title={
+                                      canEditLists
+                                        ? isApplicable
+                                          ? `Quitar ${t.code} de ${p.name}`
+                                          : `Habilitar ${t.code} para ${p.name}`
+                                        : t.name
+                                    }
+                                    className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-colors ${
+                                      isApplicable
+                                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                                        : 'border-slate-200 bg-white text-slate-300'
+                                    } ${canEditLists ? 'cursor-pointer hover:border-indigo-400 hover:bg-indigo-100' : 'cursor-default'}`}
+                                  >
+                                    {isApplicable ? <Check className="h-3.5 w-3.5" /> : <span className="text-[10px]">—</span>}
+                                  </button>
                                 </td>
                               );
                             })}
