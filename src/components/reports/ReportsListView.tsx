@@ -36,6 +36,20 @@ import {
   BellRing,
 } from 'lucide-react';
 
+// Paleta cíclica para las barras del panorama operativo -- la cantidad de
+// pasos varía según lo configurado en Listas Maestras, así que no hay un
+// color fijo por categoría como antes (teal/amber/indigo de los 3 estados).
+const STEP_BREAKDOWN_COLORS = [
+  'bg-teal-600',
+  'bg-amber-500',
+  'bg-indigo-500',
+  'bg-rose-500',
+  'bg-emerald-500',
+  'bg-violet-500',
+  'bg-sky-500',
+  'bg-orange-500',
+];
+
 interface ReportsListViewProps {
   reports: Report[];
   projects: Project[];
@@ -67,9 +81,31 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
   isCurrentProjectSuspended = false,
 }) => {
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
-  const countPendientes = reports.filter((r) => r.status === 'Pendientes Evidencias').length;
-  const countElaboracion = reports.filter((r) => r.status === 'Informe en Elaboración').length;
-  const countEntregados = reports.filter((r) => r.status === 'Entregado a Of. Proyectos').length;
+  // El panorama operativo agrupa por el paso REAL en el que está cada
+  // informe (igual que la columna "Estado del Ciclo" de la tabla), no por
+  // los 4 estados administrativos fijos -- cada tipo de informe tiene su
+  // propio flujo con sus propios nombres de paso, así que la cantidad de
+  // categorías varía según lo que esté configurado en Listas Maestras.
+  const stepBreakdown = useMemo(() => {
+    const counts = new Map<string, number>();
+    let completed = 0;
+    let unassigned = 0;
+    for (const r of reports) {
+      if (r.isWorkflowCompleted || r.status === 'Enviado') {
+        completed += 1;
+      } else if (r.currentStepName) {
+        counts.set(r.currentStepName, (counts.get(r.currentStepName) ?? 0) + 1);
+      } else {
+        unassigned += 1;
+      }
+    }
+    const groups = Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+    if (completed > 0) groups.push({ name: 'Flujo completado', count: completed });
+    if (unassigned > 0) groups.push({ name: 'Sin paso asignado', count: unassigned });
+    return groups;
+  }, [reports]);
   const totalReports = reports.length;
   const activeAlerts = alerts.filter((alert) => alert.active).length;
   const latestReport = useMemo(() => {
@@ -251,34 +287,25 @@ export const ReportsListView: React.FC<ReportsListViewProps> = ({
           </div>
           <CalendarDays className="h-5 w-5 text-teal-700" />
         </div>
-        <div className="mt-5 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-3">
-          <div className="border-b border-teal-900/10 pb-3 sm:border-b-0 sm:pb-0">
-            <div className="flex justify-between text-xs">
-              <span className="text-slate-600">En elaboración</span>
-              <strong className="text-slate-900">{countElaboracion}</strong>
-            </div>
-            <div className="mt-2 h-1.5 rounded-full bg-white/80">
-              <div className="h-full rounded-full bg-teal-600" style={{ width: `${totalReports ? Math.max((countElaboracion / totalReports) * 100, 3) : 0}%` }} />
-            </div>
-          </div>
-          <div className="border-b border-teal-900/10 pb-3 sm:border-b-0 sm:pb-0">
-            <div className="flex justify-between text-xs">
-              <span className="text-slate-600">Pendientes de evidencia</span>
-              <strong className="text-slate-900">{countPendientes}</strong>
-            </div>
-            <div className="mt-2 h-1.5 rounded-full bg-white/80">
-              <div className="h-full rounded-full bg-amber-500" style={{ width: `${totalReports ? Math.max((countPendientes / totalReports) * 100, 3) : 0}%` }} />
-            </div>
-          </div>
-          <div>
-            <div className="flex justify-between text-xs">
-              <span className="text-slate-600">Entregados a oficina</span>
-              <strong className="text-slate-900">{countEntregados}</strong>
-            </div>
-            <div className="mt-2 h-1.5 rounded-full bg-white/80">
-              <div className="h-full rounded-full bg-indigo-500" style={{ width: `${totalReports ? Math.max((countEntregados / totalReports) * 100, 3) : 0}%` }} />
-            </div>
-          </div>
+        <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3">
+          {stepBreakdown.length === 0 ? (
+            <p className="text-xs text-slate-500">No hay informes para mostrar.</p>
+          ) : (
+            stepBreakdown.map((group, idx) => (
+              <div key={group.name} className="min-w-40 flex-1 border-b border-teal-900/10 pb-3 last:border-b-0 sm:border-b-0 sm:pb-0">
+                <div className="flex justify-between gap-2 text-xs">
+                  <span className="truncate text-slate-600" title={group.name}>{group.name}</span>
+                  <strong className="shrink-0 text-slate-900">{group.count}</strong>
+                </div>
+                <div className="mt-2 h-1.5 rounded-full bg-white/80">
+                  <div
+                    className={`h-full rounded-full ${STEP_BREAKDOWN_COLORS[idx % STEP_BREAKDOWN_COLORS.length]}`}
+                    style={{ width: `${totalReports ? Math.max((group.count / totalReports) * 100, 3) : 0}%` }}
+                  />
+                </div>
+              </div>
+            ))
+          )}
         </div>
         <div className="mt-5 flex flex-col gap-3 border-t border-teal-900/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <span className="inline-flex items-center gap-2 text-xs text-slate-600">
