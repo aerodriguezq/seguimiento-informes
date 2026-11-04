@@ -70,6 +70,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const response = await fetch('/api/auth/google/app-status');
         const payload = await response.json();
         if (payload.data) {
+          // Un admin sin la conexión compartida de Drive/Gmail/Sheets sana
+          // (la que usan los correos automáticos, el barrido de alertas y
+          // la importación de hojas) se manda directo a esa pantalla de
+          // permisos de Google -- así nadie tiene que acordarse de ir a
+          // Fuentes Drive aparte. Si ya está sana, esto es invisible.
+          if (payload.data.isAdmin) {
+            try {
+              const driveStatusResponse = await fetch('/api/auth/google/status');
+              const driveStatusPayload = await driveStatusResponse.json();
+              if (!driveStatusPayload.data?.connected) {
+                window.location.href = '/api/auth/google';
+                return;
+              }
+            } catch {
+              // No bloquea el login si esta verificación falla -- el admin
+              // puede seguir usando la app y reconectar a mano si hace falta.
+            }
+          }
           setUser(payload.data);
           setStatus('authenticated');
         } else {

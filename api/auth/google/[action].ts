@@ -5,14 +5,24 @@ import {
   sessionCookie,
   clearOAuthStateCookie,
   clearSessionCookie,
-  getDriveSession,
 } from '../../../server/google-oauth.js';
 import { getSql } from '../../../server/db.js';
 
+// Ojo: esto NO mira la cookie drive_session de quien pregunta -- mira si la
+// conexión COMPARTIDA por toda la app (la que usa getConnectedAccessToken
+// en api/reports.ts, api/alerts, api/catalogs, api/projects) está sana.
+// Antes miraba la cookie del navegador, lo que daba "no conectado" en un
+// equipo nuevo aunque otro admin ya hubiera conectado la cuenta desde el
+// suyo -- y es el chequeo que necesita el auto-reconectar al iniciar
+// sesión (AuthContext.tsx), que no tiene ninguna cookie de Drive propia.
 async function status(request: VercelRequest, response: VercelResponse) {
   try {
-    const session = await getDriveSession(request);
-    return response.status(200).json({ data: { connected: Boolean(session), email: session?.google_email ?? null }, meta: {}, errors: [] });
+    const sql = await getSql();
+    const [row] = await sql`
+      SELECT google_email FROM google_drive_sessions
+      WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
+    `;
+    return response.status(200).json({ data: { connected: Boolean(row), email: row?.google_email ?? null }, meta: {}, errors: [] });
   } catch (error) {
     console.error('Google OAuth status failed', error);
     return response.status(503).json({ data: null, meta: {}, errors: ['No fue posible consultar la conexión Google.'] });

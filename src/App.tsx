@@ -278,6 +278,17 @@ export default function App() {
     }, 4000);
   };
 
+  // Aterriza aquí tras el reconectar automático de Drive/Gmail/Sheets
+  // (AuthContext.tsx redirige a un admin si esa conexión compartida no
+  // estaba sana) -- un toast de confirmación en vez de un aterrizaje mudo.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('drive') === 'connected') {
+      showToast('Conexión con Google renovada.', 'success');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const loadWorkspace = async () => {
       try {
