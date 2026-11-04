@@ -1153,6 +1153,21 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; days: string[]; seguim
   const todayIso = new Date().toISOString().slice(0, 10);
   const todayIdx = dayIndexOf(days, todayIso);
 
+  // Por defecto cada tarjeta se centra en la última fecha en la que se
+  // registró algo EN ESA FILA, no en "hoy" -- si lo más reciente que se
+  // cargó quedó varios meses atrás del día real, "hoy" cae fuera del eje
+  // compartido y la línea de tiempo se queda pegada al extremo izquierdo
+  // sin mostrar nada útil.
+  const rowDates: string[] = [];
+  row.pistas.forEach((p) => {
+    if (p.fechaInicio) rowDates.push(p.fechaInicio);
+    if (p.fechaFin) rowDates.push(p.fechaFin);
+  });
+  if (row.proyeccion?.fechaInicio) rowDates.push(row.proyeccion.fechaInicio);
+  if (row.proyeccion?.fechaFin) rowDates.push(row.proyeccion.fechaFin);
+  const lastRegisteredDate = rowDates.length > 0 ? rowDates.reduce((max, d) => (d > max ? d : max)) : null;
+  const lastRegisteredIdx = lastRegisteredDate ? dayIndexOf(days, lastRegisteredDate) : -1;
+
   const updateMonthLabel = () => {
     const el = scrollRef.current;
     if (!el || days.length === 0) return;
@@ -1166,8 +1181,9 @@ const SeguimientoRowCard: React.FC<{ row: SeguimientoRow; days: string[]; seguim
     if (!hasTimeline) return;
     const el = scrollRef.current;
     if (!el) return;
-    if (todayIdx !== -1) {
-      el.scrollLeft = Math.max(0, todayIdx * DAY_W - el.clientWidth / 2);
+    const targetIdx = lastRegisteredIdx !== -1 ? lastRegisteredIdx : todayIdx;
+    if (targetIdx !== -1) {
+      el.scrollLeft = Math.max(0, targetIdx * DAY_W - el.clientWidth / 2);
     }
     updateMonthLabel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
