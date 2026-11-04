@@ -88,6 +88,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const canEditLists = canEdit('lists');
   const currentProject = projects.find((p) => p.id === currentProjectId) ?? null;
   const [showAllTypesForProject, setShowAllTypesForProject] = useState(false);
+  const [showProjectMatrix, setShowProjectMatrix] = useState(false);
 
   const [stepsModalTypeId, setStepsModalTypeId] = useState<string | null>(null);
   const [stepsScopeProjectId, setStepsScopeProjectId] = useState<string | null>(null);
@@ -1003,11 +1004,84 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                   Mostrar todos (no solo los de {currentProject.name})
                 </label>
               )}
+              <button
+                type="button"
+                onClick={() => setShowProjectMatrix((prev) => !prev)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100 whitespace-nowrap"
+              >
+                <Building2 className="h-3.5 w-3.5" />
+                {showProjectMatrix ? 'Ocultar matriz por proyecto' : 'Ver matriz por proyecto'}
+              </button>
               <span className="text-xs text-slate-400">
                 {filteredTypes.length} tipos activos
               </span>
             </div>
           </div>
+
+          {showProjectMatrix && (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between px-4 pt-3 pb-1">
+                <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                  Tipos de informe habilitados por proyecto
+                </h3>
+                <span className="text-[11px] text-slate-400">{projects.length} proyectos</span>
+              </div>
+              <p className="px-4 pb-2 text-[11px] text-slate-500">
+                "Todos" significa que el proyecto no tiene tipos restringidos -- el catálogo completo le aplica automáticamente.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <th className="py-2.5 px-4 sticky left-0 bg-slate-50 whitespace-nowrap">Proyecto</th>
+                      {reportTypes.map((t) => (
+                        <th key={t.id} className="py-2.5 px-3 text-center font-mono" title={t.name}>
+                          {t.code}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {[...projects]
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map((p) => {
+                        const allowsAll = p.applicableTypeIds.length === 0;
+                        return (
+                          <tr key={p.id} className={`hover:bg-slate-50 transition-colors ${p.active === false ? 'opacity-50' : ''}`}>
+                            <td className="py-2.5 px-4 font-semibold text-slate-800 whitespace-nowrap sticky left-0 bg-white">
+                              {p.name}
+                              {allowsAll && (
+                                <span className="ml-1.5 inline-flex items-center rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
+                                  Todos
+                                </span>
+                              )}
+                              {p.active === false && (
+                                <span className="ml-1.5 inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
+                                  Inactivo
+                                </span>
+                              )}
+                            </td>
+                            {reportTypes.map((t) => {
+                              const isApplicable = allowsAll || p.applicableTypeIds.includes(t.id);
+                              return (
+                                <td key={t.id} className="py-2.5 px-3 text-center">
+                                  {isApplicable ? (
+                                    <Check className="w-3.5 h-3.5 text-indigo-600 inline" />
+                                  ) : (
+                                    <span className="text-slate-300">—</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
