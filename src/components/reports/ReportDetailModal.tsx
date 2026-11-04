@@ -187,8 +187,16 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [returnAttachmentsError, setReturnAttachmentsError] = useState('');
   const [activeTab, setActiveTab] = useState<'timeline' | 'contacts' | 'alerts' | 'attachments' | 'history'>('timeline');
 
-  const daysRemaining = calculateDaysRemaining(report.dueDate, report.status);
-  const semaforo = getSemaforoStatus(report.dueDate, report.status);
+  // El semáforo/días restantes se mide contra la fecha límite del PASO
+  // ACTUAL (ej. paso 1 de 3), no contra la fecha límite final de todo el
+  // informe -- si no, un informe recién empezado se ve con "11 días" de
+  // margen aunque el paso en el que realmente está ya esté por vencer.
+  // report.dueDate (la fecha final) solo se usa de respaldo cuando no hay
+  // un paso activo con fecha límite propia (ej. sin flujo configurado).
+  const currentStepInstance = report.stageInstances?.find((s) => s.stepId === report.currentStepId);
+  const effectiveDueDate = currentStepInstance?.dueDate || report.dueDate;
+  const daysRemaining = calculateDaysRemaining(effectiveDueDate, report.status);
+  const semaforo = getSemaforoStatus(effectiveDueDate, report.status);
 
   // Responsables = los asignados directamente al informe + los
   // responsables de cada paso del flujo de este tipo de informe (el mismo
@@ -414,7 +422,11 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
               <span>•</span>
               <span>Período: <strong className="text-slate-700">{report.month} {report.year}</strong></span>
               <span>•</span>
-              <span>Fecha límite: <strong className="text-slate-700">{report.dueDate}</strong></span>
+              {currentStepInstance?.dueDate ? (
+                <span>Fecha límite del paso actual: <strong className="text-slate-700">{currentStepInstance.dueDate}</strong></span>
+              ) : (
+                <span>Fecha límite: <strong className="text-slate-700">{report.dueDate}</strong></span>
+              )}
             </div>
           </div>
 
@@ -555,6 +567,9 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                         <span className={`inline-block mt-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${getStageColorClass(stage)}`}>
                           {STAGE_LABEL[stage.status] || stage.status}
                         </span>
+                        {stage.dueDate && (
+                          <div className="mt-1 text-[10.5px] text-slate-500">Límite: <strong className="text-slate-700">{stage.dueDate}</strong></div>
+                        )}
                       </div>
 
                       <div className="mt-3 pt-2 border-t border-slate-200/60 text-[11px] text-slate-500">
@@ -894,6 +909,12 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                     {new Date(report.createdAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}
                   </span>
                   <span className="text-[11px] text-slate-500">Sistema centralizado</span>
+                </div>
+
+                <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
+                  <span className="text-slate-500 block">Fecha Límite Final del Informe:</span>
+                  <span className="font-bold text-slate-900 mt-1 block">{report.dueDate}</span>
+                  <span className="text-[11px] text-slate-500">Cierre del flujo completo, no del paso actual</span>
                 </div>
 
                 {scopedFlowSteps.length > 0 ? (
