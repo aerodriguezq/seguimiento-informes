@@ -1098,7 +1098,19 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredTypes.map((type) => {
-                  const typeSteps = reportTypeSteps.filter((s) => s.typeId === type.id);
+                  // El contador y el botón deben reflejar el flujo que
+                  // "Configurar pasos" realmente va a abrir: el propio del
+                  // proyecto activo (si le aplica a este tipo) o si no la
+                  // plantilla general -- nunca la suma de pasos de TODOS los
+                  // proyectos, que no tiene relación con lo que se vería al
+                  // entrar.
+                  const appliesToCurrentProject =
+                    currentProject &&
+                    (currentProject.applicableTypeIds.length === 0 || currentProject.applicableTypeIds.includes(type.id));
+                  const effectiveScopeProjectId = appliesToCurrentProject ? currentProject.id : null;
+                  const typeSteps = reportTypeSteps.filter(
+                    (s) => s.typeId === type.id && (s.projectId ?? null) === effectiveScopeProjectId,
+                  );
                   return (
                     <tr key={type.id} className="hover:bg-slate-50 transition-colors">
                       <td className="py-3 px-4 font-mono font-bold text-indigo-700">
@@ -1130,14 +1142,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
                           type="button"
                           onClick={() => {
                             setStepsModalTypeId(type.id);
-                            // Por defecto abre en el flujo del proyecto activo
-                            // (si ese proyecto aplica a este tipo) en vez de la
-                            // plantilla general -- es lo que casi siempre se
-                            // quiere editar al entrar desde el proyecto activo.
-                            const appliesToCurrentProject =
-                              currentProject &&
-                              (currentProject.applicableTypeIds.length === 0 || currentProject.applicableTypeIds.includes(type.id));
-                            setStepsScopeProjectId(appliesToCurrentProject ? currentProject.id : null);
+                            setStepsScopeProjectId(effectiveScopeProjectId);
                           }}
                           className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100"
                         >
