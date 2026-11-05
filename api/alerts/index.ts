@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../../server/google-drive.js';
-import { sendEmail, buildAlertEmailHtml, buildPeticionReminderEmailHtml } from '../../server/google-gmail.js';
+import { sendEmail, confirmEmailSent, buildAlertEmailHtml, buildPeticionReminderEmailHtml } from '../../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../../server/sweep-config.js';
 import { canEditModuleRequest, getAccessibleProjectIds } from '../../server/admin-auth.js';
 import { logEmailSend } from '../../server/email-log.js';
@@ -164,8 +164,9 @@ async function handleSend(request: VercelRequest, response: VercelResponse, sql:
     const subject = `[Seguimiento] ${alert.name}`;
     const reportId = Number(alert.reportId) || null;
     const alertId = /^\d+$/.test(String(alert.id ?? '')) ? Number(alert.id) : null;
-    await sendEmail(accessToken, { to: toEmails, cc, subject, body: html, html: true });
-    await logEmailSend(sql, { to: toEmails, cc, subject, kind: 'manual', reportId, alertId, success: true });
+    const sentMessage = await sendEmail(accessToken, { to: toEmails, cc, subject, body: html, html: true });
+    const confirmed = await confirmEmailSent(accessToken, sentMessage.id);
+    await logEmailSend(sql, { to: toEmails, cc, subject, kind: 'manual', reportId, alertId, success: true, gmailMessageId: sentMessage.id, confirmed });
 
     if (alertId) {
       await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alertId}`;
@@ -254,8 +255,12 @@ async function sendPeticionReminder(
     actionUrl,
   });
   const subject = `[Peticiones · ${level.toUpperCase()}] ${peticion.radicado} — ${peticion.asunto}`;
-  await sendEmail(accessToken, { to: finalTo, cc: finalCc, subject, body: html, html: true });
-  await logEmailSend(sql, { to: finalTo, cc: finalCc, subject, kind: 'peticion_recordatorio', peticionId: peticion.id, success: true });
+  const sentMessage = await sendEmail(accessToken, { to: finalTo, cc: finalCc, subject, body: html, html: true });
+  const confirmed = await confirmEmailSent(accessToken, sentMessage.id);
+  await logEmailSend(sql, {
+    to: finalTo, cc: finalCc, subject, kind: 'peticion_recordatorio', peticionId: peticion.id,
+    success: true, gmailMessageId: sentMessage.id, confirmed,
+  });
   return true;
 }
 
@@ -365,10 +370,12 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
 
       const html = await buildAlertEmail(sql, alert);
       const subject = `[Seguimiento] ${alert.name}`;
-      await sendEmail(accessToken, { to: toEmails, cc, subject, body: html, html: true });
+      const sentMessage = await sendEmail(accessToken, { to: toEmails, cc, subject, body: html, html: true });
+      const confirmed = await confirmEmailSent(accessToken, sentMessage.id);
       await logEmailSend(sql, {
         to: toEmails, cc, subject, kind: 'recordatorio_paso',
-        reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null, success: true,
+        reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null,
+        success: true, gmailMessageId: sentMessage.id, confirmed,
       });
       await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alert.id}`;
       await sql`
@@ -426,10 +433,12 @@ async function handleCronSweep(sql: SqlClient): Promise<{ evaluated: number; sen
       const html = await buildAlertEmail(sql, alert);
       const toEmails = recipientRows.map((r: any) => r.email);
       const subject = `[Seguimiento] ${alert.name}`;
-      await sendEmail(accessToken, { to: toEmails, subject, body: html, html: true });
+      const sentMessage = await sendEmail(accessToken, { to: toEmails, subject, body: html, html: true });
+      const confirmed = await confirmEmailSent(accessToken, sentMessage.id);
       await logEmailSend(sql, {
         to: toEmails, subject, kind: 'recordatorio_general',
-        reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null, success: true,
+        reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null,
+        success: true, gmailMessageId: sentMessage.id, confirmed,
       });
       await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alert.id}`;
       sentCount++;

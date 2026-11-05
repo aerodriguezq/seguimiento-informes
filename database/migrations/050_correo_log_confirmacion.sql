@@ -1,0 +1,2 @@
+ALTER TABLE correo_log ADD COLUMN IF NOT EXISTS gmail_message_id TEXT;
+ALTER TABLE correo_log ADD COLUMN IF NOT EXISTS confirmado BOOLEAN;

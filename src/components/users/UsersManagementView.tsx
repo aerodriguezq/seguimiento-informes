@@ -32,6 +32,8 @@ export interface EmailLogEntry {
   kind: string;
   success: boolean;
   errorMessage: string | null;
+  gmailMessageId: string | null;
+  confirmed: boolean | null;
   reportId: string | null;
   reportConsecutive: string | null;
   alertId: string | null;
@@ -421,9 +423,21 @@ const EmailLogSection: React.FC<{ entries: EmailLogEntry[] }> = ({ entries }) =>
                   </td>
                   <td className="py-2 pr-3 whitespace-nowrap">
                     {entry.success ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
-                        <CheckCircle2 className="h-3 w-3" /> Enviado
-                      </span>
+                      entry.confirmed ? (
+                        <span
+                          className="inline-flex items-center gap-1 text-emerald-700 font-semibold cursor-help"
+                          title={`Gmail confirmó la entrega del mensaje${entry.gmailMessageId ? ` (ID: ${entry.gmailMessageId})` : ''}.`}
+                        >
+                          <CheckCircle2 className="h-3 w-3" /> Enviado y confirmado
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-flex items-center gap-1 text-amber-700 font-semibold cursor-help"
+                          title="Gmail aceptó el envío, pero no fue posible confirmar el mensaje de vuelta todavía."
+                        >
+                          <CheckCircle2 className="h-3 w-3" /> Enviado (sin confirmar)
+                        </span>
+                      )
                     ) : (
                       <span className="inline-flex items-center gap-1 text-rose-600 font-semibold" title={entry.errorMessage || ''}>
                         <AlertTriangle className="h-3 w-3" /> Error

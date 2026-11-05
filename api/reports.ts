@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../server/google-drive.js';
-import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEmail, buildStepReturnEmailHtml, buildStepReviewPendingEmailHtml, type EmailAttachment } from '../server/google-gmail.js';
+import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEmail, confirmEmailSent, buildStepReturnEmailHtml, buildStepReviewPendingEmailHtml, type EmailAttachment } from '../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
 import { isAdminRequest, canEditModuleRequest, getAccessibleProjectIds, getSessionUser } from '../server/admin-auth.js';
 import { logEmailSend } from '../server/email-log.js';
@@ -297,8 +297,9 @@ async function sendReviewPendingNotice(
       stepName,
       principalName: principal.name,
     });
-    await sendEmail(accessToken, { to: [principal.email], subject, body: html, html: true });
-    await logEmailSend(sql, { to: [principal.email], subject, kind: 'aviso_revision', success: true });
+    const sentMessage = await sendEmail(accessToken, { to: [principal.email], subject, body: html, html: true });
+    const confirmed = await confirmEmailSent(accessToken, sentMessage.id);
+    await logEmailSend(sql, { to: [principal.email], subject, kind: 'aviso_revision', success: true, gmailMessageId: sentMessage.id, confirmed });
   } catch (error) {
     console.error('No fue posible enviar el aviso de revisión pendiente', error);
     await logEmailSend(sql, {
@@ -718,7 +719,14 @@ async function advanceReportStep(
 
   const resolvedDelivery = delivery ?? { receivedAt: new Date() };
 
-  await sql`UPDATE alertas SET activa = FALSE, updated_at = NOW() WHERE informe_id = ${reportId} AND paso_id = ${current.currentStepId}`;
+  // Desactiva TODAS las alertas activas de este informe, no solo la del
+  // paso que se está completando -- igual que ya hacen setCurrentStep y su
+  // undo más abajo. Filtrar también por paso_id = currentStepId dejaba
+  // viva para siempre cualquier alerta vieja/huérfana con paso_id NULL
+  // (de datos anteriores a que el conteo de pasos quedara consistente):
+  // nunca calzaba ese WHERE, así que seguía activa sin corresponder a
+  // ningún paso real del flujo actual.
+  await sql`UPDATE alertas SET activa = FALSE, updated_at = NOW() WHERE informe_id = ${reportId}`;
   await finalizeStepInstance(sql, reportId, current.currentStepId, resolvedDelivery);
 
   // Deja rastro en el Historial de Trazabilidad de CADA entrega que avanza
@@ -1380,8 +1388,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
               returnedBy: userName || 'Usuario',
             });
             const subject = `[Seguimiento] Devuelto para corrección: ${step.name}`;
-            await sendEmail(accessToken, { to: toEmails, subject, body: html, html: true, attachments });
-            await logEmailSend(sql, { to: toEmails, subject, kind: 'devolucion_paso', reportId, success: true });
+            const sentMessage = await sendEmail(accessToken, { to: toEmails, subject, body: html, html: true, attachments });
+            const confirmed = await confirmEmailSent(accessToken, sentMessage.id);
+            await logEmailSend(sql, { to: toEmails, subject, kind: 'devolucion_paso', reportId, success: true, gmailMessageId: sentMessage.id, confirmed });
             emailSent = true;
           }
         } catch (error) {

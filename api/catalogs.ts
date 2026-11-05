@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { canEditModuleRequest, getAccessibleProjectIds } from '../server/admin-auth.js';
-import { sendEmail, buildPeticionAssignedEmailHtml } from '../server/google-gmail.js';
+import { sendEmail, confirmEmailSent, buildPeticionAssignedEmailHtml } from '../server/google-gmail.js';
 import { ensureDriveFolder, uploadDriveFile, extractDriveFolderId } from '../server/google-drive.js';
 import { logEmailSend } from '../server/email-log.js';
 
@@ -103,8 +103,12 @@ async function notifyNewPeticionResponsables(
   const cc = peticion.correoPersonaAsignada && peticion.correoPersonaAsignada.includes('@') ? [peticion.correoPersonaAsignada] : undefined;
   const subject = `[Peticiones] Se te asignó: ${peticion.radicado} — ${peticion.asunto}`;
   try {
-    await sendEmail(accessToken, { to: toEmails, cc, subject, body: html, html: true });
-    await logEmailSend(sql, { to: toEmails, cc, subject, kind: 'peticion_asignacion', peticionId: peticion.id, success: true });
+    const sentMessage = await sendEmail(accessToken, { to: toEmails, cc, subject, body: html, html: true });
+    const confirmed = await confirmEmailSent(accessToken, sentMessage.id);
+    await logEmailSend(sql, {
+      to: toEmails, cc, subject, kind: 'peticion_asignacion', peticionId: peticion.id,
+      success: true, gmailMessageId: sentMessage.id, confirmed,
+    });
   } catch (error) {
     console.error('No fue posible enviar el correo de asignación de la petición', peticion.id, error);
     await logEmailSend(sql, {
@@ -165,6 +169,7 @@ async function fetchEmailLog(sql: any) {
   return (await sql`
     SELECT cl.correo_log_id AS id, cl.enviado_en AS "sentAt", cl.destinatarios AS "to", cl.copia AS cc,
       cl.asunto AS subject, cl.tipo AS kind, cl.exito AS success, cl.error_mensaje AS "errorMessage",
+      cl.gmail_message_id AS "gmailMessageId", cl.confirmado AS confirmed,
       cl.informe_id AS "reportId", i.consecutivo AS "reportConsecutive",
       cl.alerta_id AS "alertId", cl.peticion_id AS "peticionId", p.radicado AS "peticionRadicado"
     FROM correo_log cl
@@ -1041,12 +1046,13 @@ export default async function handler(
         if (!accessToken) {
           return response.status(503).json({ data: null, meta: {}, errors: ['Conecta una cuenta de Google (Fuentes Drive) para poder enviar correos.'] });
         }
-        const { sendEmail, buildAccessApprovedEmailHtml } = await import('../server/google-gmail.js');
+        const { sendEmail, confirmEmailSent, buildAccessApprovedEmailHtml } = await import('../server/google-gmail.js');
         const baseUrl = (process.env.APP_URL || 'https://seguimiento-informes.vercel.app').replace(/\/$/, '');
         const html = buildAccessApprovedEmailHtml({ name: target.name, loginUrl: baseUrl });
         const subject = 'Acceso aprobado — Seguimiento de Informes';
-        await sendEmail(accessToken, { to: [email], subject, body: html, html: true });
-        await logEmailSend(sql, { to: [email], subject, kind: 'prueba', success: true });
+        const sentMessage = await sendEmail(accessToken, { to: [email], subject, body: html, html: true });
+        const confirmed = await confirmEmailSent(accessToken, sentMessage.id);
+        await logEmailSend(sql, { to: [email], subject, kind: 'prueba', success: true, gmailMessageId: sentMessage.id, confirmed });
         return response.status(200).json({ data: { sent: true, email }, meta: {}, errors: [] });
       } catch (error) {
         await logEmailSend(sql, {

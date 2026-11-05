@@ -78,7 +78,7 @@ function buildRawMessage(options: {
 export async function sendEmail(
   accessToken: string,
   options: { to: string[]; cc?: string[]; subject: string; body: string; html?: boolean; attachments?: EmailAttachment[] },
-): Promise<void> {
+): Promise<{ id: string; threadId: string }> {
   const rawMessage = buildRawMessage(options);
 
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
@@ -90,10 +90,35 @@ export async function sendEmail(
     body: JSON.stringify({ raw: toBase64Url(rawMessage) }),
   });
 
+  const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    const payload = await response.json().catch(() => null);
     const detail = payload?.error?.message || payload?.error?.status || JSON.stringify(payload);
     throw new Error(`Gmail respondió ${response.status} al enviar el correo: ${detail}`);
+  }
+  // Gmail responde 200 con el id del mensaje ya creado en la cuenta -- sin
+  // ese id no hay con qué confirmar después que el envío de verdad quedó
+  // registrado del lado de Gmail (ver confirmEmailSent), así que se trata
+  // como parte del contrato del envío, no como un detalle opcional.
+  if (!payload?.id) {
+    throw new Error('Gmail respondió 200 pero sin el id del mensaje enviado.');
+  }
+  return { id: payload.id as string, threadId: payload.threadId as string };
+}
+
+// Verificación extra, aparte del 200+id que ya devuelve el envío: le pide
+// ese mismo mensaje de vuelta a Gmail para confirmar que de verdad quedó en
+// la cuenta conectada, no solo que la petición de envío no reventó. Nunca
+// lanza -- si esta verificación en sí falla (red, permisos momentáneos), no
+// debe tumbar ni marcar como fallido un envío que Gmail ya aceptó.
+export async function confirmEmailSent(accessToken: string, messageId: string): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=minimal`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    return response.ok;
+  } catch {
+    return false;
   }
 }
 
