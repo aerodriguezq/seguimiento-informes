@@ -349,6 +349,28 @@ function getSweepUnit(kind: string) {
   return SWEEP_UNITS[kind] || DEFAULT_UNIT;
 }
 
+// Qué hace cada barrido automático, en términos que alguien no técnico
+// pueda leer -- antes solo se mostraba el slug técnico (ej.
+// "deteccion_entregas") debajo del título, sin explicar su función real.
+const SWEEP_DESCRIPTIONS: Record<string, string> = {
+  deteccion_entregas:
+    'Revisa el correo de Gmail conectado buscando la entrega esperada en el paso actual de cada informe activo; si encuentra una coincidencia, avanza el informe al siguiente paso automáticamente.',
+  recordatorios_alertas:
+    'Evalúa las alertas programadas, los pasos de informes vencidos o próximos a vencer, y las peticiones pendientes de respuesta, y envía los correos de recordatorio a los responsables que correspondan.',
+  importacion_cronograma:
+    'Lee la hoja de cálculo de Seguimiento (Google Sheets) de cada proyecto y sincroniza sus pistas y avances del cronograma con la app.',
+};
+
+// Convierte milisegundos a un texto corto en español ("3 h", "2 día(s)")
+// para los tooltips de estado -- evita decimales raros tipo "26.4 h".
+function formatElapsedLabel(ms: number): string {
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.round(hours / 24)} día(s)`;
+}
+
 const EMAIL_KIND_LABELS: Record<string, string> = {
   manual: 'Manual ("Enviar ahora")',
   recordatorio_paso: 'Recordatorio de paso',
@@ -441,20 +463,52 @@ const SweepCard: React.FC<{
 
   const frequencyDirty = frequency !== String(sweep.frequencyMinutes / unit.factor);
 
+  const lastRunLabel = sweep.lastRunAt ? new Date(sweep.lastRunAt).toLocaleString('es-CO') : null;
+  const lastRunError =
+    sweep.lastRunResult && typeof sweep.lastRunResult === 'object' && 'error' in sweep.lastRunResult
+      ? String((sweep.lastRunResult as Record<string, unknown>).error)
+      : null;
+
   const health = !sweep.lastRunAt
-    ? { label: 'Sin ejecuciones aún', tone: 'slate', Icon: PauseCircle }
+    ? {
+        label: 'Sin ejecuciones aún',
+        tone: 'slate',
+        Icon: PauseCircle,
+        detail: 'Todavía no se ha registrado ninguna corrida de esta automatización. Actívala o usa "Ejecutar ahora" para iniciar su historial.',
+      }
     : !sweep.active
-    ? { label: 'Desactivado', tone: 'slate', Icon: PauseCircle }
+    ? {
+        label: 'Desactivado',
+        tone: 'slate',
+        Icon: PauseCircle,
+        detail: `Está apagada manualmente -- no va a correr sola hasta que actives el interruptor. Última ejecución registrada: ${lastRunLabel}.`,
+      }
     : sweep.lastRunSuccess === false
-    ? { label: 'Con errores', tone: 'rose', Icon: AlertTriangle }
+    ? {
+        label: 'Con errores',
+        tone: 'rose',
+        Icon: AlertTriangle,
+        detail: `El último intento (${lastRunLabel}) falló${lastRunError ? `: ${lastRunError}` : ', sin detalle de error registrado.'}`,
+      }
     : (() => {
-        const elapsedMinutes = (Date.now() - new Date(sweep.lastRunAt as string).getTime()) / 60000;
+        const elapsedMs = Date.now() - new Date(sweep.lastRunAt as string).getTime();
+        const elapsedMinutes = elapsedMs / 60000;
         // Las horas programadas son diarias -- 26h de margen cubre un día
         // completo más el colchón de 15 min de la ventana de disparo.
         const staleThresholdMinutes = usesSchedule ? 26 * 60 : sweep.frequencyMinutes * 3;
         return elapsedMinutes > staleThresholdMinutes
-          ? { label: 'Posible interrupción', tone: 'amber', Icon: AlertTriangle }
-          : { label: 'Funcionando', tone: 'emerald', Icon: CheckCircle2 };
+          ? {
+              label: 'Posible interrupción',
+              tone: 'amber',
+              Icon: AlertTriangle,
+              detail: `Han pasado ${formatElapsedLabel(elapsedMs)} desde la última ejecución registrada (${lastRunLabel}), más de lo esperado entre corridas (~${formatElapsedLabel(staleThresholdMinutes * 60000)}). Puede que el cron de Vercel no se esté disparando -- revisa su configuración o usa "Ejecutar ahora" para confirmar manualmente.`,
+            }
+          : {
+              label: 'Funcionando',
+              tone: 'emerald',
+              Icon: CheckCircle2,
+              detail: `Corrió correctamente hace ${formatElapsedLabel(elapsedMs)} (${lastRunLabel}).`,
+            };
       })();
 
   const toneClasses: Record<string, string> = {
@@ -540,11 +594,14 @@ const SweepCard: React.FC<{
             <RadioTower className="h-4.5 w-4.5" />
           </div>
           <div>
-            <p className="text-sm font-bold text-slate-900">{sweep.label}</p>
-            <p className="text-[11px] text-slate-500 font-mono">{sweep.kind}</p>
+            <p className="text-sm font-bold text-slate-900" title={sweep.kind}>{sweep.label}</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">{SWEEP_DESCRIPTIONS[sweep.kind] ?? sweep.kind}</p>
           </div>
         </div>
-        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${toneClasses[health.tone]}`}>
+        <span
+          title={health.detail}
+          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold cursor-help ${toneClasses[health.tone]}`}
+        >
           <health.Icon className="h-3 w-3" />
           {health.label}
         </span>
