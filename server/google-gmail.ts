@@ -537,8 +537,12 @@ export async function findDeliveryEmail(
 ): Promise<DeliveryEmailMatch> {
   const afterSeconds = Math.floor(afterDate.getTime() / 1000);
   const senderQuery = fromEmails.length > 0 ? `(${fromEmails.map((email) => `from:${email}`).join(' OR ')})` : '';
+  // Las palabras clave son variantes alternativas del mismo término (ej.
+  // "SANJACINTO", "SAN JACINTO"), no requisitos simultáneos -- basta con
+  // que aparezca UNA de ellas, por eso se unen con OR y no con AND.
   const keywordTerms = keywords.map((k) => k.trim()).filter(Boolean).map((k) => (k.includes(' ') ? `"${k}"` : k));
-  const query = [`subject:"${subject}"`, senderQuery, `after:${afterSeconds}`, ...keywordTerms].filter(Boolean).join(' ');
+  const keywordQuery = keywordTerms.length > 0 ? `(${keywordTerms.join(' OR ')})` : '';
+  const query = [`subject:"${subject}"`, senderQuery, `after:${afterSeconds}`, keywordQuery].filter(Boolean).join(' ');
 
   // Se piden hasta 5 para poder detectar ambigüedad (varios correos
   // coincidentes), no solo el primero.
