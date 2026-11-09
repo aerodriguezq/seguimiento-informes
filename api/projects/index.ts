@@ -1333,6 +1333,91 @@ export default async function handler(
       return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
     }
 
+    // Enlaces sueltos del proyecto (carpeta de Drive, acceso directo a un
+    // documento o sistema externo) -- pestaña "Enlaces" de Información
+    // General, distinto de los adjuntos de un Informe puntual.
+    if (request.method === 'GET' && request.query.enlaces === 'list') {
+      const projectId = Number(request.query.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      const rows = await sql`
+        SELECT enlace_id AS id, proyecto_id AS "proyectoId", nombre, url
+        FROM proyecto_enlaces WHERE proyecto_id = ${projectId}
+        ORDER BY enlace_id ASC
+      `;
+      return response.status(200).json({ data: rows, meta: { total: rows.length }, errors: [] });
+    }
+
+    if (request.method === 'POST' && request.body?.kind === 'enlaceCreate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const { projectId, nombre, url } = request.body?.data ?? {};
+      const pid = Number(projectId);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      if (!nombre || !String(nombre).trim()) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El nombre del enlace es obligatorio.'] });
+      }
+      if (!url || !/^https?:\/\//.test(String(url).trim())) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El link debe empezar con http:// o https://.'] });
+      }
+      const rows = await sql`
+        INSERT INTO proyecto_enlaces (proyecto_id, nombre, url)
+        VALUES (${pid}, ${String(nombre).trim()}, ${String(url).trim()})
+        RETURNING enlace_id AS id, proyecto_id AS "proyectoId", nombre, url
+      `;
+      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'PATCH' && request.body?.kind === 'enlaceUpdate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const enlaceId = Number(request.body?.id);
+      if (!Number.isInteger(enlaceId) || enlaceId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del enlace es obligatorio.'] });
+      }
+      const current = (await sql`SELECT * FROM proyecto_enlaces WHERE enlace_id = ${enlaceId}`) as any[];
+      if (!current[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Enlace no encontrado.'] });
+      }
+      const body = request.body?.data ?? {};
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+      const nombre = has('nombre') ? String(body.nombre).trim() : current[0].nombre;
+      const url = has('url') ? String(body.url).trim() : current[0].url;
+      if (!nombre) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El nombre del enlace es obligatorio.'] });
+      }
+      if (!/^https?:\/\//.test(url)) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El link debe empezar con http:// o https://.'] });
+      }
+
+      const rows = await sql`
+        UPDATE proyecto_enlaces SET nombre = ${nombre}, url = ${url}
+        WHERE enlace_id = ${enlaceId}
+        RETURNING enlace_id AS id, proyecto_id AS "proyectoId", nombre, url
+      `;
+      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'DELETE' && request.query.enlace) {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const enlaceId = Number(request.query.enlace);
+      if (!Number.isInteger(enlaceId) || enlaceId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del enlace es obligatorio.'] });
+      }
+      const deleted = await sql`DELETE FROM proyecto_enlaces WHERE enlace_id = ${enlaceId} RETURNING enlace_id AS id`;
+      if (!deleted[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Enlace no encontrado.'] });
+      }
+      return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+    }
+
     if (request.method === 'DELETE') {
       const projectId = Number(request.query.id);
 

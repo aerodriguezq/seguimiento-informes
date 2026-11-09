@@ -295,6 +295,17 @@ export interface ConvenioParticipante {
   valor: number | null;
 }
 
+// Links sueltos de un proyecto (carpeta de Drive, documento, acceso
+// directo a un sistema externo, etc.) -- distinto de los adjuntos de un
+// Informe puntual (ReportAttachment): esto vive a nivel del proyecto
+// completo, visible desde su Información General.
+export interface ProjectEnlace {
+  id: string;
+  proyectoId: string;
+  nombre: string;
+  url: string;
+}
+
 // Subdivisión manual del Valor del Proyecto en N partes por monto (plan de
 // desembolsos) -- independiente de los Informes de tipo "Desembolso", que
 // son radicados reales; esto es la planeación de cómo se reparte la plata.

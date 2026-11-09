@@ -18,6 +18,7 @@ import {
   Aportante,
   Convenio,
   ConvenioParticipante,
+  ProjectEnlace,
   PeticionesConfig,
   EmailCandidate,
   ReturnAttachmentInput,
@@ -153,6 +154,15 @@ function mapConvenioParticipante(p: any): ConvenioParticipante {
   };
 }
 
+function mapEnlace(e: any): ProjectEnlace {
+  return {
+    id: String(e.id),
+    proyectoId: String(e.proyectoId),
+    nombre: e.nombre,
+    url: e.url,
+  };
+}
+
 function mapAlert(a: any): ScheduledAlert {
   return {
     id: String(a.id),
@@ -237,6 +247,7 @@ export default function App() {
   const [currentProjectAportantes, setCurrentProjectAportantes] = useState<Aportante[]>([]);
   const [currentProjectConvenios, setCurrentProjectConvenios] = useState<Convenio[]>([]);
   const [currentProjectConvenioParticipantes, setCurrentProjectConvenioParticipantes] = useState<ConvenioParticipante[]>([]);
+  const [currentProjectEnlaces, setCurrentProjectEnlaces] = useState<ProjectEnlace[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
@@ -391,12 +402,13 @@ export default function App() {
       setCurrentProjectAportantes([]);
       setCurrentProjectConvenios([]);
       setCurrentProjectConvenioParticipantes([]);
+      setCurrentProjectEnlaces([]);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const [reportsResponse, alertsResponse, modificatoriosResponse, valorPartesResponse, aportantesResponse, conveniosResponse, convenioParticipantesResponse] = await Promise.all([
+        const [reportsResponse, alertsResponse, modificatoriosResponse, valorPartesResponse, aportantesResponse, conveniosResponse, convenioParticipantesResponse, enlacesResponse] = await Promise.all([
           fetch(`/api/reports?projectId=${currentProjectId}`),
           fetch(`/api/alerts?projectId=${currentProjectId}`),
           fetch(`/api/projects?modificatorios=list&projectId=${currentProjectId}`),
@@ -404,6 +416,7 @@ export default function App() {
           fetch(`/api/projects?aportantes=list&projectId=${currentProjectId}`),
           fetch(`/api/projects?convenios=list&projectId=${currentProjectId}`),
           fetch(`/api/projects?convenioParticipantes=list&projectId=${currentProjectId}`),
+          fetch(`/api/projects?enlaces=list&projectId=${currentProjectId}`),
         ]);
         const reportsPayload = await reportsResponse.json();
         const alertsPayload = await alertsResponse.json();
@@ -412,6 +425,7 @@ export default function App() {
         const aportantesPayload = await aportantesResponse.json();
         const conveniosPayload = await conveniosResponse.json();
         const convenioParticipantesPayload = await convenioParticipantesResponse.json();
+        const enlacesPayload = await enlacesResponse.json();
         if (!reportsResponse.ok) throw new Error(reportsPayload.errors?.[0] || 'No fue posible consultar los informes.');
         if (!alertsResponse.ok) throw new Error(alertsPayload.errors?.[0] || 'No fue posible consultar las alertas.');
         if (cancelled) return;
@@ -422,6 +436,7 @@ export default function App() {
         setCurrentProjectAportantes(aportantesResponse.ok ? aportantesPayload.data.map(mapAportante) : []);
         setCurrentProjectConvenios(conveniosResponse.ok ? conveniosPayload.data.map(mapConvenio) : []);
         setCurrentProjectConvenioParticipantes(convenioParticipantesResponse.ok ? convenioParticipantesPayload.data.map(mapConvenioParticipante) : []);
+        setCurrentProjectEnlaces(enlacesResponse.ok ? enlacesPayload.data.map(mapEnlace) : []);
       } catch (error) {
         if (!cancelled) {
           showToast(error instanceof Error ? error.message : 'No fue posible cargar los informes y alertas de este proyecto.', 'info');
@@ -731,6 +746,46 @@ export default function App() {
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el participante.');
     await refetchConvenioParticipantes();
     showToast('Participante del convenio eliminado.', 'success');
+  };
+
+  const refetchEnlaces = async () => {
+    const response = await fetch(`/api/projects?enlaces=list&projectId=${currentProjectId}`);
+    const payload = await response.json();
+    if (response.ok) {
+      setCurrentProjectEnlaces(payload.data.map(mapEnlace));
+    }
+  };
+
+  const handleCreateEnlace = async (data: { nombre: string; url: string }) => {
+    const response = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'enlaceCreate', data: { projectId: Number(currentProjectId), ...data } }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el enlace.');
+    await refetchEnlaces();
+    showToast('Enlace guardado.', 'success');
+  };
+
+  const handleUpdateEnlace = async (id: string, data: Partial<{ nombre: string; url: string }>) => {
+    const response = await fetch('/api/projects', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'enlaceUpdate', id: Number(id), data }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el enlace.');
+    await refetchEnlaces();
+    showToast('Enlace actualizado.', 'success');
+  };
+
+  const handleDeleteEnlace = async (id: string) => {
+    const response = await fetch(`/api/projects?enlace=${id}`, { method: 'DELETE' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el enlace.');
+    await refetchEnlaces();
+    showToast('Enlace eliminado.', 'success');
   };
 
   const handleSubmitNewReport = async (input: {
@@ -1743,6 +1798,10 @@ export default function App() {
               onCreateConvenioParticipante={handleCreateConvenioParticipante}
               onUpdateConvenioParticipante={handleUpdateConvenioParticipante}
               onDeleteConvenioParticipante={handleDeleteConvenioParticipante}
+              enlaces={currentProjectEnlaces}
+              onCreateEnlace={handleCreateEnlace}
+              onUpdateEnlace={handleUpdateEnlace}
+              onDeleteEnlace={handleDeleteEnlace}
             />
           )}
 

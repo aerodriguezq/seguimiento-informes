@@ -10,6 +10,7 @@ import {
   Aportante,
   Convenio,
   ConvenioParticipante,
+  ProjectEnlace,
 } from '../../types';
 import {
   calculateDaysRemaining,
@@ -58,6 +59,8 @@ import {
   Target,
   Wallet,
   UserCog,
+  Link2,
+  ExternalLink,
 } from 'lucide-react';
 
 interface ProjectDetailViewProps {
@@ -116,6 +119,10 @@ interface ProjectDetailViewProps {
   onCreateConvenioParticipante: (data: { convenioId: string; nombre: string; rol?: string; valor?: number | null }) => Promise<void>;
   onUpdateConvenioParticipante: (id: string, data: Partial<{ nombre: string; rol: string | null; valor: number | null }>) => Promise<void>;
   onDeleteConvenioParticipante: (id: string) => Promise<void>;
+  enlaces: ProjectEnlace[];
+  onCreateEnlace: (data: { nombre: string; url: string }) => Promise<void>;
+  onUpdateEnlace: (id: string, data: Partial<{ nombre: string; url: string }>) => Promise<void>;
+  onDeleteEnlace: (id: string) => Promise<void>;
 }
 
 export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
@@ -155,6 +162,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onCreateConvenioParticipante,
   onUpdateConvenioParticipante,
   onDeleteConvenioParticipante,
+  enlaces,
+  onCreateEnlace,
+  onUpdateEnlace,
+  onDeleteEnlace,
 }) => {
   const { user, canEdit } = useAuth();
   const [isEditingVigencia, setIsEditingVigencia] = useState(false);
@@ -171,7 +182,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       setIsSavingVigencia(false);
     }
   };
-  const [infoTab, setInfoTab] = useState<'general' | 'valor' | 'desembolso' | 'convenio'>('general');
+  const [infoTab, setInfoTab] = useState<'general' | 'valor' | 'desembolso' | 'convenio' | 'enlaces'>('general');
   const [isEditingInfo, setIsEditingInfo] = useState(false);
   const [infoObjetivo, setInfoObjetivo] = useState(project.objetivoGeneral ?? '');
   const [infoMunicipios, setInfoMunicipios] = useState(project.municipios ?? '');
@@ -505,6 +516,54 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const handleDeleteParticipanteClick = async (id: string) => {
     if (!window.confirm('¿Eliminar este participante del convenio? Esta acción no se puede deshacer.')) return;
     await onDeleteConvenioParticipante(id);
+  };
+
+  // --- Enlaces: carpetas de Drive o accesos directos sueltos del proyecto
+  // (nombre + link), distintos de los adjuntos de un Informe puntual ---
+  const [showEnlaceFormModal, setShowEnlaceFormModal] = useState(false);
+  const [editingEnlaceId, setEditingEnlaceId] = useState<string | null>(null);
+  const [enlNombre, setEnlNombre] = useState('');
+  const [enlUrl, setEnlUrl] = useState('');
+  const [isSavingEnlace, setIsSavingEnlace] = useState(false);
+
+  const resetEnlaceFormState = () => {
+    setEditingEnlaceId(null);
+    setEnlNombre('');
+    setEnlUrl('');
+  };
+
+  const handleOpenNewEnlace = () => {
+    resetEnlaceFormState();
+    setShowEnlaceFormModal(true);
+  };
+
+  const handleStartEditEnlace = (e: ProjectEnlace) => {
+    setEditingEnlaceId(e.id);
+    setEnlNombre(e.nombre);
+    setEnlUrl(e.url);
+    setShowEnlaceFormModal(true);
+  };
+
+  const handleSubmitEnlaceForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!enlNombre.trim() || !enlUrl.trim()) return;
+    setIsSavingEnlace(true);
+    try {
+      if (editingEnlaceId) {
+        await onUpdateEnlace(editingEnlaceId, { nombre: enlNombre.trim(), url: enlUrl.trim() });
+      } else {
+        await onCreateEnlace({ nombre: enlNombre.trim(), url: enlUrl.trim() });
+      }
+      setShowEnlaceFormModal(false);
+      resetEnlaceFormState();
+    } finally {
+      setIsSavingEnlace(false);
+    }
+  };
+
+  const handleDeleteEnlaceClick = async (id: string) => {
+    if (!window.confirm('¿Eliminar este enlace? Esta acción no se puede deshacer.')) return;
+    await onDeleteEnlace(id);
   };
 
   const [reportFilterStatus, setReportFilterStatus] = useState<string>('all');
@@ -944,6 +1003,17 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
             }`}
           >
             Convenio
+          </button>
+          <button
+            type="button"
+            onClick={() => setInfoTab('enlaces')}
+            className={`px-3 py-2 font-semibold border-b-2 transition-colors cursor-pointer ${
+              infoTab === 'enlaces'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Enlaces
           </button>
         </div>
 
@@ -1410,6 +1480,71 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   </div>
                 );
               })
+            )}
+          </div>
+        )}
+
+        {infoTab === 'enlaces' && (
+          <div className="text-xs space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+                Enlaces {enlaces.length > 0 ? `(${enlaces.length})` : ''}
+              </span>
+              {canEdit('projects') && (
+                <button
+                  type="button"
+                  onClick={handleOpenNewEnlace}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+                >
+                  <Plus className="w-3 h-3" /> Nuevo enlace
+                </button>
+              )}
+            </div>
+
+            {enlaces.length === 0 ? (
+              <p className="text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded-lg">
+                Todavía no se han agregado enlaces para este proyecto -- carpetas de Drive, accesos directos a documentos u otros sistemas.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {enlaces.map((enlace) => (
+                  <div
+                    key={enlace.id}
+                    className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-white border border-slate-200 rounded-lg"
+                  >
+                    <a
+                      href={enlace.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-2 min-w-0 text-indigo-700 hover:text-indigo-900 hover:underline"
+                    >
+                      <Link2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="font-semibold truncate">{enlace.nombre}</span>
+                      <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" />
+                    </a>
+                    {canEdit('projects') && (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditEnlace(enlace)}
+                          className="text-slate-400 hover:text-indigo-600"
+                          title="Editar enlace"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteEnlaceClick(enlace.id)}
+                          className="text-slate-400 hover:text-rose-600"
+                          title="Eliminar enlace"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -2361,6 +2496,70 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSavingConvenioForm ? 'Guardando...' : editingConvenioFormId ? 'Guardar Cambios' : 'Crear Convenio'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Enlace -- crear o editar según editingEnlaceId */}
+      {showEnlaceFormModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                <Link2 className="w-4 h-4 text-indigo-600" />
+                {editingEnlaceId ? 'Editar Enlace' : 'Nuevo Enlace'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setShowEnlaceFormModal(false); resetEnlaceFormState(); }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitEnlaceForm} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Nombre</label>
+                <input
+                  type="text"
+                  required
+                  value={enlNombre}
+                  onChange={(e) => setEnlNombre(e.target.value)}
+                  placeholder="Ej: Carpeta de Drive, Contrato firmado..."
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Link</label>
+                <input
+                  type="url"
+                  required
+                  value={enlUrl}
+                  onChange={(e) => setEnlUrl(e.target.value)}
+                  placeholder="https://drive.google.com/..."
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => { setShowEnlaceFormModal(false); resetEnlaceFormState(); }}
+                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEnlace}
+                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSavingEnlace ? 'Guardando...' : editingEnlaceId ? 'Guardar Cambios' : 'Crear Enlace'}
                 </button>
               </div>
             </form>
