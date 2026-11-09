@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   CalendarRange,
@@ -451,10 +451,39 @@ const GanttMatrix: React.FC<{
 }> = ({ grupos, meses, closedCount, currentIdx, collapsed, onToggleCollapsed, onSelectSub }) => {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const yearGroups = useMemo(() => groupMonthsByYear(meses), [meses]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Al mes más reciente con algo REALMENTE ejecutado (no solo planeado) en
+  // cualquier subactividad visible -- igual que las líneas de tiempo por
+  // pista del otro formato de Seguimiento, que abren por defecto en su
+  // última fecha registrada en vez de en "hoy". Sin ningún ejecutado
+  // todavía, cae al mes actual (currentIdx) como hoy.
+  const lastDataIdx = useMemo(() => {
+    let maxIdx = -1;
+    grupos.forEach((g) =>
+      g.subactividades.forEach((s) => {
+        s.ejecutado.forEach((v, i) => {
+          if (v > 0 && i > maxIdx) maxIdx = i;
+        });
+      }),
+    );
+    return maxIdx;
+  }, [grupos]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container || meses.length === 0) return;
+    const targetIdx = lastDataIdx !== -1 ? lastDataIdx : currentIdx;
+    const stickyWidth = COL1_W + COL2_W + COL3_W + COL4_W;
+    const monthColWidth = 56;
+    const visibleWidth = container.clientWidth - stickyWidth;
+    const targetLeft = targetIdx * monthColWidth - (visibleWidth - monthColWidth) / 2;
+    container.scrollLeft = Math.max(0, targetLeft);
+  }, [lastDataIdx, currentIdx, meses.length]);
 
   return (
     <div className="relative mx-4 rounded-xl border border-slate-200 overflow-hidden">
-      <div className="overflow-x-auto overflow-y-auto max-h-[640px]">
+      <div ref={scrollRef} className="overflow-x-auto overflow-y-auto max-h-[640px]">
         <table className="w-full text-left border-collapse" style={{ minWidth: COL1_W + COL2_W + COL3_W + COL4_W + meses.length * 56 }}>
           <thead className="sticky top-0 z-20 bg-slate-50 text-[11px] font-semibold text-slate-600 shadow-xs">
             <tr className="border-b border-slate-200 text-[10.5px] uppercase tracking-wide text-slate-400">
