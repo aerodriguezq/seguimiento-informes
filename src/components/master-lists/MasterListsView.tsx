@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { ReportType, Contact, ReportStatus, ReportTypeStep, AreaConsolida, Project, Empresa, Rol } from '../../types';
-import { MONTHS_LIST, YEARS_LIST } from '../../data/mockData';
 import {
   Database,
   Plus,
@@ -10,8 +9,8 @@ import {
   Trash2,
   FileText,
   Users,
-  Calendar,
   X,
+  Save,
   Building2,
   Mail,
   Phone,
@@ -32,6 +31,7 @@ interface MasterListsViewProps {
   projects: Project[];
   currentProjectId?: string;
   onUpdateProjectApplicableTypes: (projectId: string, newTypeIds: string[]) => void;
+  onCreateProject: (project: { name: string; bpin: string; company: string }) => Promise<void>;
   onAddReportType: (type: ReportType) => Promise<void>;
   onUpdateReportType: (typeId: string, updates: Partial<Pick<ReportType, 'code' | 'name' | 'periodicity' | 'description' | 'active'>>) => Promise<void>;
   onDeleteReportType: (typeId: string) => Promise<void>;
@@ -63,6 +63,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   projects,
   currentProjectId,
   onUpdateProjectApplicableTypes,
+  onCreateProject,
   onAddReportType,
   onUpdateReportType,
   onDeleteReportType,
@@ -118,7 +119,7 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
   const [editStepKeywords, setEditStepKeywords] = useState('');
   const [editStepError, setEditStepError] = useState('');
   const [isSavingStepEdit, setIsSavingStepEdit] = useState(false);
-  const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'periods' | 'areas' | 'companies'>('types');
+  const [activeTab, setActiveTab] = useState<'types' | 'contacts' | 'projects' | 'areas' | 'companies'>('types');
   const [newAreaName, setNewAreaName] = useState('');
   const [areaError, setAreaError] = useState('');
   const [isSavingArea, setIsSavingArea] = useState(false);
@@ -142,6 +143,38 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       // El toast de error ya lo muestra App.tsx.
     } finally {
       setIsSavingAreaEdit(false);
+    }
+  };
+
+  // --- Proyectos (catálogo liviano: crear + listar; la gestión completa
+  // sigue viviendo en Cartera de Proyectos) ---
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectBpin, setNewProjectBpin] = useState('');
+  const [newProjectCompany, setNewProjectCompany] = useState('');
+  const [isSavingProject, setIsSavingProject] = useState(false);
+  const [projectFormError, setProjectFormError] = useState('');
+  const [isAddingProject, setIsAddingProject] = useState(false);
+
+  const handleAddProjectSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const normalizedBpin = newProjectBpin.trim().toLowerCase();
+    if (!newProjectName.trim() || !normalizedBpin || !newProjectCompany.trim()) return;
+    if (projects.some((p) => p.bpin.trim().toLowerCase() === normalizedBpin)) {
+      setProjectFormError('Ya existe un proyecto registrado con este BPIN.');
+      return;
+    }
+    setIsSavingProject(true);
+    setProjectFormError('');
+    try {
+      await onCreateProject({ name: newProjectName.trim(), bpin: newProjectBpin.trim(), company: newProjectCompany.trim() });
+      setNewProjectName('');
+      setNewProjectBpin('');
+      setNewProjectCompany('');
+      setIsAddingProject(false);
+    } catch (error) {
+      setProjectFormError(error instanceof Error ? error.message : 'No fue posible crear el proyecto.');
+    } finally {
+      setIsSavingProject(false);
     }
   };
 
@@ -347,6 +380,13 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
       c.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const filteredProjects = projects.filter(
+    (p) =>
+      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.bpin.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.company.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleSaveType = async (e: React.FormEvent) => {
@@ -648,15 +688,15 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
 
         <button
           type="button"
-          onClick={() => { setActiveTab('periods'); setSearchTerm(''); }}
+          onClick={() => { setActiveTab('projects'); setSearchTerm(''); }}
           className={`px-4 py-2.5 font-bold border-b-2 transition-colors inline-flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-            activeTab === 'periods'
+            activeTab === 'projects'
               ? 'border-indigo-600 text-indigo-600'
               : 'border-transparent text-slate-500 hover:text-slate-900'
           }`}
         >
-          <Calendar className="w-4 h-4" />
-          <span>Períodos & Vigencias</span>
+          <Building2 className="w-4 h-4" />
+          <span>Proyectos ({projects.length})</span>
         </button>
 
         <button
@@ -1310,48 +1350,125 @@ export const MasterListsView: React.FC<MasterListsViewProps> = ({
         </div>
       )}
 
-      {/* Tab: Períodos */}
-      {activeTab === 'periods' && (
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">Períodos y Vigencias Operativas</h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Meses y años configurados para cortes contables y técnicos de informes.
-            </p>
+      {/* Tab: Proyectos (catálogo liviano -- crear y ver de un vistazo; la
+          gestión completa de cada proyecto sigue en Cartera de Proyectos) */}
+      {activeTab === 'projects' && (
+        <div className="space-y-3">
+          <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-xs flex flex-wrap items-center justify-between gap-2">
+            <div className="relative w-full max-w-sm">
+              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar por nombre, BPIN o empresa..."
+                className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              {canEditLists && (
+                <button
+                  type="button"
+                  onClick={() => { setIsAddingProject((v) => !v); setProjectFormError(''); }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Nuevo Proyecto
+                </button>
+              )}
+              <span className="text-xs text-slate-400">
+                {filteredProjects.length} proyectos
+              </span>
+            </div>
           </div>
 
-          <div className="space-y-3">
-            <div>
-              <span className="text-xs font-bold text-slate-700 block mb-2">
-                Meses del Cronograma:
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {MONTHS_LIST.map((m) => (
-                  <span
-                    key={m}
-                    className="px-3 py-1 bg-slate-100 border border-slate-200 rounded-lg text-xs font-medium text-slate-700"
-                  >
-                    {m}
-                  </span>
-                ))}
+          {canEditLists && isAddingProject && (
+            <form onSubmit={handleAddProjectSubmit} className="bg-white rounded-xl border border-indigo-200 p-3 shadow-xs space-y-2">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex-1 min-w-48">
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Nombre del proyecto</label>
+                  <input
+                    required
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    placeholder="Ej. Mejoramiento vial regional"
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div className="w-44">
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">BPIN</label>
+                  <input
+                    required
+                    value={newProjectBpin}
+                    onChange={(e) => setNewProjectBpin(e.target.value)}
+                    placeholder="Ej. 2024001000452"
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div className="flex-1 min-w-48">
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Empresa</label>
+                  <input
+                    required
+                    value={newProjectCompany}
+                    onChange={(e) => setNewProjectCompany(e.target.value)}
+                    placeholder="Ej. Consorcio Vial Andino"
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSavingProject}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  {isSavingProject ? 'Guardando...' : 'Guardar'}
+                </button>
               </div>
-            </div>
+              {projectFormError && <p className="text-xs font-medium text-rose-700">{projectFormError}</p>}
+            </form>
+          )}
 
-            <div className="pt-2">
-              <span className="text-xs font-bold text-slate-700 block mb-2">
-                Vigencias Anuales Habilitadas:
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {YEARS_LIST.map((y) => (
-                  <span
-                    key={y}
-                    className="px-4 py-1.5 bg-indigo-50 border border-indigo-200 rounded-lg text-xs font-bold text-indigo-800 font-mono"
-                  >
-                    {y}
-                  </span>
-                ))}
-              </div>
-            </div>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  <th className="py-2.5 px-4">Nombre</th>
+                  <th className="py-2.5 px-4">BPIN</th>
+                  <th className="py-2.5 px-4">Empresa</th>
+                  <th className="py-2.5 px-4">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredProjects.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 text-center text-slate-400">
+                      {projects.length === 0 ? 'Todavía no hay proyectos registrados.' : 'Ningún proyecto coincide con la búsqueda.'}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredProjects.map((p) => (
+                    <tr key={p.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="py-3 px-4 font-semibold text-slate-900">{p.name}</td>
+                      <td className="py-3 px-4 font-mono text-slate-600">{p.bpin}</td>
+                      <td className="py-3 px-4 text-slate-600">{p.company}</td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                            p.generalStatus === 'Suspendido'
+                              ? 'bg-rose-50 text-rose-700'
+                              : p.generalStatus === 'En Cierre'
+                              ? 'bg-slate-100 text-slate-600'
+                              : 'bg-emerald-50 text-emerald-700'
+                          }`}
+                        >
+                          {p.generalStatus}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

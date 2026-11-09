@@ -1829,6 +1829,7 @@ export default function App() {
               projects={projects}
               currentProjectId={currentProjectId}
               onUpdateProjectApplicableTypes={handleUpdateProjectApplicableTypes}
+              onCreateProject={handleCreateProject}
               onAddReportType={handleAddReportType}
               onAddContact={handleAddContact}
               onUpdateContact={handleUpdateContact}
