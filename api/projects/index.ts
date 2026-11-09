@@ -39,6 +39,24 @@ async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
   return token.token;
 }
 
+// Cuando una hoja de Seguimiento queda ligada a un informe mensual ya
+// entregado, su link queda también como adjunto de ESE informe -- mismo
+// patrón que ya usan los adjuntos automáticos en api/reports.ts (acción
+// "attachment"), solo que acá no hay forma de distinguir si el id guardado
+// es de una Hoja de Google nativa o un .xlsx subido a Drive (extractSheetIds
+// en el frontend ya perdió esa distinción), así que se usa el link
+// genérico "abrir en Drive" que funciona para cualquiera de los dos.
+async function attachSeguimientoToInforme(sql: SqlClient, informeId: number, nombreHoja: string, spreadsheetId: string) {
+  const driveUrl = `https://drive.google.com/open?id=${spreadsheetId}`;
+  await sql`
+    INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
+    VALUES (
+      COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
+      ${informeId}, ${`Cronograma de Seguimiento: ${nombreHoja}`}, ${driveUrl}, 'Seguimiento', NOW()
+    )
+  `;
+}
+
 const GOOGLE_SHEETS_MIME = 'application/vnd.google-apps.spreadsheet';
 
 const SEGUIMIENTO_SHEET_NAMES = {
@@ -642,16 +660,43 @@ export default async function handler(
       }
       const nombre = String(request.body?.nombre ?? '').trim() || 'Principal';
       const { spreadsheetId, cronogramaGid, driveFolderUrl } = request.body ?? {};
+
+      // Si viene ligada a un informe, confirma que de verdad es de ESTE
+      // proyecto y que ya está entregado -- no basta con confiar en lo que
+      // mandó el frontend (mismo criterio de "entregado" que ya usa
+      // groupReportsByStep en el frontend: flujo completado o estado Enviado).
+      let informeId: number | null = null;
+      const rawInformeId = request.body?.informeId;
+      if (rawInformeId !== undefined && rawInformeId !== null && rawInformeId !== '') {
+        const parsedInformeId = Number(rawInformeId);
+        if (!Number.isInteger(parsedInformeId) || parsedInformeId <= 0) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['El id del informe no es válido.'] });
+        }
+        const [informeRow] = (await sql`
+          SELECT informe_id AS id FROM informes
+          WHERE informe_id = ${parsedInformeId} AND proyecto_id = ${projectId} AND (flujo_completado = TRUE OR estado = 'Enviado')
+        `) as any[];
+        if (!informeRow) {
+          return response.status(400).json({ data: null, meta: {}, errors: ['Ese informe no corresponde a este proyecto o todavía no está entregado.'] });
+        }
+        informeId = parsedInformeId;
+      }
+
       const rows = await sql`
-        INSERT INTO seguimiento_config (proyecto_id, nombre, spreadsheet_id, cronograma_gid, drive_folder_url)
+        INSERT INTO seguimiento_config (proyecto_id, nombre, spreadsheet_id, cronograma_gid, drive_folder_url, informe_id)
         VALUES (
           ${projectId}, ${nombre},
           ${spreadsheetId ? String(spreadsheetId).trim() : null}, ${cronogramaGid ? String(cronogramaGid).trim() : null},
-          ${driveFolderUrl ? String(driveFolderUrl).trim() : null}
+          ${driveFolderUrl ? String(driveFolderUrl).trim() : null}, ${informeId}
         )
         RETURNING seguimiento_id AS "seguimientoId", nombre, spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid"
       `;
-      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+      let attached = false;
+      if (informeId && spreadsheetId) {
+        await attachSeguimientoToInforme(sql, informeId, nombre, String(spreadsheetId).trim());
+        attached = true;
+      }
+      return response.status(201).json({ data: { ...rows[0], attached }, meta: {}, errors: [] });
     }
 
     if (request.method === 'DELETE' && request.query.seguimiento === 'hoja') {
@@ -728,6 +773,19 @@ export default async function handler(
         if (!spreadsheetId) {
           return response.status(400).json({ data: null, meta: {}, errors: ['El id o link del archivo es obligatorio.'] });
         }
+
+        // Si esta hoja todavía no tenía spreadsheet_id, es la primera vez
+        // que se vincula -- ahí (y solo ahí) se adjunta al informe. Sin este
+        // chequeo, cambiar de pestaña (handleSelectTab reenvía el mismo
+        // spreadsheetId con otro gid) la adjuntaría de nuevo cada vez.
+        const [before] = (await sql`
+          SELECT spreadsheet_id AS "spreadsheetId", informe_id AS "informeId", nombre FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId}
+        `) as any[];
+        if (!before) {
+          return response.status(404).json({ data: null, meta: {}, errors: ['Esa hoja de seguimiento ya no existe.'] });
+        }
+        const isFirstLink = !before.spreadsheetId;
+
         // El gid solo aplica a Hojas de Google (un .xlsx de Drive no tiene
         // ese concepto -- su pestaña del cronograma se ubica por nombre).
         const rows = await sql`
@@ -735,10 +793,12 @@ export default async function handler(
           WHERE seguimiento_id = ${seguimientoId}
           RETURNING spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid"
         `;
-        if (rows.length === 0) {
-          return response.status(404).json({ data: null, meta: {}, errors: ['Esa hoja de seguimiento ya no existe.'] });
+        let attached = false;
+        if (isFirstLink && before.informeId) {
+          await attachSeguimientoToInforme(sql, Number(before.informeId), before.nombre, String(spreadsheetId).trim());
+          attached = true;
         }
-        return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+        return response.status(200).json({ data: { ...rows[0], attached }, meta: {}, errors: [] });
       }
 
       try {

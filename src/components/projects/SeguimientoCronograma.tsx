@@ -213,9 +213,15 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   const [sheets, setSheets] = useState<SeguimientoSheetSummary[] | null>(null);
   const [selectedSeguimientoId, setSelectedSeguimientoId] = useState<number | null>(null);
   const [isAddingSheet, setIsAddingSheet] = useState(false);
-  const [newSheetName, setNewSheetName] = useState('');
   const [newSheetLink, setNewSheetLink] = useState('');
   const [isCreatingSheet, setIsCreatingSheet] = useState(false);
+
+  // El nombre de una hoja nueva ya no se escribe libre -- se elige de los
+  // informes mensuales de este proyecto que ya están entregados (flujo
+  // completado o estado "Enviado"), y esa hoja queda además como adjunto de
+  // ESE informe en cuanto se le vincula un archivo de Google Sheets/Excel.
+  const [deliveredReports, setDeliveredReports] = useState<{ id: string; month: string; year: number; typeName: string }[] | null>(null);
+  const [selectedReportId, setSelectedReportId] = useState('');
 
   // Lista de pestañas del archivo vinculado (Google Sheets o Excel), para
   // que el usuario elija a mano cuál es la del cronograma en vez de
@@ -270,6 +276,21 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
     setSelectedSeguimientoId(null);
     void loadSheets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  useEffect(() => {
+    setDeliveredReports(null);
+    setSelectedReportId('');
+    fetch(`/api/reports?projectId=${encodeURIComponent(projectId)}`)
+      .then((res) => res.json())
+      .then((payload) => {
+        const reports: any[] = payload.data || [];
+        const delivered = reports
+          .filter((r) => r.isWorkflowCompleted || r.status === 'Enviado')
+          .map((r) => ({ id: r.id as string, month: r.month as string, year: r.year as number, typeName: r.typeName as string }));
+        setDeliveredReports(delivered);
+      })
+      .catch(() => setDeliveredReports([]));
   }, [projectId]);
 
   useEffect(() => {
@@ -372,7 +393,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar la hoja de cálculo.');
-      pushLog('Hoja de cálculo configurada.', 'success');
+      pushLog(`Hoja de cálculo configurada${payload.data?.attached ? ' y adjuntada al informe de ese mes' : ''}.`, 'success');
       setIsEditingConfig(true);
       setSheetInput('');
       await fetchData(selectedSeguimientoId);
@@ -413,14 +434,18 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
 
   // Crea una hoja NUEVA bajo este proyecto (la primera, o una adicional del
   // mismo formato -- ej. otro contrato/fase de San Jacinto). El link de
-  // Google Sheets es opcional acá: se puede crear solo con el nombre y
-  // vincular la hoja de cálculo después con "Cambiar hoja".
+  // Google Sheets es opcional acá: se puede crear solo con el informe
+  // seleccionado y vincular la hoja de cálculo después con "Cambiar hoja".
+  // El nombre sale del informe elegido (ej. "Agosto 2026"), nunca se escribe
+  // a mano -- y en cuanto haya un link, esa hoja queda como adjunto de ese
+  // informe (lo hace el backend al guardar spreadsheet_id).
   const handleCreateSheet = async () => {
-    const nombre = newSheetName.trim() || (sheets && sheets.length > 0 ? '' : 'Principal');
-    if (!nombre) {
-      pushLog('Dale un nombre a la hoja (ej. "Contrato A", "Fase 1").', 'error');
+    const selectedReport = deliveredReports?.find((r) => r.id === selectedReportId);
+    if (!selectedReport) {
+      pushLog('Selecciona el informe mensual ya entregado al que corresponde esta hoja.', 'error');
       return;
     }
+    const nombre = `${selectedReport.month} ${selectedReport.year}`;
     const ids = newSheetLink.trim() ? extractSheetIds(newSheetLink) : null;
     if (newSheetLink.trim() && !ids) {
       pushLog('Pega el link completo de la hoja de cálculo (o solo su ID), o déjalo en blanco para vincularla después.', 'error');
@@ -433,14 +458,14 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           kind: 'seguimientoCreateSheet', projectId: Number(projectId), nombre,
-          spreadsheetId: ids?.spreadsheetId, cronogramaGid: ids?.gid,
+          spreadsheetId: ids?.spreadsheetId, cronogramaGid: ids?.gid, informeId: Number(selectedReportId),
         }),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible crear la hoja.');
-      pushLog(`Hoja "${nombre}" creada.`, 'success');
+      pushLog(`Hoja "${nombre}" creada${payload.data?.attached ? ' y adjuntada al informe de ese mes' : ''}.`, 'success');
       setIsAddingSheet(false);
-      setNewSheetName('');
+      setSelectedReportId('');
       setNewSheetLink('');
       await loadSheets(payload.data.seguimientoId);
     } catch (err) {
@@ -506,6 +531,35 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
     );
   }
 
+  // Campo compartido entre el formulario de la primera hoja y el de
+  // "+ Agregar hoja": el nombre de la hoja ya no se escribe libre, se elige
+  // de los informes mensuales de este proyecto que ya están entregados.
+  const reportSelectField = (
+    <div className="min-w-56">
+      <label htmlFor="seguimiento-new-sheet-report" className="block text-[11px] font-semibold text-slate-700 mb-1">
+        Informe mensual ya entregado
+      </label>
+      <select
+        id="seguimiento-new-sheet-report"
+        value={selectedReportId}
+        onChange={(e) => setSelectedReportId(e.target.value)}
+        className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600 bg-white"
+      >
+        <option value="">{deliveredReports === null ? 'Cargando informes...' : 'Selecciona un informe entregado...'}</option>
+        {(deliveredReports ?? []).map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.month} {r.year} · {r.typeName}
+          </option>
+        ))}
+      </select>
+      {deliveredReports && deliveredReports.length === 0 && (
+        <p className="mt-1 text-[10.5px] text-rose-600">
+          Este proyecto todavía no tiene informes entregados -- entrega uno primero en Informes.
+        </p>
+      )}
+    </div>
+  );
+
   // Selector de hojas -- se muestra siempre que haya al menos una, aunque
   // sea una sola (así "+ Agregar hoja" queda a la vista para cuando haga
   // falta una segunda, ej. otro contrato/fase del mismo proyecto).
@@ -530,7 +584,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       {canEdit && (
         <button
           type="button"
-          onClick={() => { setIsAddingSheet((v) => !v); setNewSheetName(''); setNewSheetLink(''); }}
+          onClick={() => { setIsAddingSheet((v) => !v); setSelectedReportId(''); setNewSheetLink(''); }}
           className="rounded-full px-3 py-1 text-xs font-bold border border-dashed"
           style={{ borderColor: BORDER, color: ACCENT }}
         >
@@ -542,17 +596,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
 
   const addSheetForm = canEdit && isAddingSheet && (
     <div className="no-print mx-4 mt-2 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
-      <div className="min-w-40">
-        <label htmlFor="seguimiento-new-sheet-name" className="block text-[11px] font-semibold text-slate-700 mb-1">Nombre de la hoja</label>
-        <input
-          id="seguimiento-new-sheet-name"
-          type="text"
-          value={newSheetName}
-          onChange={(e) => setNewSheetName(e.target.value)}
-          placeholder="Ej. Contrato A, Fase 1..."
-          className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
-        />
-      </div>
+      {reportSelectField}
       <div className="flex-1 min-w-64">
         <label htmlFor="seguimiento-new-sheet-link" className="block text-[11px] font-semibold text-slate-700 mb-1">Link de Google Sheets o Excel (opcional, se puede vincular después)</label>
         <input
@@ -567,7 +611,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       <button
         type="button"
         onClick={handleCreateSheet}
-        disabled={isCreatingSheet}
+        disabled={isCreatingSheet || !selectedReportId}
         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
       >
         <Save className="h-3.5 w-3.5" />
@@ -599,19 +643,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          <div className="min-w-40">
-            <label htmlFor="seguimiento-sheet-name-new" className="block text-[11px] font-semibold text-slate-700 mb-1">
-              Nombre de la hoja
-            </label>
-            <input
-              id="seguimiento-sheet-name-new"
-              type="text"
-              value={newSheetName}
-              onChange={(e) => setNewSheetName(e.target.value)}
-              placeholder="Ej. Principal, Contrato A..."
-              className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600"
-            />
-          </div>
+          {reportSelectField}
           <div className="flex-1 min-w-64">
             <label htmlFor="seguimiento-sheet-link-new" className="block text-[11px] font-semibold text-slate-700 mb-1">
               Link de Google Sheets o Excel (pestaña del cronograma)
@@ -628,7 +660,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
           <button
             type="button"
             onClick={handleCreateSheet}
-            disabled={isCreatingSheet || !newSheetLink.trim()}
+            disabled={isCreatingSheet || !newSheetLink.trim() || !selectedReportId}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
           >
             <Save className="h-3.5 w-3.5" />
