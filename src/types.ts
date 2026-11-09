@@ -307,21 +307,16 @@ export interface ProjectEnlace {
 }
 
 // Un proyecto puede tener N contratos (ej. Contrato principal, Otrosí,
-// Contrato de interventoría), cada uno con su propia lista de
-// participantes -- misma estructura que Convenio/ConvenioParticipante,
-// pero es una entidad distinta (un contrato no es un convenio).
+// Contrato de interventoría) -- a diferencia de Convenio (que tiene una
+// lista abierta de participantes), un contrato solo tiene un contratante,
+// un contratista y un valor fijo.
 export interface Contrato {
   id: string;
   proyectoId: string;
   numero: string;
   nombre: string | null;
-}
-
-export interface ContratoParticipante {
-  id: string;
-  contratoId: string;
-  nombre: string;
-  rol: string | null;
+  contratante: string | null;
+  contratista: string | null;
   valor: number | null;
 }
 

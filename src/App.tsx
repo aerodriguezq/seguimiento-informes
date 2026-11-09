@@ -19,7 +19,6 @@ import {
   Convenio,
   ConvenioParticipante,
   Contrato,
-  ContratoParticipante,
   ProjectEnlace,
   PeticionesConfig,
   EmailCandidate,
@@ -172,16 +171,9 @@ function mapContrato(c: any): Contrato {
     proyectoId: String(c.proyectoId),
     numero: c.numero,
     nombre: c.nombre || null,
-  };
-}
-
-function mapContratoParticipante(p: any): ContratoParticipante {
-  return {
-    id: String(p.id),
-    contratoId: String(p.contratoId),
-    nombre: p.nombre,
-    rol: p.rol || null,
-    valor: p.valor !== null && p.valor !== undefined ? Number(p.valor) : null,
+    contratante: c.contratante || null,
+    contratista: c.contratista || null,
+    valor: c.valor !== null && c.valor !== undefined ? Number(c.valor) : null,
   };
 }
 
@@ -271,7 +263,6 @@ export default function App() {
   const [currentProjectConvenioParticipantes, setCurrentProjectConvenioParticipantes] = useState<ConvenioParticipante[]>([]);
   const [currentProjectEnlaces, setCurrentProjectEnlaces] = useState<ProjectEnlace[]>([]);
   const [currentProjectContratos, setCurrentProjectContratos] = useState<Contrato[]>([]);
-  const [currentProjectContratoParticipantes, setCurrentProjectContratoParticipantes] = useState<ContratoParticipante[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
@@ -428,13 +419,12 @@ export default function App() {
       setCurrentProjectConvenioParticipantes([]);
       setCurrentProjectEnlaces([]);
       setCurrentProjectContratos([]);
-      setCurrentProjectContratoParticipantes([]);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const [reportsResponse, alertsResponse, modificatoriosResponse, valorPartesResponse, aportantesResponse, conveniosResponse, convenioParticipantesResponse, enlacesResponse, contratosResponse, contratoParticipantesResponse] = await Promise.all([
+        const [reportsResponse, alertsResponse, modificatoriosResponse, valorPartesResponse, aportantesResponse, conveniosResponse, convenioParticipantesResponse, enlacesResponse, contratosResponse] = await Promise.all([
           fetch(`/api/reports?projectId=${currentProjectId}`),
           fetch(`/api/alerts?projectId=${currentProjectId}`),
           fetch(`/api/projects?modificatorios=list&projectId=${currentProjectId}`),
@@ -444,7 +434,6 @@ export default function App() {
           fetch(`/api/projects?convenioParticipantes=list&projectId=${currentProjectId}`),
           fetch(`/api/projects?enlaces=list&projectId=${currentProjectId}`),
           fetch(`/api/projects?contratos=list&projectId=${currentProjectId}`),
-          fetch(`/api/projects?contratoParticipantes=list&projectId=${currentProjectId}`),
         ]);
         const reportsPayload = await reportsResponse.json();
         const alertsPayload = await alertsResponse.json();
@@ -455,7 +444,6 @@ export default function App() {
         const convenioParticipantesPayload = await convenioParticipantesResponse.json();
         const enlacesPayload = await enlacesResponse.json();
         const contratosPayload = await contratosResponse.json();
-        const contratoParticipantesPayload = await contratoParticipantesResponse.json();
         if (!reportsResponse.ok) throw new Error(reportsPayload.errors?.[0] || 'No fue posible consultar los informes.');
         if (!alertsResponse.ok) throw new Error(alertsPayload.errors?.[0] || 'No fue posible consultar las alertas.');
         if (cancelled) return;
@@ -468,7 +456,6 @@ export default function App() {
         setCurrentProjectConvenioParticipantes(convenioParticipantesResponse.ok ? convenioParticipantesPayload.data.map(mapConvenioParticipante) : []);
         setCurrentProjectEnlaces(enlacesResponse.ok ? enlacesPayload.data.map(mapEnlace) : []);
         setCurrentProjectContratos(contratosResponse.ok ? contratosPayload.data.map(mapContrato) : []);
-        setCurrentProjectContratoParticipantes(contratoParticipantesResponse.ok ? contratoParticipantesPayload.data.map(mapContratoParticipante) : []);
       } catch (error) {
         if (!cancelled) {
           showToast(error instanceof Error ? error.message : 'No fue posible cargar los informes y alertas de este proyecto.', 'info');
@@ -828,7 +815,9 @@ export default function App() {
     }
   };
 
-  const handleCreateContrato = async (data: { numero: string; nombre?: string }) => {
+  const handleCreateContrato = async (data: {
+    numero: string; nombre?: string; contratante?: string; contratista?: string; valor?: number | null;
+  }) => {
     const response = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -840,7 +829,9 @@ export default function App() {
     showToast('Contrato guardado.', 'success');
   };
 
-  const handleUpdateContrato = async (id: string, data: Partial<{ numero: string; nombre: string | null }>) => {
+  const handleUpdateContrato = async (id: string, data: Partial<{
+    numero: string; nombre: string | null; contratante: string | null; contratista: string | null; valor: number | null;
+  }>) => {
     const response = await fetch('/api/projects', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -857,48 +848,7 @@ export default function App() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el contrato.');
     await refetchContratos();
-    await refetchContratoParticipantes();
     showToast('Contrato eliminado.', 'success');
-  };
-
-  const refetchContratoParticipantes = async () => {
-    const response = await fetch(`/api/projects?contratoParticipantes=list&projectId=${currentProjectId}`);
-    const payload = await response.json();
-    if (response.ok) {
-      setCurrentProjectContratoParticipantes(payload.data.map(mapContratoParticipante));
-    }
-  };
-
-  const handleCreateContratoParticipante = async (data: { contratoId: string; nombre: string; rol?: string; valor?: number | null }) => {
-    const response = await fetch('/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind: 'contratoParticipanteCreate', data }),
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el participante.');
-    await refetchContratoParticipantes();
-    showToast('Participante del contrato guardado.', 'success');
-  };
-
-  const handleUpdateContratoParticipante = async (id: string, data: Partial<{ nombre: string; rol: string | null; valor: number | null }>) => {
-    const response = await fetch('/api/projects', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind: 'contratoParticipanteUpdate', id: Number(id), data }),
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el participante.');
-    await refetchContratoParticipantes();
-    showToast('Participante del contrato actualizado.', 'success');
-  };
-
-  const handleDeleteContratoParticipante = async (id: string) => {
-    const response = await fetch(`/api/projects?contratoParticipante=${id}`, { method: 'DELETE' });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el participante.');
-    await refetchContratoParticipantes();
-    showToast('Participante del contrato eliminado.', 'success');
   };
 
   const handleSubmitNewReport = async (input: {
@@ -1919,10 +1869,6 @@ export default function App() {
               onCreateContrato={handleCreateContrato}
               onUpdateContrato={handleUpdateContrato}
               onDeleteContrato={handleDeleteContrato}
-              contratoParticipantes={currentProjectContratoParticipantes}
-              onCreateContratoParticipante={handleCreateContratoParticipante}
-              onUpdateContratoParticipante={handleUpdateContratoParticipante}
-              onDeleteContratoParticipante={handleDeleteContratoParticipante}
             />
           )}
 

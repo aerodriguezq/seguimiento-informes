@@ -12,7 +12,6 @@ import {
   ConvenioParticipante,
   ProjectEnlace,
   Contrato,
-  ContratoParticipante,
 } from '../../types';
 import {
   calculateDaysRemaining,
@@ -126,13 +125,13 @@ interface ProjectDetailViewProps {
   onUpdateEnlace: (id: string, data: Partial<{ nombre: string; url: string }>) => Promise<void>;
   onDeleteEnlace: (id: string) => Promise<void>;
   contratos: Contrato[];
-  onCreateContrato: (data: { numero: string; nombre?: string }) => Promise<void>;
-  onUpdateContrato: (id: string, data: Partial<{ numero: string; nombre: string | null }>) => Promise<void>;
+  onCreateContrato: (data: {
+    numero: string; nombre?: string; contratante?: string; contratista?: string; valor?: number | null;
+  }) => Promise<void>;
+  onUpdateContrato: (id: string, data: Partial<{
+    numero: string; nombre: string | null; contratante: string | null; contratista: string | null; valor: number | null;
+  }>) => Promise<void>;
   onDeleteContrato: (id: string) => Promise<void>;
-  contratoParticipantes: ContratoParticipante[];
-  onCreateContratoParticipante: (data: { contratoId: string; nombre: string; rol?: string; valor?: number | null }) => Promise<void>;
-  onUpdateContratoParticipante: (id: string, data: Partial<{ nombre: string; rol: string | null; valor: number | null }>) => Promise<void>;
-  onDeleteContratoParticipante: (id: string) => Promise<void>;
 }
 
 export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
@@ -180,10 +179,6 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onCreateContrato,
   onUpdateContrato,
   onDeleteContrato,
-  contratoParticipantes,
-  onCreateContratoParticipante,
-  onUpdateContratoParticipante,
-  onDeleteContratoParticipante,
 }) => {
   const { user, canEdit } = useAuth();
   const [isEditingVigencia, setIsEditingVigencia] = useState(false);
@@ -542,17 +537,23 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     await onDeleteConvenioParticipante(id);
   };
 
-  // --- Contratos: mismo patrón que Convenios (arriba), entidad distinta ---
+  // --- Contratos: numero/nombre + contratista, contratante y valor fijos (sin lista de participantes) ---
   const [showContratoFormModal, setShowContratoFormModal] = useState(false);
   const [editingContratoFormId, setEditingContratoFormId] = useState<string | null>(null);
   const [ctrNumero, setCtrNumero] = useState('');
   const [ctrNombre, setCtrNombre] = useState('');
+  const [ctrContratante, setCtrContratante] = useState('');
+  const [ctrContratista, setCtrContratista] = useState('');
+  const [ctrValor, setCtrValor] = useState('');
   const [isSavingContratoForm, setIsSavingContratoForm] = useState(false);
 
   const resetContratoFormState = () => {
     setEditingContratoFormId(null);
     setCtrNumero('');
     setCtrNombre('');
+    setCtrContratante('');
+    setCtrContratista('');
+    setCtrValor('');
   };
 
   const handleOpenNewContrato = () => {
@@ -564,6 +565,9 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     setEditingContratoFormId(c.id);
     setCtrNumero(c.numero);
     setCtrNombre(c.nombre || '');
+    setCtrContratante(c.contratante || '');
+    setCtrContratista(c.contratista || '');
+    setCtrValor(c.valor !== null ? String(c.valor) : '');
     setShowContratoFormModal(true);
   };
 
@@ -572,10 +576,23 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     if (!ctrNumero.trim()) return;
     setIsSavingContratoForm(true);
     try {
+      const valor = ctrValor.trim() === '' ? null : Number(ctrValor);
       if (editingContratoFormId) {
-        await onUpdateContrato(editingContratoFormId, { numero: ctrNumero.trim(), nombre: ctrNombre.trim() || null });
+        await onUpdateContrato(editingContratoFormId, {
+          numero: ctrNumero.trim(),
+          nombre: ctrNombre.trim() || null,
+          contratante: ctrContratante.trim() || null,
+          contratista: ctrContratista.trim() || null,
+          valor,
+        });
       } else {
-        await onCreateContrato({ numero: ctrNumero.trim(), nombre: ctrNombre.trim() || undefined });
+        await onCreateContrato({
+          numero: ctrNumero.trim(),
+          nombre: ctrNombre.trim() || undefined,
+          contratante: ctrContratante.trim() || undefined,
+          contratista: ctrContratista.trim() || undefined,
+          valor,
+        });
       }
       setShowContratoFormModal(false);
       resetContratoFormState();
@@ -585,63 +602,8 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   };
 
   const handleDeleteContratoEntityClick = async (id: string) => {
-    if (!window.confirm('¿Eliminar este contrato? También se eliminan todos sus participantes. Esta acción no se puede deshacer.')) return;
+    if (!window.confirm('¿Eliminar este contrato? Esta acción no se puede deshacer.')) return;
     await onDeleteContrato(id);
-  };
-
-  // --- Participantes de un contrato específico ---
-  const [showContratoParticipanteModal, setShowContratoParticipanteModal] = useState(false);
-  const [participanteContratoId, setParticipanteContratoId] = useState<string | null>(null);
-  const [editingContratoParticipanteId, setEditingContratoParticipanteId] = useState<string | null>(null);
-  const [ctpNombre, setCtpNombre] = useState('');
-  const [ctpRol, setCtpRol] = useState('');
-  const [ctpValor, setCtpValor] = useState('');
-  const [isSavingContratoParticipante, setIsSavingContratoParticipante] = useState(false);
-
-  const resetContratoParticipanteForm = () => {
-    setEditingContratoParticipanteId(null);
-    setParticipanteContratoId(null);
-    setCtpNombre('');
-    setCtpRol('');
-    setCtpValor('');
-  };
-
-  const handleOpenNewContratoParticipante = (contratoId: string) => {
-    resetContratoParticipanteForm();
-    setParticipanteContratoId(contratoId);
-    setShowContratoParticipanteModal(true);
-  };
-
-  const handleStartEditContratoParticipante = (p: ContratoParticipante) => {
-    setEditingContratoParticipanteId(p.id);
-    setParticipanteContratoId(p.contratoId);
-    setCtpNombre(p.nombre);
-    setCtpRol(p.rol || '');
-    setCtpValor(p.valor !== null ? String(p.valor) : '');
-    setShowContratoParticipanteModal(true);
-  };
-
-  const handleSubmitContratoParticipante = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!ctpNombre.trim() || !participanteContratoId) return;
-    setIsSavingContratoParticipante(true);
-    try {
-      const valor = ctpValor.trim() === '' ? null : Number(ctpValor);
-      if (editingContratoParticipanteId) {
-        await onUpdateContratoParticipante(editingContratoParticipanteId, { nombre: ctpNombre.trim(), rol: ctpRol.trim() || null, valor });
-      } else {
-        await onCreateContratoParticipante({ contratoId: participanteContratoId, nombre: ctpNombre.trim(), rol: ctpRol.trim() || undefined, valor });
-      }
-      setShowContratoParticipanteModal(false);
-      resetContratoParticipanteForm();
-    } finally {
-      setIsSavingContratoParticipante(false);
-    }
-  };
-
-  const handleDeleteContratoParticipanteClick = async (id: string) => {
-    if (!window.confirm('¿Eliminar este participante del contrato? Esta acción no se puede deshacer.')) return;
-    await onDeleteContratoParticipante(id);
   };
 
   // --- Enlaces: carpetas de Drive o accesos directos sueltos del proyecto
@@ -1674,105 +1636,52 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 Todavía no se han registrado contratos para este proyecto.
               </p>
             ) : (
-              contratos.map((contrato) => {
-                const participantesDelContrato = contratoParticipantes.filter((p) => p.contratoId === contrato.id);
-                const sumaContrato = participantesDelContrato.reduce((acc, p) => acc + (p.valor ?? 0), 0);
-                return (
-                  <div key={contrato.id} className="border border-slate-200 rounded-lg overflow-hidden">
-                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 bg-slate-50 border-b border-slate-200">
-                      <div className="min-w-0">
+              <div className="space-y-1.5">
+                {contratos.map((contrato) => (
+                  <div
+                    key={contrato.id}
+                    className="flex flex-wrap items-center justify-between gap-3 p-3 bg-white border border-slate-200 rounded-lg"
+                  >
+                    <div className="min-w-0">
+                      <div>
                         <span className="font-bold text-slate-900">{contrato.numero}</span>
                         {contrato.nombre && <span className="text-slate-500"> — {contrato.nombre}</span>}
                       </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-500">
+                        {contrato.contratante && (
+                          <span>Contratante: <strong className="text-slate-700">{contrato.contratante}</strong></span>
+                        )}
+                        {contrato.contratista && (
+                          <span>Contratista: <strong className="text-slate-700">{contrato.contratista}</strong></span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      {contrato.valor !== null && <span className="font-bold text-slate-800">{formatCurrency(contrato.valor)}</span>}
                       {canEdit('projects') && (
-                        <div className="flex items-center gap-3 shrink-0">
+                        <div className="flex items-center gap-1.5">
                           <button
                             type="button"
-                            onClick={() => handleOpenNewContratoParticipante(contrato.id)}
-                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+                            onClick={() => handleStartEditContratoForm(contrato)}
+                            className="text-slate-400 hover:text-indigo-600"
+                            title="Editar contrato"
                           >
-                            <Plus className="w-3 h-3" /> Participante
+                            <Edit2 className="w-3.5 h-3.5" />
                           </button>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleStartEditContratoForm(contrato)}
-                              className="text-slate-400 hover:text-indigo-600"
-                              title="Editar contrato"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteContratoEntityClick(contrato.id)}
-                              className="text-slate-400 hover:text-rose-600"
-                              title="Eliminar contrato"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteContratoEntityClick(contrato.id)}
+                            className="text-slate-400 hover:text-rose-600"
+                            title="Eliminar contrato"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       )}
                     </div>
-
-                    <div className="p-3">
-                      {participantesDelContrato.length === 0 ? (
-                        <p className="text-slate-400 py-3 text-center">Sin participantes todavía.</p>
-                      ) : (
-                        <>
-                          <div className="space-y-1.5">
-                            {participantesDelContrato.map((p) => (
-                              <div
-                                key={p.id}
-                                className="flex flex-wrap items-center justify-between gap-2 p-2 bg-white border border-slate-200 rounded-lg"
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                  <span className="font-semibold text-slate-800 truncate">{p.nombre}</span>
-                                  {p.rol && (
-                                    <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                      {p.rol}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {p.valor !== null && <span className="font-bold text-slate-800">{formatCurrency(p.valor)}</span>}
-                                  {canEdit('projects') && (
-                                    <div className="flex items-center gap-1.5">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleStartEditContratoParticipante(p)}
-                                        className="text-slate-400 hover:text-indigo-600"
-                                        title="Editar participante"
-                                      >
-                                        <Edit2 className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteContratoParticipanteClick(p.id)}
-                                        className="text-slate-400 hover:text-rose-600"
-                                        title="Eliminar participante"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          {sumaContrato > 0 && (
-                            <div className="mt-2 flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
-                              <span className="text-slate-500">Suma de participantes</span>
-                              <span className="font-bold text-slate-800">{formatCurrency(sumaContrato)}</span>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
                   </div>
-                );
-              })
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -2990,6 +2899,33 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 />
               </div>
 
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Contratante (opcional)</label>
+                <input
+                  type="text"
+                  value={ctrContratante}
+                  onChange={(e) => setCtrContratante(e.target.value)}
+                  placeholder="Ej: Alcaldía de San Jacinto"
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Contratista (opcional)</label>
+                <input
+                  type="text"
+                  value={ctrContratista}
+                  onChange={(e) => setCtrContratista(e.target.value)}
+                  placeholder="Ej: Constructora XYZ S.A.S."
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Valor (opcional)</label>
+                <CurrencyInput value={ctrValor} onChange={setCtrValor} placeholder="Ej: 3.000.000.000" />
+              </div>
+
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -3004,74 +2940,6 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSavingContratoForm ? 'Guardando...' : editingContratoFormId ? 'Guardar Cambios' : 'Crear Contrato'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Participante del Contrato -- crear o editar según editingContratoParticipanteId */}
-      {showContratoParticipanteModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                <Users className="w-4 h-4 text-indigo-600" />
-                {editingContratoParticipanteId ? 'Editar Participante' : 'Nuevo Participante del Contrato'}
-              </h3>
-              <button
-                type="button"
-                onClick={() => { setShowContratoParticipanteModal(false); resetContratoParticipanteForm(); }}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitContratoParticipante} className="space-y-3 text-xs">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Nombre de la entidad</label>
-                <input
-                  type="text"
-                  required
-                  value={ctpNombre}
-                  onChange={(e) => setCtpNombre(e.target.value)}
-                  placeholder="Ej: Alcaldía de San Jacinto"
-                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Rol en el contrato (opcional)</label>
-                <input
-                  type="text"
-                  value={ctpRol}
-                  onChange={(e) => setCtpRol(e.target.value)}
-                  placeholder="Ej: Contratista, Interventor, Supervisor..."
-                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Valor que aporta (opcional)</label>
-                <CurrencyInput value={ctpValor} onChange={setCtpValor} placeholder="Ej: 3.000.000.000" />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => { setShowContratoParticipanteModal(false); resetContratoParticipanteForm(); }}
-                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingContratoParticipante}
-                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isSavingContratoParticipante ? 'Guardando...' : editingContratoParticipanteId ? 'Guardar Cambios' : 'Crear Participante'}
                 </button>
               </div>
             </form>
