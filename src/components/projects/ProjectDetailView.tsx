@@ -1282,7 +1282,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                     <span className="text-slate-500">Suma de aportantes</span>
                     <span className="font-bold text-slate-800">{formatCurrency(sumaAportantes)}</span>
                   </div>
-                  {valorActual !== null && Math.abs(sumaAportantes - valorActual) > 0.5 && (
+                  {valorActual !== null && Math.abs(sumaAportantes - valorActual) > 100 && (
                     <p className="mt-1 text-[10.5px] text-amber-600">
                       La suma de aportantes ({formatCurrency(sumaAportantes)}) no coincide con el Valor Actual ({formatCurrency(valorActual)}).
                     </p>
@@ -1414,7 +1414,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                     <span className="text-slate-500">Suma de las partes</span>
                     <span className="font-bold text-slate-800">{formatCurrency(sumaValorPartes)}</span>
                   </div>
-                  {valorActual !== null && Math.abs(sumaValorPartes - valorActual) > 0.5 && (
+                  {valorActual !== null && Math.abs(sumaValorPartes - valorActual) > 100 && (
                     <p className="mt-1 text-[10.5px] text-amber-600">
                       La suma de las partes ({formatCurrency(sumaValorPartes)}) no coincide con el Valor Actual ({formatCurrency(valorActual)}).
                     </p>
