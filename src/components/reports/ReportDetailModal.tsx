@@ -13,6 +13,7 @@ import {
   calculateDaysRemaining,
   getSemaforoStatus,
   getReportEffectiveDueDate,
+  getReportDeliveryInfo,
   STATUS_SEQUENCE,
   MONTHS_LIST,
 } from '../../data/mockData';
@@ -192,6 +193,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const effectiveDueDate = getReportEffectiveDueDate(report);
   const daysRemaining = calculateDaysRemaining(effectiveDueDate, report.status);
   const semaforo = getSemaforoStatus(effectiveDueDate, report.status);
+  const deliveryInfo = getReportDeliveryInfo(report);
 
   // Responsables = los asignados directamente al informe + los
   // responsables de cada paso del flujo de este tipo de informe (el mismo
@@ -970,15 +972,33 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                 )}
               </div>
 
-              {(report.revisorNombre || report.fechaEntregaReal || report.fechaRevision) && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {(deliveryInfo.deliveredAt || report.revisorNombre || report.fechaEntregaReal || report.fechaRevision) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
+                    <span className="text-slate-500 block">Fecha de Entrega Real:</span>
+                    <span className="font-bold text-slate-900 mt-1 block">
+                      {deliveryInfo.deliveredAt
+                        ? new Date(deliveryInfo.deliveredAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })
+                        : report.fechaEntregaReal || '—'}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
+                    <span className="text-slate-500 block">Cumplimiento:</span>
+                    {deliveryInfo.onTime === null ? (
+                      <span className="font-bold text-slate-400 mt-1 block">—</span>
+                    ) : (
+                      <span
+                        className={`inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded font-bold ${
+                          deliveryInfo.onTime ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                        }`}
+                      >
+                        {deliveryInfo.onTime ? 'Entregado a tiempo' : 'Entregado con retraso'}
+                      </span>
+                    )}
+                  </div>
                   <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
                     <span className="text-slate-500 block">Responsable de Revisión:</span>
                     <span className="font-bold text-slate-900 mt-1 block">{report.revisorNombre || '—'}</span>
-                  </div>
-                  <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
-                    <span className="text-slate-500 block">Fecha de Entrega Real:</span>
-                    <span className="font-bold text-slate-900 mt-1 block">{report.fechaEntregaReal || '—'}</span>
                   </div>
                   <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
                     <span className="text-slate-500 block">Fecha de Revisión:</span>

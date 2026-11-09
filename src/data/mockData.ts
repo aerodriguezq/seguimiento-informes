@@ -658,6 +658,31 @@ export function getReportEffectiveDueDate(report: Pick<Report, 'dueDate' | 'curr
   return currentStage?.dueDate || report.dueDate;
 }
 
+export interface ReportDeliveryInfo {
+  deliveredAt: string | null;
+  onTime: boolean | null;
+}
+
+// Hoy existe "a tiempo/tarde" por CADA PASO del flujo (informe_pasos_instancia.estado_etapa),
+// pero nada a nivel del INFORME COMPLETO -- esto compara cuándo se cerró
+// de verdad el ÚLTIMO paso (report.currentStepId sigue apuntando a él
+// aunque el flujo ya esté completo -- advanceReportStep no lo cambia en su
+// rama final) contra la fecha límite FINAL del informe (report.dueDate,
+// no la de un paso individual). Para informes históricos cargados
+// masivamente, que no necesariamente tienen stageInstances, cae a
+// fechaEntregaReal. Sin ninguna de las dos fuentes, o si el informe
+// todavía no se completó, no hay nada que evaluar.
+export function getReportDeliveryInfo(
+  report: Pick<Report, 'dueDate' | 'isWorkflowCompleted' | 'currentStepId' | 'stageInstances' | 'fechaEntregaReal'>,
+): ReportDeliveryInfo {
+  if (!report.isWorkflowCompleted) return { deliveredAt: null, onTime: null };
+  const finalStage = report.stageInstances?.find((s) => s.stepId === report.currentStepId);
+  const deliveredAt = finalStage?.receivedAt || report.fechaEntregaReal || null;
+  if (!deliveredAt) return { deliveredAt: null, onTime: null };
+  const deliveredDateOnly = deliveredAt.slice(0, 10);
+  return { deliveredAt, onTime: deliveredDateOnly <= report.dueDate };
+}
+
 export function calculateDaysRemaining(dueDateStr: string, status: ReportStatus): number {
   if (status === 'Enviado') {
     return 0; // Already fulfilled
