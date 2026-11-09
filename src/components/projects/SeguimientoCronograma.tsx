@@ -74,6 +74,7 @@ type SeguimientoData = {
     lastError: string | null;
     insumosColumnasVisibles: string[] | null;
     driveFolderUrl: string | null;
+    informeId: number | null;
   } | null;
   kpis: Record<string, Kpi>;
   rows: SeguimientoRow[];
@@ -201,6 +202,8 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [driveFolderInput, setDriveFolderInput] = useState('');
   const [isSavingDriveFolder, setIsSavingDriveFolder] = useState(false);
+  const [assignReportId, setAssignReportId] = useState('');
+  const [isAssigningReport, setIsAssigningReport] = useState(false);
   const [search, setSearch] = useState('');
   const [isColumnsPanelOpen, setIsColumnsPanelOpen] = useState(false);
   const [draftColumns, setDraftColumns] = useState<Set<string>>(new Set(INSUMO_COLUMN_KEYS));
@@ -292,6 +295,14 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       })
       .catch(() => setDeliveredReports([]));
   }, [projectId]);
+
+  // Mantiene el selector de "Informe vinculado" del panel "Cambiar hoja" en
+  // sincronía con lo que de verdad tiene guardado la hoja activa -- se
+  // recalcula cada vez que cambian los datos (incluido justo después de
+  // guardar una asignación nueva).
+  useEffect(() => {
+    setAssignReportId(data?.config?.informeId ? String(data.config.informeId) : '');
+  }, [data?.config?.informeId]);
 
   useEffect(() => {
     if (selectedSeguimientoId == null) return;
@@ -403,6 +414,31 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       pushLog(err instanceof Error ? err.message : 'No fue posible guardar la hoja de cálculo.', 'error');
     } finally {
       setIsSavingConfig(false);
+    }
+  };
+
+  // Asigna (o corrige) el informe de la hoja activa -- para las que se
+  // crearon antes de que esto existiera, o si se eligió el mes equivocado.
+  // Si la hoja ya tiene un archivo vinculado, el backend lo adjunta de una
+  // vez al informe recién asignado.
+  const handleAssignReport = async () => {
+    if (!selectedSeguimientoId || !assignReportId) return;
+    setIsAssigningReport(true);
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'seguimientoAsignarInforme', seguimientoId: selectedSeguimientoId, informeId: Number(assignReportId) }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible asignar el informe.');
+      pushLog(`Hoja asignada al informe seleccionado${payload.data?.attached ? ' y adjuntada a ese informe' : ''}.`, 'success');
+      await fetchData(selectedSeguimientoId);
+      await loadSheets(selectedSeguimientoId);
+    } catch (err) {
+      pushLog(err instanceof Error ? err.message : 'No fue posible asignar el informe.', 'error');
+    } finally {
+      setIsAssigningReport(false);
     }
   };
 
@@ -888,6 +924,43 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
               )}
             </div>
           )}
+
+          <div className="w-full flex flex-wrap items-end gap-2 pt-2 mt-1 border-t border-slate-200">
+            <div className="flex-1 min-w-64">
+              <label htmlFor="seguimiento-informe-edit" className="block text-[11px] font-semibold text-slate-700 mb-1">
+                Informe vinculado
+              </label>
+              <select
+                id="seguimiento-informe-edit"
+                value={assignReportId}
+                onChange={(e) => setAssignReportId(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600 bg-white"
+              >
+                <option value="">{deliveredReports === null ? 'Cargando informes...' : 'Sin asignar'}</option>
+                {(deliveredReports ?? []).map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.month} {r.year} · {r.typeName}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10.5px] text-slate-500">
+                {data.config.informeId
+                  ? `Actual: ${deliveredReports?.find((r) => r.id === String(data.config?.informeId))?.month ?? 'informe'} ${
+                      deliveredReports?.find((r) => r.id === String(data.config?.informeId))?.year ?? ''
+                    }`
+                  : 'Esta hoja todavía no está asignada a ningún informe.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleAssignReport}
+              disabled={isAssigningReport || !assignReportId || assignReportId === String(data.config.informeId ?? '')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
+            >
+              <Save className="h-3.5 w-3.5" />
+              {isAssigningReport ? 'Guardando...' : 'Asignar'}
+            </button>
+          </div>
 
           <div className="w-full flex flex-wrap items-end gap-2 pt-2 mt-1 border-t border-slate-200">
             <div className="flex-1 min-w-64">

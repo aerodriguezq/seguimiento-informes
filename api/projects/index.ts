@@ -46,6 +46,18 @@ async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
 // es de una Hoja de Google nativa o un .xlsx subido a Drive (extractSheetIds
 // en el frontend ya perdió esa distinción), así que se usa el link
 // genérico "abrir en Drive" que funciona para cualquiera de los dos.
+// Mismo criterio de "entregado" que ya usa groupReportsByStep en el
+// frontend: flujo completado o estado Enviado -- se repite acá porque un
+// informe tiene que confirmarse como entregado tanto al crear una hoja
+// nueva ligada a él como al asignárselo después a una ya existente.
+async function isInformeEntregadoDelProyecto(sql: SqlClient, informeId: number, projectId: number): Promise<boolean> {
+  const [row] = (await sql`
+    SELECT informe_id AS id FROM informes
+    WHERE informe_id = ${informeId} AND proyecto_id = ${projectId} AND (flujo_completado = TRUE OR estado = 'Enviado')
+  `) as any[];
+  return Boolean(row);
+}
+
 async function attachSeguimientoToInforme(sql: SqlClient, informeId: number, nombreHoja: string, spreadsheetId: string) {
   const driveUrl = `https://drive.google.com/open?id=${spreadsheetId}`;
   await sql`
@@ -94,7 +106,8 @@ async function fetchSeguimiento(sql: SqlClient, seguimientoId: number) {
     SELECT seguimiento_id AS "seguimientoId", proyecto_id AS "projectId", nombre, formato,
       spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid",
       ultima_importacion AS "lastImportAt", ultimo_error AS "lastError",
-      insumos_columnas_visibles AS "insumosColumnasVisibles", drive_folder_url AS "driveFolderUrl"
+      insumos_columnas_visibles AS "insumosColumnasVisibles", drive_folder_url AS "driveFolderUrl",
+      informe_id AS "informeId"
     FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId}
   `) as any[];
 
@@ -672,11 +685,7 @@ export default async function handler(
         if (!Number.isInteger(parsedInformeId) || parsedInformeId <= 0) {
           return response.status(400).json({ data: null, meta: {}, errors: ['El id del informe no es válido.'] });
         }
-        const [informeRow] = (await sql`
-          SELECT informe_id AS id FROM informes
-          WHERE informe_id = ${parsedInformeId} AND proyecto_id = ${projectId} AND (flujo_completado = TRUE OR estado = 'Enviado')
-        `) as any[];
-        if (!informeRow) {
+        if (!(await isInformeEntregadoDelProyecto(sql, parsedInformeId, projectId))) {
           return response.status(400).json({ data: null, meta: {}, errors: ['Ese informe no corresponde a este proyecto o todavía no está entregado.'] });
         }
         informeId = parsedInformeId;
@@ -697,6 +706,45 @@ export default async function handler(
         attached = true;
       }
       return response.status(201).json({ data: { ...rows[0], attached }, meta: {}, errors: [] });
+    }
+
+    // Asigna (o reasigna) el informe de una hoja YA EXISTENTE -- para las
+    // creadas antes de que esto fuera obligatorio, o para corregir una mal
+    // asignada. Si la hoja ya tiene un archivo vinculado, ese link se
+    // adjunta de una vez al informe recién asignado (si no cambió nada
+    // respecto al informe que ya tenía, no se repite el adjunto).
+    if (request.method === 'POST' && request.body?.kind === 'seguimientoAsignarInforme') {
+      if (!(await canEditModuleRequest(request, sql, 'seguimiento'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Seguimiento.'] });
+      }
+      const seguimientoId = Number(request.body?.seguimientoId);
+      if (!Number.isInteger(seguimientoId) || seguimientoId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja de seguimiento es obligatorio.'] });
+      }
+      const parsedInformeId = Number(request.body?.informeId);
+      if (!Number.isInteger(parsedInformeId) || parsedInformeId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del informe es obligatorio.'] });
+      }
+
+      const [before] = (await sql`
+        SELECT proyecto_id AS "projectId", nombre, spreadsheet_id AS "spreadsheetId", informe_id AS "informeId"
+        FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId}
+      `) as any[];
+      if (!before) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Esa hoja de seguimiento ya no existe.'] });
+      }
+      if (!(await isInformeEntregadoDelProyecto(sql, parsedInformeId, Number(before.projectId)))) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Ese informe no corresponde a este proyecto o todavía no está entregado.'] });
+      }
+
+      await sql`UPDATE seguimiento_config SET informe_id = ${parsedInformeId} WHERE seguimiento_id = ${seguimientoId}`;
+
+      let attached = false;
+      if (before.spreadsheetId && Number(before.informeId) !== parsedInformeId) {
+        await attachSeguimientoToInforme(sql, parsedInformeId, before.nombre, before.spreadsheetId);
+        attached = true;
+      }
+      return response.status(200).json({ data: { seguimientoId, informeId: parsedInformeId, attached }, meta: {}, errors: [] });
     }
 
     if (request.method === 'DELETE' && request.query.seguimiento === 'hoja') {
