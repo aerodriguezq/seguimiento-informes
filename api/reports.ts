@@ -36,6 +36,34 @@ async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
   return getDriveAccessToken(session[0].token_json);
 }
 
+// Las hojas de Seguimiento (Gantt) en modo "vincular a TODOS los informes"
+// (seguimiento_config.vincula_todos_informes, ver api/projects/index.ts)
+// necesitan que su link quede adjunto a CADA informe que se entregue, no
+// solo al que existía cuando se activó ese modo -- esto se llama justo
+// después de que un informe quede entregado (flujo_completado/estado
+// 'Enviado'), desde los 3 lugares donde eso puede pasar: avance de paso
+// final, cambio manual de estado, y carga masiva. Mismo patrón de adjunto
+// que ya usa api/projects/index.ts (attachSeguimientoToInforme) -- se
+// repite acá en vez de importarlo porque son dos funciones serverless
+// separadas.
+async function attachVinculaTodosSheets(sql: SqlClient, reportId: number, projectId: number) {
+  const sheets = (await sql`
+    SELECT seguimiento_id AS id, nombre, spreadsheet_id AS "spreadsheetId"
+    FROM seguimiento_config
+    WHERE proyecto_id = ${projectId} AND vincula_todos_informes = TRUE AND spreadsheet_id IS NOT NULL
+  `) as any[];
+  for (const sheet of sheets) {
+    const driveUrl = `https://drive.google.com/open?id=${sheet.spreadsheetId}`;
+    await sql`
+      INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
+      VALUES (
+        COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
+        ${reportId}, ${`Cronograma de Seguimiento: ${sheet.nombre}`}, ${driveUrl}, 'Seguimiento', NOW()
+      )
+    `;
+  }
+}
+
 const MONTHS_ES =['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 function nextMonthYear(monthName: string, year: number) {
@@ -618,6 +646,9 @@ async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ cre
           VALUES (COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1, ${reportId}, 'Evidencias', ${enlaceEvidencias}, 'Carga masiva', NOW())
         `;
       }
+      if (status === 'Enviado') {
+        await attachVinculaTodosSheets(sql, reportId, project.id);
+      }
 
       const typeCodeForConsecutive = type.codigo || 'INF';
       const [{ count }] = (await sql`SELECT COUNT(*) AS count FROM informes WHERE tipo_informe_id = ${type.id} AND anio = ${year}`) as any[];
@@ -751,6 +782,7 @@ async function advanceReportStep(
 
   if (current.isFinal) {
     await sql`UPDATE informes SET flujo_completado = TRUE, estado = 'Enviado', updated_at = NOW() WHERE informe_id = ${reportId}`;
+    await attachVinculaTodosSheets(sql, reportId, current.projectId);
     await maybeScheduleNextMonth(sql, reportId);
     return;
   }
@@ -772,6 +804,7 @@ async function advanceReportStep(
     await createStepAlert(sql, reportId, current.projectId, nextStep.id, nextStep.name, current.year, current.monthName, dynamicStartDate);
   } else {
     await sql`UPDATE informes SET flujo_completado = TRUE, estado = 'Enviado', updated_at = NOW() WHERE informe_id = ${reportId}`;
+    await attachVinculaTodosSheets(sql, reportId, current.projectId);
     await maybeScheduleNextMonth(sql, reportId);
   }
 }
@@ -1141,6 +1174,10 @@ export default async function handler(request: VercelRequest, response: VercelRe
           ${reportId}, ${status}, NOW(), ${userName || 'Usuario'}, ${comment || ''}
         )
       `;
+      if (status === 'Enviado') {
+        const [statusReport] = (await sql`SELECT proyecto_id AS "projectId" FROM informes WHERE informe_id = ${reportId}`) as any[];
+        if (statusReport) await attachVinculaTodosSheets(sql, reportId, statusReport.projectId);
+      }
     } else if (action === 'edit') {
       // Campos editables después de creado: mes, fecha límite, responsables y
       // observaciones. Año, tipo y proyecto se dejan fijos a propósito — de

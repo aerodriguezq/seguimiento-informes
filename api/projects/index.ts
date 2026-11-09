@@ -69,6 +69,20 @@ async function attachSeguimientoToInforme(sql: SqlClient, informeId: number, nom
   `;
 }
 
+// Para una hoja en modo "vincular a TODOS los informes": el adjunto
+// retroactivo a los que ya están entregados en este momento (los que se
+// entreguen después quedan cubiertos aparte, por attachVinculaTodosSheets
+// en api/reports.ts, que corre justo cuando un informe pasa a entregado).
+async function attachSeguimientoToAllDelivered(sql: SqlClient, projectId: number, nombreHoja: string, spreadsheetId: string) {
+  const delivered = (await sql`
+    SELECT informe_id AS id FROM informes WHERE proyecto_id = ${projectId} AND (flujo_completado = TRUE OR estado = 'Enviado')
+  `) as any[];
+  for (const row of delivered) {
+    await attachSeguimientoToInforme(sql, Number(row.id), nombreHoja, spreadsheetId);
+  }
+  return delivered.length;
+}
+
 const GOOGLE_SHEETS_MIME = 'application/vnd.google-apps.spreadsheet';
 
 const SEGUIMIENTO_SHEET_NAMES = {
@@ -107,7 +121,7 @@ async function fetchSeguimiento(sql: SqlClient, seguimientoId: number) {
       spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid",
       ultima_importacion AS "lastImportAt", ultimo_error AS "lastError",
       insumos_columnas_visibles AS "insumosColumnasVisibles", drive_folder_url AS "driveFolderUrl",
-      informe_id AS "informeId"
+      informe_id AS "informeId", vincula_todos_informes AS "vinculaTodosInformes"
     FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId}
   `) as any[];
 
@@ -673,46 +687,58 @@ export default async function handler(
       }
       const nombre = String(request.body?.nombre ?? '').trim() || 'Principal';
       const { spreadsheetId, cronogramaGid, driveFolderUrl } = request.body ?? {};
+      const vincularTodos = Boolean(request.body?.vincularTodos);
 
-      // Si viene ligada a un informe, confirma que de verdad es de ESTE
-      // proyecto y que ya está entregado -- no basta con confiar en lo que
-      // mandó el frontend (mismo criterio de "entregado" que ya usa
-      // groupReportsByStep en el frontend: flujo completado o estado Enviado).
+      // Si viene ligada a un informe específico (mutuamente excluyente con
+      // vincularTodos), confirma que de verdad es de ESTE proyecto y que ya
+      // está entregado -- no basta con confiar en lo que mandó el frontend
+      // (mismo criterio de "entregado" que ya usa groupReportsByStep en el
+      // frontend: flujo completado o estado Enviado).
       let informeId: number | null = null;
-      const rawInformeId = request.body?.informeId;
-      if (rawInformeId !== undefined && rawInformeId !== null && rawInformeId !== '') {
-        const parsedInformeId = Number(rawInformeId);
-        if (!Number.isInteger(parsedInformeId) || parsedInformeId <= 0) {
-          return response.status(400).json({ data: null, meta: {}, errors: ['El id del informe no es válido.'] });
+      if (!vincularTodos) {
+        const rawInformeId = request.body?.informeId;
+        if (rawInformeId !== undefined && rawInformeId !== null && rawInformeId !== '') {
+          const parsedInformeId = Number(rawInformeId);
+          if (!Number.isInteger(parsedInformeId) || parsedInformeId <= 0) {
+            return response.status(400).json({ data: null, meta: {}, errors: ['El id del informe no es válido.'] });
+          }
+          if (!(await isInformeEntregadoDelProyecto(sql, parsedInformeId, projectId))) {
+            return response.status(400).json({ data: null, meta: {}, errors: ['Ese informe no corresponde a este proyecto o todavía no está entregado.'] });
+          }
+          informeId = parsedInformeId;
         }
-        if (!(await isInformeEntregadoDelProyecto(sql, parsedInformeId, projectId))) {
-          return response.status(400).json({ data: null, meta: {}, errors: ['Ese informe no corresponde a este proyecto o todavía no está entregado.'] });
-        }
-        informeId = parsedInformeId;
       }
 
       const rows = await sql`
-        INSERT INTO seguimiento_config (proyecto_id, nombre, spreadsheet_id, cronograma_gid, drive_folder_url, informe_id)
+        INSERT INTO seguimiento_config (proyecto_id, nombre, spreadsheet_id, cronograma_gid, drive_folder_url, informe_id, vincula_todos_informes)
         VALUES (
           ${projectId}, ${nombre},
           ${spreadsheetId ? String(spreadsheetId).trim() : null}, ${cronogramaGid ? String(cronogramaGid).trim() : null},
-          ${driveFolderUrl ? String(driveFolderUrl).trim() : null}, ${informeId}
+          ${driveFolderUrl ? String(driveFolderUrl).trim() : null}, ${informeId}, ${vincularTodos}
         )
         RETURNING seguimiento_id AS "seguimientoId", nombre, spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid"
       `;
       let attached = false;
-      if (informeId && spreadsheetId) {
-        await attachSeguimientoToInforme(sql, informeId, nombre, String(spreadsheetId).trim());
-        attached = true;
+      let attachedCount = 0;
+      if (spreadsheetId) {
+        if (vincularTodos) {
+          attachedCount = await attachSeguimientoToAllDelivered(sql, projectId, nombre, String(spreadsheetId).trim());
+          attached = attachedCount > 0;
+        } else if (informeId) {
+          await attachSeguimientoToInforme(sql, informeId, nombre, String(spreadsheetId).trim());
+          attached = true;
+          attachedCount = 1;
+        }
       }
-      return response.status(201).json({ data: { ...rows[0], attached }, meta: {}, errors: [] });
+      return response.status(201).json({ data: { ...rows[0], attached, attachedCount }, meta: {}, errors: [] });
     }
 
     // Asigna (o reasigna) el informe de una hoja YA EXISTENTE -- para las
-    // creadas antes de que esto fuera obligatorio, o para corregir una mal
-    // asignada. Si la hoja ya tiene un archivo vinculado, ese link se
-    // adjunta de una vez al informe recién asignado (si no cambió nada
-    // respecto al informe que ya tenía, no se repite el adjunto).
+    // creadas antes de que esto fuera obligatorio, para corregir una mal
+    // asignada, o para pasarla a modo "vincular a TODOS los informes" (y
+    // viceversa). Si la hoja ya tiene un archivo vinculado, ese link se
+    // adjunta de una vez según el nuevo modo (si no cambió nada respecto a
+    // lo que ya tenía, no se repite el adjunto).
     if (request.method === 'POST' && request.body?.kind === 'seguimientoAsignarInforme') {
       if (!(await canEditModuleRequest(request, sql, 'seguimiento'))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Seguimiento.'] });
@@ -721,26 +747,40 @@ export default async function handler(
       if (!Number.isInteger(seguimientoId) || seguimientoId <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El id de la hoja de seguimiento es obligatorio.'] });
       }
-      const parsedInformeId = Number(request.body?.informeId);
-      if (!Number.isInteger(parsedInformeId) || parsedInformeId <= 0) {
-        return response.status(400).json({ data: null, meta: {}, errors: ['El id del informe es obligatorio.'] });
-      }
+      const vincularTodos = Boolean(request.body?.vincularTodos);
 
       const [before] = (await sql`
-        SELECT proyecto_id AS "projectId", nombre, spreadsheet_id AS "spreadsheetId", informe_id AS "informeId"
+        SELECT proyecto_id AS "projectId", nombre, spreadsheet_id AS "spreadsheetId", informe_id AS "informeId",
+          vincula_todos_informes AS "vinculaTodosInformes"
         FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId}
       `) as any[];
       if (!before) {
         return response.status(404).json({ data: null, meta: {}, errors: ['Esa hoja de seguimiento ya no existe.'] });
       }
+
+      if (vincularTodos) {
+        await sql`UPDATE seguimiento_config SET vincula_todos_informes = TRUE, informe_id = NULL WHERE seguimiento_id = ${seguimientoId}`;
+        let attachedCount = 0;
+        // Solo adjunta retroactivamente si ANTES no estaba en este modo --
+        // si ya lo estaba, esto es solo un re-guardado sin cambios reales.
+        if (!before.vinculaTodosInformes && before.spreadsheetId) {
+          attachedCount = await attachSeguimientoToAllDelivered(sql, Number(before.projectId), before.nombre, before.spreadsheetId);
+        }
+        return response.status(200).json({ data: { seguimientoId, vincularTodos: true, attached: attachedCount > 0, attachedCount }, meta: {}, errors: [] });
+      }
+
+      const parsedInformeId = Number(request.body?.informeId);
+      if (!Number.isInteger(parsedInformeId) || parsedInformeId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del informe es obligatorio.'] });
+      }
       if (!(await isInformeEntregadoDelProyecto(sql, parsedInformeId, Number(before.projectId)))) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Ese informe no corresponde a este proyecto o todavía no está entregado.'] });
       }
 
-      await sql`UPDATE seguimiento_config SET informe_id = ${parsedInformeId} WHERE seguimiento_id = ${seguimientoId}`;
+      await sql`UPDATE seguimiento_config SET informe_id = ${parsedInformeId}, vincula_todos_informes = FALSE WHERE seguimiento_id = ${seguimientoId}`;
 
       let attached = false;
-      if (before.spreadsheetId && Number(before.informeId) !== parsedInformeId) {
+      if (before.spreadsheetId && (before.vinculaTodosInformes || Number(before.informeId) !== parsedInformeId)) {
         await attachSeguimientoToInforme(sql, parsedInformeId, before.nombre, before.spreadsheetId);
         attached = true;
       }
@@ -823,11 +863,14 @@ export default async function handler(
         }
 
         // Si esta hoja todavía no tenía spreadsheet_id, es la primera vez
-        // que se vincula -- ahí (y solo ahí) se adjunta al informe. Sin este
-        // chequeo, cambiar de pestaña (handleSelectTab reenvía el mismo
+        // que se vincula -- ahí (y solo ahí) se adjunta al informe (o a
+        // todos los entregados, si está en ese modo). Sin este chequeo,
+        // cambiar de pestaña (handleSelectTab reenvía el mismo
         // spreadsheetId con otro gid) la adjuntaría de nuevo cada vez.
         const [before] = (await sql`
-          SELECT spreadsheet_id AS "spreadsheetId", informe_id AS "informeId", nombre FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId}
+          SELECT spreadsheet_id AS "spreadsheetId", informe_id AS "informeId", nombre,
+            proyecto_id AS "projectId", vincula_todos_informes AS "vinculaTodosInformes"
+          FROM seguimiento_config WHERE seguimiento_id = ${seguimientoId}
         `) as any[];
         if (!before) {
           return response.status(404).json({ data: null, meta: {}, errors: ['Esa hoja de seguimiento ya no existe.'] });
@@ -842,11 +885,16 @@ export default async function handler(
           RETURNING spreadsheet_id AS "spreadsheetId", cronograma_gid AS "cronogramaGid"
         `;
         let attached = false;
-        if (isFirstLink && before.informeId) {
+        let attachedCount = 0;
+        if (isFirstLink && before.vinculaTodosInformes) {
+          attachedCount = await attachSeguimientoToAllDelivered(sql, Number(before.projectId), before.nombre, String(spreadsheetId).trim());
+          attached = attachedCount > 0;
+        } else if (isFirstLink && before.informeId) {
           await attachSeguimientoToInforme(sql, Number(before.informeId), before.nombre, String(spreadsheetId).trim());
           attached = true;
+          attachedCount = 1;
         }
-        return response.status(200).json({ data: { ...rows[0], attached }, meta: {}, errors: [] });
+        return response.status(200).json({ data: { ...rows[0], attached, attachedCount }, meta: {}, errors: [] });
       }
 
       try {

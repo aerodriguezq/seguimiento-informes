@@ -1,0 +1,1 @@
+ALTER TABLE seguimiento_config ADD COLUMN IF NOT EXISTS vincula_todos_informes BOOLEAN NOT NULL DEFAULT FALSE;

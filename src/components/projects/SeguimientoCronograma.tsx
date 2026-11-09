@@ -75,6 +75,7 @@ type SeguimientoData = {
     insumosColumnasVisibles: string[] | null;
     driveFolderUrl: string | null;
     informeId: number | null;
+    vinculaTodosInformes: boolean;
   } | null;
   kpis: Record<string, Kpi>;
   rows: SeguimientoRow[];
@@ -203,6 +204,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   const [driveFolderInput, setDriveFolderInput] = useState('');
   const [isSavingDriveFolder, setIsSavingDriveFolder] = useState(false);
   const [assignReportId, setAssignReportId] = useState('');
+  const [assignVincularTodos, setAssignVincularTodos] = useState(false);
   const [isAssigningReport, setIsAssigningReport] = useState(false);
   const [search, setSearch] = useState('');
   const [isColumnsPanelOpen, setIsColumnsPanelOpen] = useState(false);
@@ -225,6 +227,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   // ESE informe en cuanto se le vincula un archivo de Google Sheets/Excel.
   const [deliveredReports, setDeliveredReports] = useState<{ id: string; month: string; year: number; typeName: string }[] | null>(null);
   const [selectedReportId, setSelectedReportId] = useState('');
+  const [vincularTodos, setVincularTodos] = useState(false);
 
   // Lista de pestañas del archivo vinculado (Google Sheets o Excel), para
   // que el usuario elija a mano cuál es la del cronograma en vez de
@@ -302,7 +305,8 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   // guardar una asignación nueva).
   useEffect(() => {
     setAssignReportId(data?.config?.informeId ? String(data.config.informeId) : '');
-  }, [data?.config?.informeId]);
+    setAssignVincularTodos(Boolean(data?.config?.vinculaTodosInformes));
+  }, [data?.config?.informeId, data?.config?.vinculaTodosInformes]);
 
   useEffect(() => {
     if (selectedSeguimientoId == null) return;
@@ -418,21 +422,26 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
   };
 
   // Asigna (o corrige) el informe de la hoja activa -- para las que se
-  // crearon antes de que esto existiera, o si se eligió el mes equivocado.
-  // Si la hoja ya tiene un archivo vinculado, el backend lo adjunta de una
-  // vez al informe recién asignado.
+  // crearon antes de que esto existiera, si se eligió el mes equivocado, o
+  // para pasarla a "vincular a TODOS los informes" (incluidos los que se
+  // entreguen después). Si la hoja ya tiene un archivo vinculado, el
+  // backend lo adjunta de una vez según el modo elegido.
   const handleAssignReport = async () => {
-    if (!selectedSeguimientoId || !assignReportId) return;
+    if (!selectedSeguimientoId || (!assignVincularTodos && !assignReportId)) return;
     setIsAssigningReport(true);
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'seguimientoAsignarInforme', seguimientoId: selectedSeguimientoId, informeId: Number(assignReportId) }),
+        body: JSON.stringify({
+          kind: 'seguimientoAsignarInforme', seguimientoId: selectedSeguimientoId,
+          vincularTodos: assignVincularTodos, informeId: assignVincularTodos ? undefined : Number(assignReportId),
+        }),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible asignar el informe.');
-      pushLog(`Hoja asignada al informe seleccionado${payload.data?.attached ? ' y adjuntada a ese informe' : ''}.`, 'success');
+      const attachedCount = payload.data?.attachedCount ?? (payload.data?.attached ? 1 : 0);
+      pushLog(`Hoja asignada${attachedCount > 0 ? ` y adjuntada a ${attachedCount} informe(s)` : ''}.`, 'success');
       await fetchData(selectedSeguimientoId);
       await loadSheets(selectedSeguimientoId);
     } catch (err) {
@@ -470,18 +479,19 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
 
   // Crea una hoja NUEVA bajo este proyecto (la primera, o una adicional del
   // mismo formato -- ej. otro contrato/fase de San Jacinto). El link de
-  // Google Sheets es opcional acá: se puede crear solo con el informe
-  // seleccionado y vincular la hoja de cálculo después con "Cambiar hoja".
-  // El nombre sale del informe elegido (ej. "Agosto 2026"), nunca se escribe
-  // a mano -- y en cuanto haya un link, esa hoja queda como adjunto de ese
-  // informe (lo hace el backend al guardar spreadsheet_id).
+  // Google Sheets es opcional acá: se puede crear solo con el informe (o
+  // "todos") seleccionado y vincular la hoja de cálculo después con
+  // "Cambiar hoja". El nombre sale del informe elegido (ej. "Agosto 2026"),
+  // o es genérico en modo "todos" -- nunca se escribe a mano. En cuanto haya
+  // un link, esa hoja queda como adjunto del/los informe(s) correspondientes
+  // (lo hace el backend al guardar spreadsheet_id).
   const handleCreateSheet = async () => {
     const selectedReport = deliveredReports?.find((r) => r.id === selectedReportId);
-    if (!selectedReport) {
-      pushLog('Selecciona el informe mensual ya entregado al que corresponde esta hoja.', 'error');
+    if (!vincularTodos && !selectedReport) {
+      pushLog('Selecciona el informe mensual ya entregado al que corresponde esta hoja, o marca "vincular a todos".', 'error');
       return;
     }
-    const nombre = `${selectedReport.month} ${selectedReport.year}`;
+    const nombre = vincularTodos ? 'Cronograma del proyecto' : `${selectedReport!.month} ${selectedReport!.year}`;
     const ids = newSheetLink.trim() ? extractSheetIds(newSheetLink) : null;
     if (newSheetLink.trim() && !ids) {
       pushLog('Pega el link completo de la hoja de cálculo (o solo su ID), o déjalo en blanco para vincularla después.', 'error');
@@ -494,14 +504,17 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           kind: 'seguimientoCreateSheet', projectId: Number(projectId), nombre,
-          spreadsheetId: ids?.spreadsheetId, cronogramaGid: ids?.gid, informeId: Number(selectedReportId),
+          spreadsheetId: ids?.spreadsheetId, cronogramaGid: ids?.gid,
+          vincularTodos, informeId: vincularTodos ? undefined : Number(selectedReportId),
         }),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.errors?.[0] || 'No fue posible crear la hoja.');
-      pushLog(`Hoja "${nombre}" creada${payload.data?.attached ? ' y adjuntada al informe de ese mes' : ''}.`, 'success');
+      const attachedCount = payload.data?.attachedCount ?? 0;
+      pushLog(`Hoja "${nombre}" creada${attachedCount > 0 ? ` y adjuntada a ${attachedCount} informe(s)` : ''}.`, 'success');
       setIsAddingSheet(false);
       setSelectedReportId('');
+      setVincularTodos(false);
       setNewSheetLink('');
       await loadSheets(payload.data.seguimientoId);
     } catch (err) {
@@ -567,19 +580,28 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
     );
   }
 
-  // Campo compartido entre el formulario de la primera hoja y el de
-  // "+ Agregar hoja": el nombre de la hoja ya no se escribe libre, se elige
-  // de los informes mensuales de este proyecto que ya están entregados.
-  const reportSelectField = (
+  // Campo compartido entre los formularios de creación de hoja y el panel
+  // de asignación: el nombre/vínculo de una hoja ya no se escribe libre, se
+  // elige de los informes mensuales de este proyecto que ya están
+  // entregados -- o se marca "vincular a todos" para que quede adjunta a
+  // cada informe entregado, incluidos los que se entreguen después.
+  const renderReportAssignmentField = (
+    idPrefix: string,
+    reportId: string,
+    onReportIdChange: (v: string) => void,
+    vinculaTodos: boolean,
+    onVinculaTodosChange: (v: boolean) => void,
+  ) => (
     <div className="min-w-56">
-      <label htmlFor="seguimiento-new-sheet-report" className="block text-[11px] font-semibold text-slate-700 mb-1">
+      <label htmlFor={`${idPrefix}-report`} className="block text-[11px] font-semibold text-slate-700 mb-1">
         Informe mensual ya entregado
       </label>
       <select
-        id="seguimiento-new-sheet-report"
-        value={selectedReportId}
-        onChange={(e) => setSelectedReportId(e.target.value)}
-        className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600 bg-white"
+        id={`${idPrefix}-report`}
+        value={reportId}
+        onChange={(e) => onReportIdChange(e.target.value)}
+        disabled={vinculaTodos}
+        className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600 bg-white disabled:bg-slate-100 disabled:text-slate-400"
       >
         <option value="">{deliveredReports === null ? 'Cargando informes...' : 'Selecciona un informe entregado...'}</option>
         {(deliveredReports ?? []).map((r) => (
@@ -588,11 +610,21 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
           </option>
         ))}
       </select>
-      {deliveredReports && deliveredReports.length === 0 && (
+      {deliveredReports && deliveredReports.length === 0 && !vinculaTodos && (
         <p className="mt-1 text-[10.5px] text-rose-600">
           Este proyecto todavía no tiene informes entregados -- entrega uno primero en Informes.
         </p>
       )}
+      <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={vinculaTodos}
+          onChange={(e) => onVinculaTodosChange(e.target.checked)}
+          className="rounded"
+          style={{ accentColor: ACCENT }}
+        />
+        Vincular a TODOS los informes de este proyecto (incluidos los que se entreguen después)
+      </label>
     </div>
   );
 
@@ -620,7 +652,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       {canEdit && (
         <button
           type="button"
-          onClick={() => { setIsAddingSheet((v) => !v); setSelectedReportId(''); setNewSheetLink(''); }}
+          onClick={() => { setIsAddingSheet((v) => !v); setSelectedReportId(''); setVincularTodos(false); setNewSheetLink(''); }}
           className="rounded-full px-3 py-1 text-xs font-bold border border-dashed"
           style={{ borderColor: BORDER, color: ACCENT }}
         >
@@ -632,7 +664,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
 
   const addSheetForm = canEdit && isAddingSheet && (
     <div className="no-print mx-4 mt-2 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
-      {reportSelectField}
+      {renderReportAssignmentField('seguimiento-new-sheet', selectedReportId, setSelectedReportId, vincularTodos, setVincularTodos)}
       <div className="flex-1 min-w-64">
         <label htmlFor="seguimiento-new-sheet-link" className="block text-[11px] font-semibold text-slate-700 mb-1">Link de Google Sheets o Excel (opcional, se puede vincular después)</label>
         <input
@@ -647,7 +679,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
       <button
         type="button"
         onClick={handleCreateSheet}
-        disabled={isCreatingSheet || !selectedReportId}
+        disabled={isCreatingSheet || (!vincularTodos && !selectedReportId)}
         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
       >
         <Save className="h-3.5 w-3.5" />
@@ -679,7 +711,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          {reportSelectField}
+          {renderReportAssignmentField('seguimiento-sheet-new', selectedReportId, setSelectedReportId, vincularTodos, setVincularTodos)}
           <div className="flex-1 min-w-64">
             <label htmlFor="seguimiento-sheet-link-new" className="block text-[11px] font-semibold text-slate-700 mb-1">
               Link de Google Sheets o Excel (pestaña del cronograma)
@@ -696,7 +728,7 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
           <button
             type="button"
             onClick={handleCreateSheet}
-            disabled={isCreatingSheet || !newSheetLink.trim() || !selectedReportId}
+            disabled={isCreatingSheet || !newSheetLink.trim() || (!vincularTodos && !selectedReportId)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
           >
             <Save className="h-3.5 w-3.5" />
@@ -926,25 +958,12 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
           )}
 
           <div className="w-full flex flex-wrap items-end gap-2 pt-2 mt-1 border-t border-slate-200">
+            {renderReportAssignmentField('seguimiento-assign', assignReportId, setAssignReportId, assignVincularTodos, setAssignVincularTodos)}
             <div className="flex-1 min-w-64">
-              <label htmlFor="seguimiento-informe-edit" className="block text-[11px] font-semibold text-slate-700 mb-1">
-                Informe vinculado
-              </label>
-              <select
-                id="seguimiento-informe-edit"
-                value={assignReportId}
-                onChange={(e) => setAssignReportId(e.target.value)}
-                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-teal-600 bg-white"
-              >
-                <option value="">{deliveredReports === null ? 'Cargando informes...' : 'Sin asignar'}</option>
-                {(deliveredReports ?? []).map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.month} {r.year} · {r.typeName}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-[10.5px] text-slate-500">
-                {data.config.informeId
+              <p className="text-[10.5px] text-slate-500">
+                {data.config.vinculaTodosInformes
+                  ? 'Actual: vinculada a TODOS los informes de este proyecto.'
+                  : data.config.informeId
                   ? `Actual: ${deliveredReports?.find((r) => r.id === String(data.config?.informeId))?.month ?? 'informe'} ${
                       deliveredReports?.find((r) => r.id === String(data.config?.informeId))?.year ?? ''
                     }`
@@ -954,7 +973,12 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
             <button
               type="button"
               onClick={handleAssignReport}
-              disabled={isAssigningReport || !assignReportId || assignReportId === String(data.config.informeId ?? '')}
+              disabled={
+                isAssigningReport ||
+                (!assignVincularTodos && !assignReportId) ||
+                (assignVincularTodos === Boolean(data.config.vinculaTodosInformes) &&
+                  assignReportId === String(data.config.informeId ?? ''))
+              }
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-teal-700 hover:bg-teal-800 rounded-lg disabled:opacity-50"
             >
               <Save className="h-3.5 w-3.5" />
