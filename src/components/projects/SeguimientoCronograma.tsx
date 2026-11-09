@@ -99,10 +99,10 @@ const ACCENT_LIGHT = '#e6f0f7';
 const BORDER = '#e1e5ea';
 const MUTED = '#6b7280';
 
-const KPI_META: { key: string; label: string; icon: string; color: string; bg: string }[] = [
-  { key: 'insumo', label: 'Insumo', icon: '📦', color: '#2563eb', bg: '#eff6ff' },
-  { key: 'abono', label: 'Abono', icon: '🌱', color: '#10b981', bg: '#ecfdf5' },
-  { key: 'material_vegetal', label: 'Material Vegetal', icon: '🌿', color: '#d97706', bg: '#fffbeb' },
+const KPI_META: { key: string; label: string; description: string; icon: string; color: string; bg: string }[] = [
+  { key: 'insumo', label: 'Entrega de Insumos', description: 'ya recibieron el insumo', icon: '📦', color: '#2563eb', bg: '#eff6ff' },
+  { key: 'abono', label: 'Entrega de Abono', description: 'ya recibieron el abono', icon: '🌱', color: '#10b981', bg: '#ecfdf5' },
+  { key: 'material_vegetal', label: 'Entrega de Material Vegetal', description: 'ya recibieron el material vegetal', icon: '🌿', color: '#d97706', bg: '#fffbeb' },
 ];
 
 // Mismos colores que .tl-seg.tl-* en el original: compra (azul oscuro, texto blanco), entrega
@@ -964,7 +964,11 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
         </div>
       ) : (
         <>
-          {/* Tarjetas de % de avance */}
+          {/* Tarjetas de avance por línea de entrega -- llevan el conteo real
+              de beneficiarios por delante (lo concreto) y el % como dato de
+              apoyo, no al revés; antes el % solo decía "Porcentaje de avance
+              general" sin aclarar de qué, y el conteo de beneficiarios
+              quedaba escondido abajo repitiendo el mismo número. */}
           <div className="seg-kpi-grid p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
             {KPI_META.map((meta) => {
               const kpi = data.kpis[meta.key];
@@ -972,18 +976,22 @@ export const SeguimientoCronograma: React.FC<{ projectId: string; canEdit: boole
               const kpiAvance = Number(kpi?.avance);
               if (!kpi || !Number.isFinite(kpiTotal) || kpiTotal === 0) return null;
               const pct = Math.round((kpiAvance / kpiTotal) * 1000) / 10;
+              const pendientes = Math.max(kpi.total - kpi.avance, 0);
               return (
                 <div key={meta.key} className="rounded-xl p-4" style={{ borderTop: `4px solid ${meta.color}`, boxShadow: '0 1px 2px rgba(15,23,42,0.06)' }}>
-                  <div className="flex items-center justify-between mb-2.5">
+                  <div className="flex items-center justify-between mb-3">
                     <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: MUTED }}>{meta.label}</span>
                     <span className="rounded-lg px-2 py-1 text-sm leading-none" style={{ background: meta.bg, color: meta.color }}>{meta.icon}</span>
                   </div>
-                  <p className="text-[26px] font-extrabold text-slate-800 leading-none">{pct.toFixed(1)}%</p>
-                  <p className="text-[11px] mt-0.5" style={{ color: MUTED }}>Porcentaje de avance general</p>
+                  <div className="flex items-baseline gap-1.5">
+                    <p className="text-[26px] font-extrabold text-slate-800 leading-none">{kpi.avance}</p>
+                    <p className="text-[13px] font-semibold leading-none" style={{ color: MUTED }}>de {kpi.total} beneficiarios</p>
+                  </div>
+                  <p className="text-[11px] mt-1" style={{ color: MUTED }}>{meta.description}</p>
                   <div className="mt-3.5">
-                    <div className="flex items-center justify-between text-[11px] mb-1" style={{ color: '#4b5563' }}>
-                      <span>Beneficiarios</span>
-                      <b className="text-slate-800">{kpi.avance} / {kpi.total}</b>
+                    <div className="flex items-center justify-between text-[11px] mb-1">
+                      <span className="font-bold" style={{ color: meta.color }}>{pct.toFixed(1)}% de avance</span>
+                      <span style={{ color: '#4b5563' }}>{pendientes} pendiente{pendientes === 1 ? '' : 's'}</span>
                     </div>
                     <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
                       <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: meta.color }} />
