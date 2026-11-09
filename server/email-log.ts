@@ -8,6 +8,7 @@ export type EmailLogKind =
   | 'peticion_asignacion'
   | 'devolucion_paso'
   | 'aviso_revision'
+  | 'aviso_revision_entrega'
   | 'prueba';
 
 // Deja un rastro de cada correo que el sistema intenta enviar (haya salido

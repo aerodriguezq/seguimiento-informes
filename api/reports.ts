@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../server/google-drive.js';
-import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEmail, confirmEmailSent, buildStepReturnEmailHtml, buildStepReviewPendingEmailHtml, type EmailAttachment } from '../server/google-gmail.js';
+import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEmail, confirmEmailSent, buildStepReturnEmailHtml, buildStepReviewPendingEmailHtml, buildStepDeliveryDetectedEmailHtml, type EmailAttachment } from '../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
 import { isAdminRequest, canEditModuleRequest, getAccessibleProjectIds, getSessionUser } from '../server/admin-auth.js';
 import { logEmailSend } from '../server/email-log.js';
@@ -947,16 +947,31 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
   // volvería a encontrar el mismo correo ambiguo y duplicaría la nota en
   // el historial (Regla 6/7). Quedan así hasta que alguien los resuelva a
   // mano (confirmar entrega avanza el paso y limpia el estado).
+  //
+  // Los pasos que requieren revisión SÍ se incluyen (antes se excluían por
+  // completo): el barrido los detecta igual, pero en vez de avanzar el
+  // flujo solo, adjunta el correo como evidencia y avisa al Principal para
+  // que decida -- ver la rama "requiresReview" más abajo. Para no
+  // reenviarle el aviso en cada corrida mientras sigue sin decidir, se
+  // excluyen los que ya tienen un correo_gmail_id guardado (ya se detectó y
+  // avisó una vez para este paso; se limpia solo si el informe se devuelve
+  // a un paso anterior y vuelve a llegar hasta acá).
   const pendingSteps = (await sql`
-    SELECT i.informe_id AS "reportId", wp.paso_id AS "stepId", wp.asunto_correo AS "emailSubjectBase",
-           wp.palabras_clave AS "keywordsRaw",
-           i.numero_secuencia AS "sequenceNumber", i.updated_at AS "stepStartedAt"
+    SELECT i.informe_id AS "reportId", i.proyecto_id AS "projectId", p.nombre AS "projectName",
+           i.mes_nombre AS "monthName", i.anio AS "year",
+           wp.paso_id AS "stepId", wp.nombre AS "stepName", wp.asunto_correo AS "emailSubjectBase",
+           wp.palabras_clave AS "keywordsRaw", wp.requiere_revision AS "requiresReview",
+           i.numero_secuencia AS "sequenceNumber", i.updated_at AS "stepStartedAt",
+           principal.nombre AS "principalName", principal.email AS "principalEmail"
     FROM informes i
     JOIN tipo_informe_pasos wp ON wp.paso_id = i.paso_actual_id
+    JOIN proyectos p ON p.proyecto_id = i.proyecto_id
     LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = i.informe_id AND ipi.paso_id = i.paso_actual_id
+    LEFT JOIN tipo_informe_paso_contacto tpc ON tpc.paso_id = wp.paso_id AND tpc.es_principal = TRUE
+    LEFT JOIN contactos principal ON principal.contacto_id = tpc.contacto_id
     WHERE i.flujo_completado = FALSE AND i.paso_actual_id IS NOT NULL
       AND (ipi.estado_etapa IS NULL OR ipi.estado_etapa <> 'EN_REVISION')
-      AND wp.requiere_revision = FALSE
+      AND (wp.requiere_revision = FALSE OR ipi.correo_gmail_id IS NULL)
   `) as any[];
 
   let advanced = 0;
@@ -1010,6 +1025,58 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
           )
         `;
       }
+
+      // Paso que requiere revisión: NO avanza solo. Se adjunta la evidencia
+      // (arriba) y se le pasa la decisión al Principal -- da el visto bueno
+      // o devuelve con observaciones desde el detalle del informe, igual
+      // que ya hace hoy con un correo encontrado a mano.
+      if (step.requiresReview) {
+        const emailLink = match.messageId ? `https://mail.google.com/mail/u/0/#all/${match.messageId}` : null;
+        await sql`
+          INSERT INTO informe_pasos_instancia (informe_id, paso_id, estado_etapa, correo_gmail_id, correo_remitente)
+          VALUES (${step.reportId}, ${step.stepId}, 'ALERTA_GENERADA', ${match.messageId}, ${match.fromEmail})
+          ON CONFLICT (informe_id, paso_id) DO UPDATE SET
+            correo_gmail_id = EXCLUDED.correo_gmail_id, correo_remitente = EXCLUDED.correo_remitente, updated_at = NOW()
+        `;
+        await sql`
+          INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario, correo_link)
+          VALUES (
+            COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+            ${step.reportId}, (SELECT estado FROM informes WHERE informe_id = ${step.reportId}),
+            ${match.receivedAt || new Date().toISOString()}, 'Sistema (detección automática)',
+            ${`Se detectó el correo de entrega para "${step.stepName}"${match.fromEmail ? ` de ${match.fromEmail}` : ''} -- pendiente de revisión por ${step.principalName || 'el Principal'}.`},
+            ${emailLink}
+          )
+        `;
+        if (step.principalEmail) {
+          const subject = `[Seguimiento] Entrega recibida, pendiente tu revisión: ${step.stepName}`;
+          try {
+            const html = buildStepDeliveryDetectedEmailHtml({
+              projectName: step.projectName || 'Proyecto',
+              periodLabel: `${step.monthName} ${step.year}`,
+              stepName: step.stepName,
+              principalName: step.principalName || '',
+              fromEmail: match.fromEmail,
+              emailLink,
+            });
+            const sentMessage = await sendEmail(accessToken, { to: [step.principalEmail], subject, body: html, html: true });
+            const confirmed = await confirmEmailSent(accessToken, sentMessage.id);
+            await logEmailSend(sql, {
+              to: [step.principalEmail], subject, kind: 'aviso_revision_entrega', reportId: step.reportId,
+              success: true, gmailMessageId: sentMessage.id, confirmed,
+            });
+          } catch (error) {
+            console.error('No fue posible avisar al Principal de la entrega detectada', error);
+            await logEmailSend(sql, {
+              to: [], subject, kind: 'aviso_revision_entrega', reportId: step.reportId,
+              success: false, errorMessage: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        flaggedForReview++;
+        continue;
+      }
+
       await advanceReportStep(sql, step.reportId, {
         receivedAt: match.receivedAt ? new Date(match.receivedAt) : new Date(),
         messageId: match.messageId,

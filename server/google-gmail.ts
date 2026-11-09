@@ -491,6 +491,61 @@ export function buildStepReviewPendingEmailHtml(options: {
 </div>`;
 }
 
+// Se manda cuando el barrido automático DETECTA el correo de entrega de un
+// paso que requiere revisión -- a diferencia de buildStepReviewPendingEmailHtml
+// (que avisa apenas el paso arranca, sin que haya llegado nada todavía),
+// este ya incluye quién mandó el correo y un link directo para abrirlo, para
+// que el Principal no tenga que buscarlo a mano.
+export function buildStepDeliveryDetectedEmailHtml(options: {
+  projectName: string;
+  periodLabel: string;
+  stepName: string;
+  principalName: string;
+  fromEmail: string | null;
+  emailLink: string | null;
+}): string {
+  const escape = (value: string) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c] as string));
+  const bg = '#4338ca';
+  const accent = '#c7d2fe';
+
+  return `<div style="max-width: 480px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dce4ec; border-radius: 8px; font-family: Arial, sans-serif; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+  <div style="background-color: ${bg}; color: #ffffff; padding: 20px; text-align: center;">
+    <div style="font-size: 24px; margin-bottom: 5px;">📬</div>
+    <h2 style="margin: 0; font-size: 18px; font-weight: bold; color: #ffffff;">Entrega recibida, pendiente tu revisión</h2>
+    <p style="margin: 5px 0 0 0; font-size: 16px; font-weight: 600; color: ${accent};">${escape(options.stepName)}</p>
+  </div>
+
+  <div style="padding: 20px; background-color: #f8fafc;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #334155;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold; width: 45%;">🏢 Proyecto:</td>
+        <td style="padding: 10px 0;">${escape(options.projectName)}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">🗓️ Período:</td>
+        <td style="padding: 10px 0;">${escape(options.periodLabel)}</td>
+      </tr>
+      ${options.fromEmail ? `<tr>
+        <td style="padding: 10px 0; font-weight: bold;">✉️ Recibido de:</td>
+        <td style="padding: 10px 0;">${escape(options.fromEmail)}</td>
+      </tr>` : ''}
+    </table>
+  </div>
+
+  <div style="padding: 16px 20px; background-color: #eef2ff; border-top: 1px solid #e2e8f0;">
+    <p style="margin: 0; font-size: 13px; color: #334155;">Llegó el correo de entrega para el paso <strong>"${escape(options.stepName)}"</strong>. Como responsable principal, revísalo y decide si está todo correcto o si hay que devolverlo con observaciones.</p>
+    ${options.emailLink ? `<p style="margin: 10px 0 0 0; text-align: center;"><a href="${options.emailLink}" style="display: inline-block; font-size: 13px; font-weight: bold; color: #ffffff; background-color: ${bg}; border-radius: 4px; padding: 8px 14px; text-decoration: none;">Abrir correo recibido</a></p>` : ''}
+    <p style="margin: 10px 0 0 0; font-size: 13px; color: #334155;">Ingresa a la aplicación de Seguimiento de Informes y, desde el detalle de este informe, da el <strong>visto bueno</strong> para que avance, o genera una <strong>observación</strong> para devolverlo a corrección.</p>
+  </div>
+
+  <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">
+    <p style="font-size: 11px; color: #64748b; margin: 0;">Este mensaje fue enviado automáticamente desde <strong>Seguimiento de Informes</strong>.</p>
+  </div>
+</div>`;
+}
+
 const DRIVE_URL_PATTERN = /https:\/\/(?:drive|docs)\.google\.com\/[^\s"'<>)\]]+/;
 
 function fromBase64Url(value: string) {
