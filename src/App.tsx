@@ -257,6 +257,7 @@ export default function App() {
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [reportsFilterStatus, setReportsFilterStatus] = useState<string>('all');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ id: string; text: string; type: 'success' | 'info' } | null>(null);
 
   // Atajo global ⌘K / Ctrl+K para abrir la búsqueda, desde cualquier pantalla.
@@ -1595,6 +1596,8 @@ export default function App() {
         projects={projects}
         reports={reports}
         isCurrentProjectSuspended={isCurrentProjectSuspended}
+        isMobileOpen={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
 
       {/* Main Workspace Column */}
@@ -1612,6 +1615,7 @@ export default function App() {
           onOpenNewReport={() => handleOpenNewReport(currentProjectId)}
           onOpenSearch={() => setIsSearchOpen(true)}
           isCurrentProjectSuspended={isCurrentProjectSuspended}
+          onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
         />
 
         {/* Dynamic Main Content Container */}

@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Info,
   LogOut,
+  Menu,
 } from 'lucide-react';
 import { Project, SystemNotification } from '../../types';
 import { useAuth } from '../../auth/AuthContext';
@@ -31,6 +32,9 @@ interface HeaderProps {
   onOpenNewReport: () => void;
   isCurrentProjectSuspended: boolean;
   onOpenSearch: () => void;
+  // Abre el drawer del Sidebar en pantallas angostas -- el botón solo se ve
+  // ahí (lg:hidden); en escritorio el Sidebar ya queda fijo a la izquierda.
+  onOpenMobileSidebar: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -45,6 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenNewReport,
   isCurrentProjectSuspended,
   onOpenSearch,
+  onOpenMobileSidebar,
 }) => {
   const { user, logout } = useAuth();
   const currentDateLabel = new Intl.DateTimeFormat('es-CO', {
@@ -74,6 +79,14 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="flex items-center justify-between gap-4">
         {/* Left: Project Selector & Context */}
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onOpenMobileSidebar}
+            className="lg:hidden p-1.5 -ml-1 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
+            aria-label="Abrir menú de navegación"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
           <div className="relative">
             <button
               id="project-selector-dropdown-btn"
