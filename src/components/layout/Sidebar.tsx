@@ -14,8 +14,6 @@ import {
   Inbox,
   ShieldCheck,
   Sprout,
-  PanelLeftClose,
-  PanelLeftOpen,
   Info,
   X,
 } from 'lucide-react';
@@ -34,8 +32,8 @@ interface SidebarProps {
   reports: Report[];
   isCurrentProjectSuspended: boolean;
   // Drawer de móvil -- hoy la barra siempre se renderizaba a ancho fijo
-  // (w-18/w-64) sin ocultarse en pantallas angostas; el disparador vive en
-  // Header.tsx (botón hamburguesa) y el estado en App.tsx.
+  // sin ocultarse en pantallas angostas; el disparador vive en Header.tsx
+  // (botón hamburguesa) y el estado en App.tsx.
   isMobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -94,7 +92,6 @@ function findAncestorGroups(nodes: NavNode[], targetId: ActiveModule, path: stri
 const BG = '#0F172A';
 const PANEL = '#141E33';
 const BORDER = '#263449';
-const BORDER_HOVER = '#384B66';
 const ACCENT = '#5238F5';
 const SUCCESS = '#00D6A0';
 const DANGER = '#F43F5E';
@@ -115,7 +112,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { user, canView } = useAuth();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['informes']));
-  const [isCollapsed, setIsCollapsed] = useState(false);
   const [seguimientoPct, setSeguimientoPct] = useState<number | null>(null);
   const [peticionesCount, setPeticionesCount] = useState<number | null>(null);
 
@@ -308,21 +304,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (isMobileOpen) onCloseMobile();
   };
 
-  // "collapsed" se recibe como parámetro (no se lee isCollapsed directo) para
-  // poder construir el contenido dos veces: el <aside> de escritorio respeta
-  // el colapso real, el drawer de móvil siempre se arma expandido (no tiene
-  // sentido un drawer angosto de solo íconos).
-  const renderNode = (node: NavNode, depth: number, collapsed: boolean): React.ReactNode => {
+  const renderNode = (node: NavNode, depth: number): React.ReactNode => {
     if (node.kind === 'section') {
-      const visibleChildren = node.children.map((child) => renderNode(child, 0, collapsed)).filter(Boolean);
+      const visibleChildren = node.children.map((child) => renderNode(child, 0)).filter(Boolean);
       if (visibleChildren.length === 0) return null;
       return (
         <div key={node.label}>
-          {!collapsed && (
-            <div className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#475569]">
-              {node.label}
-            </div>
-          )}
+          <div className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#475569]">
+            {node.label}
+          </div>
           <div className="space-y-1">{visibleChildren}</div>
         </div>
       );
@@ -341,15 +331,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           type="button"
           disabled={isDisabled}
           onClick={() => !isDisabled && handleSelect(node.id)}
-          title={isDisabled ? node.disabledTitle : collapsed ? node.label : undefined}
+          title={isDisabled ? node.disabledTitle : undefined}
           style={{
-            paddingLeft: collapsed ? undefined : `${12 + depth * 16}px`,
+            paddingLeft: `${12 + depth * 16}px`,
             background: isActive ? ACCENT : undefined,
             boxShadow: isActive ? `0 4px 14px -2px ${ACCENT}4d` : undefined,
           }}
-          className={`w-full flex items-center rounded-xl text-xs font-medium transition-all duration-150 group ${
+          className={`w-full flex items-center justify-between pr-3 py-2.5 rounded-xl text-xs font-medium transition-all duration-150 group ${
             isDisabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
-          } ${collapsed ? 'justify-center py-2.5' : 'justify-between pr-3 py-2.5'} ${
+          } ${
             isActive
               ? 'text-white font-semibold'
               : isDisabled
@@ -357,11 +347,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               : 'text-[#94A3B8] hover:text-[#E2E8F0] hover:bg-[#1E293B]'
           }`}
         >
-          <div className={`flex items-center min-w-0 ${collapsed ? '' : 'gap-2.5'}`}>
+          <div className="flex items-center min-w-0 gap-2.5">
             <Icon className={`w-4 h-4 shrink-0 transition-colors ${isActive ? 'text-white' : 'text-[#64748B] group-hover:text-[#CBD5E1]'}`} />
-            {!collapsed && <span className="truncate">{node.label}</span>}
+            <span className="truncate">{node.label}</span>
           </div>
-          {!collapsed && hasBadge(node.badge) && (
+          {hasBadge(node.badge) && (
             <span
               className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold font-mono ${
                 isActive ? 'bg-white/20 text-white' : node.badgeColor
@@ -374,15 +364,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       );
     }
 
-    const visibleChildren = node.children.map((child) => renderNode(child, depth + 1, collapsed)).filter(Boolean);
+    const visibleChildren = node.children.map((child) => renderNode(child, depth + 1)).filter(Boolean);
     if (visibleChildren.length === 0) return null;
-
-    // Colapsado: sin jerarquía de grupos posible (no hay espacio para label
-    // ni chevron) -- se listan los hijos directo, iguales a cualquier otro
-    // ícono de la barra.
-    if (collapsed) {
-      return <div key={node.id} className="space-y-1">{visibleChildren}</div>;
-    }
 
     const Icon = node.icon;
     const isOpen = expandedGroups.has(node.id);
@@ -412,182 +395,111 @@ export const Sidebar: React.FC<SidebarProps> = ({
     );
   };
 
-  const projectInitials = currentProject?.name
-    ? currentProject.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
-    : '';
-
-  const renderContent = (collapsed: boolean) => (
+  const renderContent = () => (
     <div className="flex flex-col h-full select-none" style={{ background: BG, color: '#94A3B8' }}>
       {/* Encabezado con logo real dentro del badge con gradiente */}
-      <div
-        className={`h-16 shrink-0 flex items-center justify-between border-b ${collapsed ? 'px-3 justify-center' : 'px-4'}`}
-        style={{ borderColor: `${BORDER}b3` }}
-      >
+      <div className="h-16 shrink-0 flex items-center px-4 border-b" style={{ borderColor: `${BORDER}b3` }}>
         <div className="flex items-center gap-3 overflow-hidden">
-          <div className="relative w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ring-1 ring-white/20 shadow-md bg-gradient-to-tr from-[#3B82F6] via-[#5238F5] to-[#8B5CF6]" style={{ boxShadow: `0 4px 14px -2px ${ACCENT}4d` }}>
+          <div
+            className="relative w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ring-1 ring-white/20 shadow-md bg-gradient-to-tr from-[#3B82F6] via-[#5238F5] to-[#8B5CF6]"
+            style={{ boxShadow: `0 4px 14px -2px ${ACCENT}4d` }}
+          >
             <img src="/logo.svg" alt="" className="w-6 h-6 object-contain" />
           </div>
-          {!collapsed && (
-            <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.18 }} className="min-w-0">
-              <h1 className="text-sm font-bold text-[#E2E8F0] tracking-tight truncate leading-tight">Seguimiento & Alertas</h1>
-              <p className="text-[10px] text-[#94A3B8] font-medium truncate mt-0.5">Gestión Operacional de Informes</p>
-            </motion.div>
-          )}
+          <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.18 }} className="min-w-0">
+            <h1 className="text-sm font-bold text-[#E2E8F0] tracking-tight truncate leading-tight">Seguimiento & Alertas</h1>
+            <p className="text-[10px] text-[#94A3B8] font-medium truncate mt-0.5">Gestión Operacional de Informes</p>
+          </motion.div>
         </div>
-        {!collapsed && (
-          <button
-            type="button"
-            onClick={() => setIsCollapsed(true)}
-            className="p-1.5 rounded-lg text-[#94A3B8] hover:text-[#E2E8F0] hover:bg-[#1E293B] transition-colors shrink-0 focus:outline-none focus:ring-1"
-            style={{ ['--tw-ring-color' as any]: ACCENT }}
-            title="Contraer menú lateral"
-            aria-label="Contraer menú lateral"
-          >
-            <PanelLeftClose className="w-4 h-4" />
-          </button>
-        )}
       </div>
-
-      {collapsed && (
-        <div className="px-3 pt-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => setIsCollapsed(false)}
-            className="w-full flex items-center justify-center p-1.5 rounded-lg text-[#94A3B8] hover:text-[#E2E8F0] hover:bg-[#1E293B] transition-colors"
-            title="Expandir menú lateral"
-            aria-label="Expandir menú lateral"
-          >
-            <PanelLeftOpen className="w-4 h-4" />
-          </button>
-        </div>
-      )}
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3.5 no-scrollbar">
         {/* Proyecto en Pantalla: aclara de inmediato a qué proyecto queda
             acotada toda la app (ver remasterización de acceso por proyecto). */}
         {currentProject && (
-          !collapsed ? (
-            <motion.div
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="p-3 rounded-xl transition-all shadow-xs"
-              style={{ background: PANEL, border: `1px solid ${BORDER}` }}
-            >
-              <div className="flex items-center justify-between gap-1 mb-1.5">
-                <span className="text-[9px] font-bold tracking-wider uppercase" style={{ color: '#64748B' }}>
-                  Proyecto en Pantalla
-                </span>
-                <span
-                  className="inline-flex items-center gap-1 text-[9px] font-bold rounded-md px-1.5 py-0.5"
-                  style={
-                    isCurrentProjectSuspended
-                      ? { color: DANGER, background: `${DANGER}1a`, border: `1px solid ${DANGER}33` }
-                      : { color: SUCCESS, background: `${SUCCESS}1a`, border: `1px solid ${SUCCESS}33` }
-                  }
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${isCurrentProjectSuspended ? '' : 'animate-pulse'}`}
-                    style={{ background: isCurrentProjectSuspended ? DANGER : SUCCESS }}
-                  />
-                  {isCurrentProjectSuspended ? 'SUSPENDIDO' : 'ACTIVO'}
-                </span>
-              </div>
-              <h3 className="text-xs font-bold text-[#E2E8F0] truncate leading-tight">{currentProject.name}</h3>
-              <p className="text-[10px] font-mono text-[#94A3B8] mt-0.5 tracking-tight truncate">BPIN: {currentProject.bpin}</p>
-            </motion.div>
-          ) : (
-            <div
-              className="w-10 h-10 mx-auto rounded-xl flex items-center justify-center relative"
-              style={{ background: PANEL, border: `1px solid ${BORDER}` }}
-              title={`Proyecto ${isCurrentProjectSuspended ? 'suspendido' : 'activo'}: ${currentProject.name} (BPIN: ${currentProject.bpin})`}
-            >
-              <span className="text-xs font-bold text-[#E2E8F0]">{projectInitials}</span>
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-3 rounded-xl transition-all shadow-xs"
+            style={{ background: PANEL, border: `1px solid ${BORDER}` }}
+          >
+            <div className="flex items-center justify-between gap-1 mb-1.5">
+              <span className="text-[9px] font-bold tracking-wider uppercase" style={{ color: '#64748B' }}>
+                Proyecto en Pantalla
+              </span>
               <span
-                className="absolute top-1 right-1 w-2 h-2 rounded-full ring-2"
-                style={{ background: isCurrentProjectSuspended ? DANGER : SUCCESS, ['--tw-ring-color' as any]: BG }}
-              />
+                className="inline-flex items-center gap-1 text-[9px] font-bold rounded-md px-1.5 py-0.5"
+                style={
+                  isCurrentProjectSuspended
+                    ? { color: DANGER, background: `${DANGER}1a`, border: `1px solid ${DANGER}33` }
+                    : { color: SUCCESS, background: `${SUCCESS}1a`, border: `1px solid ${SUCCESS}33` }
+                }
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${isCurrentProjectSuspended ? '' : 'animate-pulse'}`}
+                  style={{ background: isCurrentProjectSuspended ? DANGER : SUCCESS }}
+                />
+                {isCurrentProjectSuspended ? 'SUSPENDIDO' : 'ACTIVO'}
+              </span>
             </div>
-          )
+            <h3 className="text-xs font-bold text-[#E2E8F0] truncate leading-tight">{currentProject.name}</h3>
+            <p className="text-[10px] font-mono text-[#94A3B8] mt-0.5 tracking-tight truncate">BPIN: {currentProject.bpin}</p>
+          </motion.div>
         )}
 
         {/* Pastilla de alertas urgentes -- mismo dato y mismo destino
             (lista de Informes) que ya usaba el diseño anterior. */}
         {urgentReportsCount > 0 && (
-          !collapsed ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              onClick={() => handleSelect('reports')}
-              className="p-2.5 rounded-xl flex items-center justify-between cursor-pointer transition-all shadow-xs group"
-              style={{ background: '#2A121E', border: '1px solid #541B2E' }}
-              title="Haz clic para ver los informes urgentes"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: DANGER }} />
-                  <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: DANGER }} />
-                </span>
-                <span className="text-xs font-medium truncate" style={{ color: DANGER }}>
-                  {urgentReportsCount} {urgentReportsCount === 1 ? 'urgente' : 'urgentes'}
-                </span>
-              </div>
-              <span className="text-[11px] font-semibold text-rose-300 group-hover:text-white flex items-center gap-0.5 shrink-0 transition-colors">
-                Ver
-                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            onClick={() => handleSelect('reports')}
+            className="p-2.5 rounded-xl flex items-center justify-between cursor-pointer transition-all shadow-xs group"
+            style={{ background: '#2A121E', border: '1px solid #541B2E' }}
+            title="Haz clic para ver los informes urgentes"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: DANGER }} />
+                <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: DANGER }} />
               </span>
-            </motion.div>
-          ) : (
-            <div
-              onClick={() => handleSelect('reports')}
-              className="w-10 h-10 mx-auto rounded-xl flex items-center justify-center cursor-pointer relative transition-colors"
-              style={{ background: '#2A121E', border: '1px solid #541B2E' }}
-              title={`${urgentReportsCount} alertas urgentes`}
-            >
-              <BellRing className="w-4 h-4" style={{ color: DANGER }} />
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full ring-2 animate-pulse" style={{ background: DANGER, ['--tw-ring-color' as any]: BG }} />
+              <span className="text-xs font-medium truncate" style={{ color: DANGER }}>
+                {urgentReportsCount} {urgentReportsCount === 1 ? 'urgente' : 'urgentes'}
+              </span>
             </div>
-          )
+            <span className="text-[11px] font-semibold text-rose-300 group-hover:text-white flex items-center gap-0.5 shrink-0 transition-colors">
+              Ver
+              <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+            </span>
+          </motion.div>
         )}
 
         <nav className="space-y-1" aria-label="Navegación principal">
-          {navTree.map((node) => renderNode(node, 0, collapsed))}
+          {navTree.map((node) => renderNode(node, 0))}
         </nav>
       </div>
 
       {/* Pie de página -- sin hora de sincronización inventada: solo
           confirma que el sistema está respondiendo. */}
-      {!collapsed ? (
-        <div className="p-3 border-t text-[11px] text-[#94A3B8] flex items-center justify-between shrink-0" style={{ borderColor: BORDER }}>
-          <div className="flex items-center gap-2 truncate">
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: SUCCESS }} />
-            <span className="truncate">Sistema en línea</span>
-          </div>
-          <span className="text-[10px] font-mono text-[#64748B]">v2.0</span>
+      <div className="p-3 border-t text-[11px] text-[#94A3B8] flex items-center justify-between shrink-0" style={{ borderColor: BORDER }}>
+        <div className="flex items-center gap-2 truncate">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: SUCCESS }} />
+          <span className="truncate">Sistema en línea</span>
         </div>
-      ) : (
-        <div className="p-3 border-t text-center shrink-0" style={{ borderColor: BORDER }}>
-          <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: SUCCESS }} title="Sistema en línea" />
-        </div>
-      )}
+        <span className="text-[10px] font-mono text-[#64748B]">v2.0</span>
+      </div>
     </div>
   );
 
   return (
     <>
       {/* Barra persistente de escritorio */}
-      <aside
-        id="app-sidebar-nav"
-        className={`hidden lg:flex shrink-0 flex-col h-screen sticky top-0 z-40 border-r transition-all duration-200 ${
-          isCollapsed ? 'w-18' : 'w-64'
-        }`}
-        style={{ borderColor: BORDER }}
-      >
-        {renderContent(isCollapsed)}
+      <aside id="app-sidebar-nav" className="hidden lg:flex shrink-0 flex-col w-64 h-screen sticky top-0 z-40 border-r" style={{ borderColor: BORDER }}>
+        {renderContent()}
       </aside>
 
-      {/* Drawer deslizable en móvil -- siempre expandido (no tiene sentido un
-          drawer angosto de solo íconos), se abre desde el botón hamburguesa
-          de Header.tsx. */}
+      {/* Drawer deslizable en móvil, se abre desde el botón hamburguesa de
+          Header.tsx. */}
       <AnimatePresence>
         {isMobileOpen && (
           <>
@@ -606,7 +518,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="lg:hidden fixed top-0 bottom-0 left-0 w-[280px] z-50 shadow-2xl"
             >
               <div className="relative h-full">
-                {renderContent(false)}
+                {renderContent()}
                 <button
                   type="button"
                   onClick={onCloseMobile}
