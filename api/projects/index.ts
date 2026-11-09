@@ -1018,7 +1018,7 @@ export default async function handler(
         return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
       }
       const rows = await sql`
-        SELECT parte_id AS id, proyecto_id AS "proyectoId", numero, concepto, monto,
+        SELECT parte_id AS id, proyecto_id AS "proyectoId", numero, concepto, monto, porcentaje,
           TO_CHAR(fecha_estimada, 'YYYY-MM-DD') AS "fechaEstimada", estado
         FROM proyecto_valor_partes WHERE proyecto_id = ${projectId}
         ORDER BY fecha_estimada ASC NULLS LAST, parte_id ASC
@@ -1030,7 +1030,7 @@ export default async function handler(
       if (!(await canEditModuleRequest(request, sql, 'projects'))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
       }
-      const { projectId, numero, concepto, monto, fechaEstimada, estado } = request.body?.data ?? {};
+      const { projectId, numero, concepto, monto, porcentaje, fechaEstimada, estado } = request.body?.data ?? {};
       const pid = Number(projectId);
       if (!Number.isInteger(pid) || pid <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
@@ -1041,13 +1041,18 @@ export default async function handler(
       if (monto === undefined || monto === null || monto === '' || Number.isNaN(Number(monto))) {
         return response.status(400).json({ data: null, meta: {}, errors: ['El monto de la parte es obligatorio.'] });
       }
+      if (porcentaje !== undefined && porcentaje !== null && porcentaje !== '' &&
+          (Number.isNaN(Number(porcentaje)) || Number(porcentaje) < 0 || Number(porcentaje) > 100)) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El porcentaje debe estar entre 0 y 100.'] });
+      }
+      const porcentajeValue = porcentaje === undefined || porcentaje === null || porcentaje === '' ? null : Number(porcentaje);
       const rows = await sql`
-        INSERT INTO proyecto_valor_partes (proyecto_id, numero, concepto, monto, fecha_estimada, estado)
+        INSERT INTO proyecto_valor_partes (proyecto_id, numero, concepto, monto, porcentaje, fecha_estimada, estado)
         VALUES (
-          ${pid}, ${String(numero).trim()}, ${concepto || null}, ${Number(monto)},
+          ${pid}, ${String(numero).trim()}, ${concepto || null}, ${Number(monto)}, ${porcentajeValue},
           ${fechaEstimada || null}, ${estado && String(estado).trim() ? String(estado).trim() : 'Pendiente'}
         )
-        RETURNING parte_id AS id, proyecto_id AS "proyectoId", numero, concepto, monto,
+        RETURNING parte_id AS id, proyecto_id AS "proyectoId", numero, concepto, monto, porcentaje,
           TO_CHAR(fecha_estimada, 'YYYY-MM-DD') AS "fechaEstimada", estado
       `;
       return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
@@ -1070,14 +1075,22 @@ export default async function handler(
       const numero = has('numero') ? String(body.numero).trim() : current[0].numero;
       const concepto = has('concepto') ? (body.concepto || null) : current[0].concepto;
       const monto = has('monto') ? Number(body.monto) : current[0].monto;
+      if (has('porcentaje') && body.porcentaje !== null && body.porcentaje !== '' &&
+          (Number.isNaN(Number(body.porcentaje)) || Number(body.porcentaje) < 0 || Number(body.porcentaje) > 100)) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El porcentaje debe estar entre 0 y 100.'] });
+      }
+      const porcentaje = has('porcentaje')
+        ? (body.porcentaje === null || body.porcentaje === '' ? null : Number(body.porcentaje))
+        : current[0].porcentaje;
       const fechaEstimada = has('fechaEstimada') ? (body.fechaEstimada || null) : current[0].fecha_estimada;
       const estado = has('estado') ? String(body.estado).trim() : current[0].estado;
 
       const rows = await sql`
         UPDATE proyecto_valor_partes
-        SET numero = ${numero}, concepto = ${concepto}, monto = ${monto}, fecha_estimada = ${fechaEstimada}, estado = ${estado}
+        SET numero = ${numero}, concepto = ${concepto}, monto = ${monto}, porcentaje = ${porcentaje},
+          fecha_estimada = ${fechaEstimada}, estado = ${estado}
         WHERE parte_id = ${parteId}
-        RETURNING parte_id AS id, proyecto_id AS "proyectoId", numero, concepto, monto,
+        RETURNING parte_id AS id, proyecto_id AS "proyectoId", numero, concepto, monto, porcentaje,
           TO_CHAR(fecha_estimada, 'YYYY-MM-DD') AS "fechaEstimada", estado
       `;
       return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
@@ -1327,6 +1340,162 @@ export default async function handler(
         return response.status(400).json({ data: null, meta: {}, errors: ['El id del participante es obligatorio.'] });
       }
       const deleted = await sql`DELETE FROM proyecto_convenio_participantes WHERE participante_id = ${participanteId} RETURNING participante_id AS id`;
+      if (!deleted[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Participante no encontrado.'] });
+      }
+      return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+    }
+
+    // Contratos: mismo patrón que Convenios (arriba) pero entidad distinta
+    // -- un proyecto puede tener N contratos, cada uno con su propia lista
+    // de participantes (nombre, rol y valor opcionales).
+    if (request.method === 'GET' && request.query.contratos === 'list') {
+      const projectId = Number(request.query.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      const rows = await sql`
+        SELECT contrato_id AS id, proyecto_id AS "proyectoId", numero, nombre
+        FROM proyecto_contratos WHERE proyecto_id = ${projectId}
+        ORDER BY contrato_id ASC
+      `;
+      return response.status(200).json({ data: rows, meta: { total: rows.length }, errors: [] });
+    }
+
+    if (request.method === 'POST' && request.body?.kind === 'contratoCreate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const { projectId, numero, nombre } = request.body?.data ?? {};
+      const pid = Number(projectId);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      if (!numero || !String(numero).trim()) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El número del contrato es obligatorio.'] });
+      }
+      const rows = await sql`
+        INSERT INTO proyecto_contratos (proyecto_id, numero, nombre)
+        VALUES (${pid}, ${String(numero).trim()}, ${nombre && String(nombre).trim() ? String(nombre).trim() : null})
+        RETURNING contrato_id AS id, proyecto_id AS "proyectoId", numero, nombre
+      `;
+      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'PATCH' && request.body?.kind === 'contratoUpdate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const contratoId = Number(request.body?.id);
+      if (!Number.isInteger(contratoId) || contratoId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del contrato es obligatorio.'] });
+      }
+      const current = (await sql`SELECT * FROM proyecto_contratos WHERE contrato_id = ${contratoId}`) as any[];
+      if (!current[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Contrato no encontrado.'] });
+      }
+      const body = request.body?.data ?? {};
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+      const numero = has('numero') ? String(body.numero).trim() : current[0].numero;
+      const nombre = has('nombre') ? (body.nombre || null) : current[0].nombre;
+
+      const rows = await sql`
+        UPDATE proyecto_contratos SET numero = ${numero}, nombre = ${nombre}
+        WHERE contrato_id = ${contratoId}
+        RETURNING contrato_id AS id, proyecto_id AS "proyectoId", numero, nombre
+      `;
+      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'DELETE' && request.query.contrato) {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const contratoId = Number(request.query.contrato);
+      if (!Number.isInteger(contratoId) || contratoId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del contrato es obligatorio.'] });
+      }
+      const deleted = await sql`DELETE FROM proyecto_contratos WHERE contrato_id = ${contratoId} RETURNING contrato_id AS id`;
+      if (!deleted[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Contrato no encontrado.'] });
+      }
+      return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
+    }
+
+    // Participantes de un contrato: nombre, rol opcional y monto opcional.
+    if (request.method === 'GET' && request.query.contratoParticipantes === 'list') {
+      const projectId = Number(request.query.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del proyecto es obligatorio.'] });
+      }
+      const rows = await sql`
+        SELECT pcp.participante_id AS id, pcp.contrato_id AS "contratoId", pcp.nombre, pcp.rol, pcp.valor
+        FROM proyecto_contrato_participantes pcp
+        JOIN proyecto_contratos pc ON pc.contrato_id = pcp.contrato_id
+        WHERE pc.proyecto_id = ${projectId}
+        ORDER BY pcp.participante_id ASC
+      `;
+      return response.status(200).json({ data: rows, meta: { total: rows.length }, errors: [] });
+    }
+
+    if (request.method === 'POST' && request.body?.kind === 'contratoParticipanteCreate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const { contratoId, nombre, rol, valor } = request.body?.data ?? {};
+      const cid = Number(contratoId);
+      if (!Number.isInteger(cid) || cid <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del contrato es obligatorio.'] });
+      }
+      if (!nombre || !String(nombre).trim()) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El nombre del participante es obligatorio.'] });
+      }
+      const rows = await sql`
+        INSERT INTO proyecto_contrato_participantes (contrato_id, nombre, rol, valor)
+        VALUES (
+          ${cid}, ${String(nombre).trim()}, ${rol && String(rol).trim() ? String(rol).trim() : null},
+          ${valor === undefined || valor === null || valor === '' ? null : Number(valor)}
+        )
+        RETURNING participante_id AS id, contrato_id AS "contratoId", nombre, rol, valor
+      `;
+      return response.status(201).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'PATCH' && request.body?.kind === 'contratoParticipanteUpdate') {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const participanteId = Number(request.body?.id);
+      if (!Number.isInteger(participanteId) || participanteId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del participante es obligatorio.'] });
+      }
+      const current = (await sql`SELECT * FROM proyecto_contrato_participantes WHERE participante_id = ${participanteId}`) as any[];
+      if (!current[0]) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Participante no encontrado.'] });
+      }
+      const body = request.body?.data ?? {};
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+      const nombre = has('nombre') ? String(body.nombre).trim() : current[0].nombre;
+      const rol = has('rol') ? (body.rol || null) : current[0].rol;
+      const valor = has('valor') ? (body.valor === null || body.valor === '' ? null : Number(body.valor)) : current[0].valor;
+
+      const rows = await sql`
+        UPDATE proyecto_contrato_participantes SET nombre = ${nombre}, rol = ${rol}, valor = ${valor}
+        WHERE participante_id = ${participanteId}
+        RETURNING participante_id AS id, contrato_id AS "contratoId", nombre, rol, valor
+      `;
+      return response.status(200).json({ data: rows[0], meta: {}, errors: [] });
+    }
+
+    if (request.method === 'DELETE' && request.query.contratoParticipante) {
+      if (!(await canEditModuleRequest(request, sql, 'projects'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Proyectos.'] });
+      }
+      const participanteId = Number(request.query.contratoParticipante);
+      if (!Number.isInteger(participanteId) || participanteId <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['El id del participante es obligatorio.'] });
+      }
+      const deleted = await sql`DELETE FROM proyecto_contrato_participantes WHERE participante_id = ${participanteId} RETURNING participante_id AS id`;
       if (!deleted[0]) {
         return response.status(404).json({ data: null, meta: {}, errors: ['Participante no encontrado.'] });
       }

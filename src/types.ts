@@ -306,6 +306,25 @@ export interface ProjectEnlace {
   url: string;
 }
 
+// Un proyecto puede tener N contratos (ej. Contrato principal, Otrosí,
+// Contrato de interventoría), cada uno con su propia lista de
+// participantes -- misma estructura que Convenio/ConvenioParticipante,
+// pero es una entidad distinta (un contrato no es un convenio).
+export interface Contrato {
+  id: string;
+  proyectoId: string;
+  numero: string;
+  nombre: string | null;
+}
+
+export interface ContratoParticipante {
+  id: string;
+  contratoId: string;
+  nombre: string;
+  rol: string | null;
+  valor: number | null;
+}
+
 // Subdivisión manual del Valor del Proyecto en N partes por monto (plan de
 // desembolsos) -- independiente de los Informes de tipo "Desembolso", que
 // son radicados reales; esto es la planeación de cómo se reparte la plata.
@@ -315,6 +334,11 @@ export interface ValorParte {
   numero: string;
   concepto: string | null;
   monto: number;
+  // Porcentaje (0-100) que esta parte representa sobre el Valor Actual del
+  // proyecto -- se muestra junto al monto; la suma de porcentajes de todas
+  // las partes de un proyecto debería llegar a 100 de forma continua (sin
+  // huecos ni traslapes).
+  porcentaje: number | null;
   fechaEstimada: string | null;
   estado: 'Pendiente' | 'Pagado';
 }

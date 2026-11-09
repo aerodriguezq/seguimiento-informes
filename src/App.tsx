@@ -18,6 +18,8 @@ import {
   Aportante,
   Convenio,
   ConvenioParticipante,
+  Contrato,
+  ContratoParticipante,
   ProjectEnlace,
   PeticionesConfig,
   EmailCandidate,
@@ -121,6 +123,7 @@ function mapValorParte(p: any): ValorParte {
     numero: p.numero,
     concepto: p.concepto || null,
     monto: Number(p.monto),
+    porcentaje: p.porcentaje !== null && p.porcentaje !== undefined ? Number(p.porcentaje) : null,
     fechaEstimada: p.fechaEstimada || null,
     estado: p.estado === 'Pagado' ? 'Pagado' : 'Pendiente',
   };
@@ -160,6 +163,25 @@ function mapEnlace(e: any): ProjectEnlace {
     proyectoId: String(e.proyectoId),
     nombre: e.nombre,
     url: e.url,
+  };
+}
+
+function mapContrato(c: any): Contrato {
+  return {
+    id: String(c.id),
+    proyectoId: String(c.proyectoId),
+    numero: c.numero,
+    nombre: c.nombre || null,
+  };
+}
+
+function mapContratoParticipante(p: any): ContratoParticipante {
+  return {
+    id: String(p.id),
+    contratoId: String(p.contratoId),
+    nombre: p.nombre,
+    rol: p.rol || null,
+    valor: p.valor !== null && p.valor !== undefined ? Number(p.valor) : null,
   };
 }
 
@@ -248,6 +270,8 @@ export default function App() {
   const [currentProjectConvenios, setCurrentProjectConvenios] = useState<Convenio[]>([]);
   const [currentProjectConvenioParticipantes, setCurrentProjectConvenioParticipantes] = useState<ConvenioParticipante[]>([]);
   const [currentProjectEnlaces, setCurrentProjectEnlaces] = useState<ProjectEnlace[]>([]);
+  const [currentProjectContratos, setCurrentProjectContratos] = useState<Contrato[]>([]);
+  const [currentProjectContratoParticipantes, setCurrentProjectContratoParticipantes] = useState<ContratoParticipante[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
@@ -403,12 +427,14 @@ export default function App() {
       setCurrentProjectConvenios([]);
       setCurrentProjectConvenioParticipantes([]);
       setCurrentProjectEnlaces([]);
+      setCurrentProjectContratos([]);
+      setCurrentProjectContratoParticipantes([]);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const [reportsResponse, alertsResponse, modificatoriosResponse, valorPartesResponse, aportantesResponse, conveniosResponse, convenioParticipantesResponse, enlacesResponse] = await Promise.all([
+        const [reportsResponse, alertsResponse, modificatoriosResponse, valorPartesResponse, aportantesResponse, conveniosResponse, convenioParticipantesResponse, enlacesResponse, contratosResponse, contratoParticipantesResponse] = await Promise.all([
           fetch(`/api/reports?projectId=${currentProjectId}`),
           fetch(`/api/alerts?projectId=${currentProjectId}`),
           fetch(`/api/projects?modificatorios=list&projectId=${currentProjectId}`),
@@ -417,6 +443,8 @@ export default function App() {
           fetch(`/api/projects?convenios=list&projectId=${currentProjectId}`),
           fetch(`/api/projects?convenioParticipantes=list&projectId=${currentProjectId}`),
           fetch(`/api/projects?enlaces=list&projectId=${currentProjectId}`),
+          fetch(`/api/projects?contratos=list&projectId=${currentProjectId}`),
+          fetch(`/api/projects?contratoParticipantes=list&projectId=${currentProjectId}`),
         ]);
         const reportsPayload = await reportsResponse.json();
         const alertsPayload = await alertsResponse.json();
@@ -426,6 +454,8 @@ export default function App() {
         const conveniosPayload = await conveniosResponse.json();
         const convenioParticipantesPayload = await convenioParticipantesResponse.json();
         const enlacesPayload = await enlacesResponse.json();
+        const contratosPayload = await contratosResponse.json();
+        const contratoParticipantesPayload = await contratoParticipantesResponse.json();
         if (!reportsResponse.ok) throw new Error(reportsPayload.errors?.[0] || 'No fue posible consultar los informes.');
         if (!alertsResponse.ok) throw new Error(alertsPayload.errors?.[0] || 'No fue posible consultar las alertas.');
         if (cancelled) return;
@@ -437,6 +467,8 @@ export default function App() {
         setCurrentProjectConvenios(conveniosResponse.ok ? conveniosPayload.data.map(mapConvenio) : []);
         setCurrentProjectConvenioParticipantes(convenioParticipantesResponse.ok ? convenioParticipantesPayload.data.map(mapConvenioParticipante) : []);
         setCurrentProjectEnlaces(enlacesResponse.ok ? enlacesPayload.data.map(mapEnlace) : []);
+        setCurrentProjectContratos(contratosResponse.ok ? contratosPayload.data.map(mapContrato) : []);
+        setCurrentProjectContratoParticipantes(contratoParticipantesResponse.ok ? contratoParticipantesPayload.data.map(mapContratoParticipante) : []);
       } catch (error) {
         if (!cancelled) {
           showToast(error instanceof Error ? error.message : 'No fue posible cargar los informes y alertas de este proyecto.', 'info');
@@ -592,7 +624,7 @@ export default function App() {
   };
 
   const handleCreateValorParte = async (data: {
-    numero: string; concepto?: string; monto: number; fechaEstimada?: string; estado?: string;
+    numero: string; concepto?: string; monto: number; porcentaje?: number | null; fechaEstimada?: string; estado?: string;
   }) => {
     const response = await fetch('/api/projects', {
       method: 'POST',
@@ -606,7 +638,7 @@ export default function App() {
   };
 
   const handleUpdateValorParte = async (id: string, data: Partial<{
-    numero: string; concepto: string | null; monto: number; fechaEstimada: string | null; estado: string;
+    numero: string; concepto: string | null; monto: number; porcentaje: number | null; fechaEstimada: string | null; estado: string;
   }>) => {
     const response = await fetch('/api/projects', {
       method: 'PATCH',
@@ -786,6 +818,87 @@ export default function App() {
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el enlace.');
     await refetchEnlaces();
     showToast('Enlace eliminado.', 'success');
+  };
+
+  const refetchContratos = async () => {
+    const response = await fetch(`/api/projects?contratos=list&projectId=${currentProjectId}`);
+    const payload = await response.json();
+    if (response.ok) {
+      setCurrentProjectContratos(payload.data.map(mapContrato));
+    }
+  };
+
+  const handleCreateContrato = async (data: { numero: string; nombre?: string }) => {
+    const response = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'contratoCreate', data: { projectId: Number(currentProjectId), ...data } }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el contrato.');
+    await refetchContratos();
+    showToast('Contrato guardado.', 'success');
+  };
+
+  const handleUpdateContrato = async (id: string, data: Partial<{ numero: string; nombre: string | null }>) => {
+    const response = await fetch('/api/projects', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'contratoUpdate', id: Number(id), data }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el contrato.');
+    await refetchContratos();
+    showToast('Contrato actualizado.', 'success');
+  };
+
+  const handleDeleteContrato = async (id: string) => {
+    const response = await fetch(`/api/projects?contrato=${id}`, { method: 'DELETE' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el contrato.');
+    await refetchContratos();
+    await refetchContratoParticipantes();
+    showToast('Contrato eliminado.', 'success');
+  };
+
+  const refetchContratoParticipantes = async () => {
+    const response = await fetch(`/api/projects?contratoParticipantes=list&projectId=${currentProjectId}`);
+    const payload = await response.json();
+    if (response.ok) {
+      setCurrentProjectContratoParticipantes(payload.data.map(mapContratoParticipante));
+    }
+  };
+
+  const handleCreateContratoParticipante = async (data: { contratoId: string; nombre: string; rol?: string; valor?: number | null }) => {
+    const response = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'contratoParticipanteCreate', data }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible guardar el participante.');
+    await refetchContratoParticipantes();
+    showToast('Participante del contrato guardado.', 'success');
+  };
+
+  const handleUpdateContratoParticipante = async (id: string, data: Partial<{ nombre: string; rol: string | null; valor: number | null }>) => {
+    const response = await fetch('/api/projects', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'contratoParticipanteUpdate', id: Number(id), data }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible actualizar el participante.');
+    await refetchContratoParticipantes();
+    showToast('Participante del contrato actualizado.', 'success');
+  };
+
+  const handleDeleteContratoParticipante = async (id: string) => {
+    const response = await fetch(`/api/projects?contratoParticipante=${id}`, { method: 'DELETE' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible eliminar el participante.');
+    await refetchContratoParticipantes();
+    showToast('Participante del contrato eliminado.', 'success');
   };
 
   const handleSubmitNewReport = async (input: {
@@ -1802,6 +1915,14 @@ export default function App() {
               onCreateEnlace={handleCreateEnlace}
               onUpdateEnlace={handleUpdateEnlace}
               onDeleteEnlace={handleDeleteEnlace}
+              contratos={currentProjectContratos}
+              onCreateContrato={handleCreateContrato}
+              onUpdateContrato={handleUpdateContrato}
+              onDeleteContrato={handleDeleteContrato}
+              contratoParticipantes={currentProjectContratoParticipantes}
+              onCreateContratoParticipante={handleCreateContratoParticipante}
+              onUpdateContratoParticipante={handleUpdateContratoParticipante}
+              onDeleteContratoParticipante={handleDeleteContratoParticipante}
             />
           )}
 

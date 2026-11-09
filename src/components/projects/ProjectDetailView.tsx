@@ -11,6 +11,8 @@ import {
   Convenio,
   ConvenioParticipante,
   ProjectEnlace,
+  Contrato,
+  ContratoParticipante,
 } from '../../types';
 import {
   calculateDaysRemaining,
@@ -101,10 +103,10 @@ interface ProjectDetailViewProps {
   onDeleteModificatorio: (id: string) => Promise<void>;
   valorPartes: ValorParte[];
   onCreateValorParte: (data: {
-    numero: string; concepto?: string; monto: number; fechaEstimada?: string; estado?: string;
+    numero: string; concepto?: string; monto: number; porcentaje?: number | null; fechaEstimada?: string; estado?: string;
   }) => Promise<void>;
   onUpdateValorParte: (id: string, data: Partial<{
-    numero: string; concepto: string | null; monto: number; fechaEstimada: string | null; estado: string;
+    numero: string; concepto: string | null; monto: number; porcentaje: number | null; fechaEstimada: string | null; estado: string;
   }>) => Promise<void>;
   onDeleteValorParte: (id: string) => Promise<void>;
   aportantes: Aportante[];
@@ -123,6 +125,14 @@ interface ProjectDetailViewProps {
   onCreateEnlace: (data: { nombre: string; url: string }) => Promise<void>;
   onUpdateEnlace: (id: string, data: Partial<{ nombre: string; url: string }>) => Promise<void>;
   onDeleteEnlace: (id: string) => Promise<void>;
+  contratos: Contrato[];
+  onCreateContrato: (data: { numero: string; nombre?: string }) => Promise<void>;
+  onUpdateContrato: (id: string, data: Partial<{ numero: string; nombre: string | null }>) => Promise<void>;
+  onDeleteContrato: (id: string) => Promise<void>;
+  contratoParticipantes: ContratoParticipante[];
+  onCreateContratoParticipante: (data: { contratoId: string; nombre: string; rol?: string; valor?: number | null }) => Promise<void>;
+  onUpdateContratoParticipante: (id: string, data: Partial<{ nombre: string; rol: string | null; valor: number | null }>) => Promise<void>;
+  onDeleteContratoParticipante: (id: string) => Promise<void>;
 }
 
 export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
@@ -166,6 +176,14 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onCreateEnlace,
   onUpdateEnlace,
   onDeleteEnlace,
+  contratos,
+  onCreateContrato,
+  onUpdateContrato,
+  onDeleteContrato,
+  contratoParticipantes,
+  onCreateContratoParticipante,
+  onUpdateContratoParticipante,
+  onDeleteContratoParticipante,
 }) => {
   const { user, canEdit } = useAuth();
   const [isEditingVigencia, setIsEditingVigencia] = useState(false);
@@ -182,7 +200,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       setIsSavingVigencia(false);
     }
   };
-  const [infoTab, setInfoTab] = useState<'general' | 'valor' | 'desembolso' | 'convenio' | 'enlaces'>('general');
+  const [infoTab, setInfoTab] = useState<'general' | 'valor' | 'desembolso' | 'convenio' | 'contrato' | 'enlaces'>('general');
   const [isEditingInfo, setIsEditingInfo] = useState(false);
   const [infoObjetivo, setInfoObjetivo] = useState(project.objetivoGeneral ?? '');
   const [infoMunicipios, setInfoMunicipios] = useState(project.municipios ?? '');
@@ -312,6 +330,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const [vpNumero, setVpNumero] = useState('');
   const [vpConcepto, setVpConcepto] = useState('');
   const [vpMonto, setVpMonto] = useState('');
+  const [vpPorcentaje, setVpPorcentaje] = useState('');
   const [vpFechaEstimada, setVpFechaEstimada] = useState('');
   const [vpEstado, setVpEstado] = useState<'Pendiente' | 'Pagado'>('Pendiente');
   const [isSavingValorParte, setIsSavingValorParte] = useState(false);
@@ -321,6 +340,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     setVpNumero('');
     setVpConcepto('');
     setVpMonto('');
+    setVpPorcentaje('');
     setVpFechaEstimada('');
     setVpEstado('Pendiente');
   };
@@ -330,6 +350,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     setVpNumero(p.numero);
     setVpConcepto(p.concepto || '');
     setVpMonto(p.monto !== null ? String(p.monto) : '');
+    setVpPorcentaje(p.porcentaje !== null ? String(p.porcentaje) : '');
     setVpFechaEstimada(p.fechaEstimada || '');
     setVpEstado(p.estado);
     setShowValorParteModal(true);
@@ -340,11 +361,13 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     if (!vpNumero.trim() || vpMonto.trim() === '') return;
     setIsSavingValorParte(true);
     try {
+      const porcentaje = vpPorcentaje.trim() === '' ? null : Number(vpPorcentaje);
       if (editingValorParteId) {
         await onUpdateValorParte(editingValorParteId, {
           numero: vpNumero.trim(),
           concepto: vpConcepto.trim() || null,
           monto: Number(vpMonto),
+          porcentaje,
           fechaEstimada: vpFechaEstimada || null,
           estado: vpEstado,
         });
@@ -353,6 +376,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           numero: vpNumero.trim(),
           concepto: vpConcepto.trim() || undefined,
           monto: Number(vpMonto),
+          porcentaje,
           fechaEstimada: vpFechaEstimada || undefined,
           estado: vpEstado,
         });
@@ -518,6 +542,108 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     await onDeleteConvenioParticipante(id);
   };
 
+  // --- Contratos: mismo patrón que Convenios (arriba), entidad distinta ---
+  const [showContratoFormModal, setShowContratoFormModal] = useState(false);
+  const [editingContratoFormId, setEditingContratoFormId] = useState<string | null>(null);
+  const [ctrNumero, setCtrNumero] = useState('');
+  const [ctrNombre, setCtrNombre] = useState('');
+  const [isSavingContratoForm, setIsSavingContratoForm] = useState(false);
+
+  const resetContratoFormState = () => {
+    setEditingContratoFormId(null);
+    setCtrNumero('');
+    setCtrNombre('');
+  };
+
+  const handleOpenNewContrato = () => {
+    resetContratoFormState();
+    setShowContratoFormModal(true);
+  };
+
+  const handleStartEditContratoForm = (c: Contrato) => {
+    setEditingContratoFormId(c.id);
+    setCtrNumero(c.numero);
+    setCtrNombre(c.nombre || '');
+    setShowContratoFormModal(true);
+  };
+
+  const handleSubmitContratoForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ctrNumero.trim()) return;
+    setIsSavingContratoForm(true);
+    try {
+      if (editingContratoFormId) {
+        await onUpdateContrato(editingContratoFormId, { numero: ctrNumero.trim(), nombre: ctrNombre.trim() || null });
+      } else {
+        await onCreateContrato({ numero: ctrNumero.trim(), nombre: ctrNombre.trim() || undefined });
+      }
+      setShowContratoFormModal(false);
+      resetContratoFormState();
+    } finally {
+      setIsSavingContratoForm(false);
+    }
+  };
+
+  const handleDeleteContratoEntityClick = async (id: string) => {
+    if (!window.confirm('¿Eliminar este contrato? También se eliminan todos sus participantes. Esta acción no se puede deshacer.')) return;
+    await onDeleteContrato(id);
+  };
+
+  // --- Participantes de un contrato específico ---
+  const [showContratoParticipanteModal, setShowContratoParticipanteModal] = useState(false);
+  const [participanteContratoId, setParticipanteContratoId] = useState<string | null>(null);
+  const [editingContratoParticipanteId, setEditingContratoParticipanteId] = useState<string | null>(null);
+  const [ctpNombre, setCtpNombre] = useState('');
+  const [ctpRol, setCtpRol] = useState('');
+  const [ctpValor, setCtpValor] = useState('');
+  const [isSavingContratoParticipante, setIsSavingContratoParticipante] = useState(false);
+
+  const resetContratoParticipanteForm = () => {
+    setEditingContratoParticipanteId(null);
+    setParticipanteContratoId(null);
+    setCtpNombre('');
+    setCtpRol('');
+    setCtpValor('');
+  };
+
+  const handleOpenNewContratoParticipante = (contratoId: string) => {
+    resetContratoParticipanteForm();
+    setParticipanteContratoId(contratoId);
+    setShowContratoParticipanteModal(true);
+  };
+
+  const handleStartEditContratoParticipante = (p: ContratoParticipante) => {
+    setEditingContratoParticipanteId(p.id);
+    setParticipanteContratoId(p.contratoId);
+    setCtpNombre(p.nombre);
+    setCtpRol(p.rol || '');
+    setCtpValor(p.valor !== null ? String(p.valor) : '');
+    setShowContratoParticipanteModal(true);
+  };
+
+  const handleSubmitContratoParticipante = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ctpNombre.trim() || !participanteContratoId) return;
+    setIsSavingContratoParticipante(true);
+    try {
+      const valor = ctpValor.trim() === '' ? null : Number(ctpValor);
+      if (editingContratoParticipanteId) {
+        await onUpdateContratoParticipante(editingContratoParticipanteId, { nombre: ctpNombre.trim(), rol: ctpRol.trim() || null, valor });
+      } else {
+        await onCreateContratoParticipante({ contratoId: participanteContratoId, nombre: ctpNombre.trim(), rol: ctpRol.trim() || undefined, valor });
+      }
+      setShowContratoParticipanteModal(false);
+      resetContratoParticipanteForm();
+    } finally {
+      setIsSavingContratoParticipante(false);
+    }
+  };
+
+  const handleDeleteContratoParticipanteClick = async (id: string) => {
+    if (!window.confirm('¿Eliminar este participante del contrato? Esta acción no se puede deshacer.')) return;
+    await onDeleteContratoParticipante(id);
+  };
+
   // --- Enlaces: carpetas de Drive o accesos directos sueltos del proyecto
   // (nombre + link), distintos de los adjuntos de un Informe puntual ---
   const [showEnlaceFormModal, setShowEnlaceFormModal] = useState(false);
@@ -669,6 +795,8 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     .pop();
   const valorActual = latestAdicion ? latestAdicion.valorActual : project.valorInicial;
   const sumaValorPartes = valorPartes.reduce((acc, p) => acc + p.monto, 0);
+  const sumaPorcentajesPartes = valorPartes.reduce((acc, p) => acc + (p.porcentaje ?? 0), 0);
+  const porcentajeRestante = Math.max(0, Math.round((100 - sumaPorcentajesPartes) * 100) / 100);
   const sumaAportantes = aportantes.reduce((acc, a) => acc + a.monto, 0);
 
   const formatCurrency = (value: number | null | undefined) => {
@@ -1006,6 +1134,17 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           </button>
           <button
             type="button"
+            onClick={() => setInfoTab('contrato')}
+            className={`px-3 py-2 font-semibold border-b-2 transition-colors cursor-pointer ${
+              infoTab === 'contrato'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Contrato
+          </button>
+          <button
+            type="button"
             onClick={() => setInfoTab('enlaces')}
             className={`px-3 py-2 font-semibold border-b-2 transition-colors cursor-pointer ${
               infoTab === 'enlaces'
@@ -1239,7 +1378,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 {canEdit('projects') && (
                   <button
                     type="button"
-                    onClick={() => { resetValorParteForm(); setShowValorParteModal(true); }}
+                    onClick={() => {
+                      resetValorParteForm();
+                      if (porcentajeRestante > 0) setVpPorcentaje(String(porcentajeRestante));
+                      setShowValorParteModal(true);
+                    }}
                     className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
                   >
                     <Plus className="w-3 h-3" /> Agregar parte
@@ -1265,6 +1408,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                           {p.fechaEstimada && <span className="text-slate-400 shrink-0">{p.fechaEstimada}</span>}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
+                          {p.porcentaje !== null && (
+                            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700">
+                              {p.porcentaje}%
+                            </span>
+                          )}
                           <span className="font-bold text-slate-800">{formatCurrency(p.monto)}</span>
                           <button
                             type="button"
@@ -1308,6 +1456,26 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                     <p className="mt-1 text-[10.5px] text-amber-600">
                       La suma de las partes ({formatCurrency(sumaValorPartes)}) no coincide con el Valor Actual ({formatCurrency(valorActual)}).
                     </p>
+                  )}
+                  {sumaPorcentajesPartes > 0 && (
+                    <div
+                      className={`mt-1.5 flex items-center justify-between p-2 rounded-lg border ${
+                        Math.abs(sumaPorcentajesPartes - 100) < 0.01
+                          ? 'bg-emerald-50 border-emerald-200'
+                          : 'bg-amber-50 border-amber-200'
+                      }`}
+                    >
+                      <span className={Math.abs(sumaPorcentajesPartes - 100) < 0.01 ? 'text-emerald-700' : 'text-amber-700'}>
+                        {Math.abs(sumaPorcentajesPartes - 100) < 0.01
+                          ? 'División continua: las partes cubren el 100% sin huecos.'
+                          : sumaPorcentajesPartes > 100
+                          ? `Suma de porcentajes: ${sumaPorcentajesPartes}% — se excede el 100% por ${Math.round((sumaPorcentajesPartes - 100) * 100) / 100}%.`
+                          : `Suma de porcentajes: ${sumaPorcentajesPartes}% — falta ${porcentajeRestante}% para completar el 100%.`}
+                      </span>
+                      <span className={`font-bold ${Math.abs(sumaPorcentajesPartes - 100) < 0.01 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        {sumaPorcentajesPartes}%
+                      </span>
+                    </div>
                   )}
                 </>
               )}
@@ -1472,6 +1640,131 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                             <div className="mt-2 flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
                               <span className="text-slate-500">Suma de participantes</span>
                               <span className="font-bold text-slate-800">{formatCurrency(sumaConvenio)}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {infoTab === 'contrato' && (
+          <div className="text-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+                Contratos {contratos.length > 0 ? `(${contratos.length})` : ''}
+              </span>
+              {canEdit('projects') && (
+                <button
+                  type="button"
+                  onClick={handleOpenNewContrato}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+                >
+                  <Plus className="w-3 h-3" /> Nuevo contrato
+                </button>
+              )}
+            </div>
+
+            {contratos.length === 0 ? (
+              <p className="text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded-lg">
+                Todavía no se han registrado contratos para este proyecto.
+              </p>
+            ) : (
+              contratos.map((contrato) => {
+                const participantesDelContrato = contratoParticipantes.filter((p) => p.contratoId === contrato.id);
+                const sumaContrato = participantesDelContrato.reduce((acc, p) => acc + (p.valor ?? 0), 0);
+                return (
+                  <div key={contrato.id} className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 bg-slate-50 border-b border-slate-200">
+                      <div className="min-w-0">
+                        <span className="font-bold text-slate-900">{contrato.numero}</span>
+                        {contrato.nombre && <span className="text-slate-500"> — {contrato.nombre}</span>}
+                      </div>
+                      {canEdit('projects') && (
+                        <div className="flex items-center gap-3 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenNewContratoParticipante(contrato.id)}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+                          >
+                            <Plus className="w-3 h-3" /> Participante
+                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditContratoForm(contrato)}
+                              className="text-slate-400 hover:text-indigo-600"
+                              title="Editar contrato"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteContratoEntityClick(contrato.id)}
+                              className="text-slate-400 hover:text-rose-600"
+                              title="Eliminar contrato"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-3">
+                      {participantesDelContrato.length === 0 ? (
+                        <p className="text-slate-400 py-3 text-center">Sin participantes todavía.</p>
+                      ) : (
+                        <>
+                          <div className="space-y-1.5">
+                            {participantesDelContrato.map((p) => (
+                              <div
+                                key={p.id}
+                                className="flex flex-wrap items-center justify-between gap-2 p-2 bg-white border border-slate-200 rounded-lg"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                  <span className="font-semibold text-slate-800 truncate">{p.nombre}</span>
+                                  {p.rol && (
+                                    <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                      {p.rol}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {p.valor !== null && <span className="font-bold text-slate-800">{formatCurrency(p.valor)}</span>}
+                                  {canEdit('projects') && (
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleStartEditContratoParticipante(p)}
+                                        className="text-slate-400 hover:text-indigo-600"
+                                        title="Editar participante"
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteContratoParticipanteClick(p.id)}
+                                        className="text-slate-400 hover:text-rose-600"
+                                        title="Eliminar participante"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {sumaContrato > 0 && (
+                            <div className="mt-2 flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
+                              <span className="text-slate-500">Suma de participantes</span>
+                              <span className="font-bold text-slate-800">{formatCurrency(sumaContrato)}</span>
                             </div>
                           )}
                         </>
@@ -2329,6 +2622,26 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               </div>
 
               <div>
+                <label className="block font-semibold text-slate-700 mb-1">Porcentaje sobre el valor (opcional)</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.01"
+                    value={vpPorcentaje}
+                    onChange={(e) => setVpPorcentaje(e.target.value)}
+                    placeholder="Ej: 25"
+                    className="w-full px-2.5 py-1.5 pr-7 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                  />
+                  <span className="absolute right-2.5 top-1.5 text-slate-400">%</span>
+                </div>
+                <p className="mt-1 text-[10.5px] text-slate-400">
+                  Para que la división sea continua, la suma de porcentajes de todas las partes debe llegar a 100%.
+                </p>
+              </div>
+
+              <div>
                 <label className="block font-semibold text-slate-700 mb-1">Concepto (opcional)</label>
                 <input
                   type="text"
@@ -2628,6 +2941,137 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSavingParticipante ? 'Guardando...' : editingParticipanteId ? 'Guardar Cambios' : 'Crear Participante'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Contrato -- crear o editar según editingContratoFormId */}
+      {showContratoFormModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-indigo-600" />
+                {editingContratoFormId ? 'Editar Contrato' : 'Nuevo Contrato'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setShowContratoFormModal(false); resetContratoFormState(); }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitContratoForm} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Número</label>
+                <input
+                  type="text"
+                  required
+                  value={ctrNumero}
+                  onChange={(e) => setCtrNumero(e.target.value)}
+                  placeholder="Ej: Contrato 1, Contrato No. 045-2026..."
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Nombre u objeto (opcional)</label>
+                <input
+                  type="text"
+                  value={ctrNombre}
+                  onChange={(e) => setCtrNombre(e.target.value)}
+                  placeholder="Ej: Contrato de Interventoría"
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => { setShowContratoFormModal(false); resetContratoFormState(); }}
+                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingContratoForm}
+                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSavingContratoForm ? 'Guardando...' : editingContratoFormId ? 'Guardar Cambios' : 'Crear Contrato'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Participante del Contrato -- crear o editar según editingContratoParticipanteId */}
+      {showContratoParticipanteModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 max-w-md w-full space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                <Users className="w-4 h-4 text-indigo-600" />
+                {editingContratoParticipanteId ? 'Editar Participante' : 'Nuevo Participante del Contrato'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setShowContratoParticipanteModal(false); resetContratoParticipanteForm(); }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitContratoParticipante} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Nombre de la entidad</label>
+                <input
+                  type="text"
+                  required
+                  value={ctpNombre}
+                  onChange={(e) => setCtpNombre(e.target.value)}
+                  placeholder="Ej: Alcaldía de San Jacinto"
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Rol en el contrato (opcional)</label>
+                <input
+                  type="text"
+                  value={ctpRol}
+                  onChange={(e) => setCtpRol(e.target.value)}
+                  placeholder="Ej: Contratista, Interventor, Supervisor..."
+                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Valor que aporta (opcional)</label>
+                <CurrencyInput value={ctpValor} onChange={setCtpValor} placeholder="Ej: 3.000.000.000" />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => { setShowContratoParticipanteModal(false); resetContratoParticipanteForm(); }}
+                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingContratoParticipante}
+                  className="px-4 py-1.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSavingContratoParticipante ? 'Guardando...' : editingContratoParticipanteId ? 'Guardar Cambios' : 'Crear Participante'}
                 </button>
               </div>
             </form>
