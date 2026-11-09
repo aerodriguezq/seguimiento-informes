@@ -44,29 +44,31 @@ export async function getSweepGate(sql: SqlClient, kind: SweepKind, force: boole
   if (scheduledTimes.length > 0) {
     const now = new Date();
     const nowMinutes = colombiaMinutesOfDay(now);
-    // Ventana de 45 min después de cada hora programada. El workflow de
-    // GitHub Actions dispara cada 15 min "en teoría", pero en la práctica
-    // se observaron huecos reales de hasta 25 min entre ticks (su propio
-    // scheduler es "mejor esfuerzo", no garantizado) -- una ventana de solo
-    // 20 min era más angosta que esos huecos y podía dejar el día entero
-    // sin ningún tick que cayera adentro. 45 min da margen de sobra incluso
-    // si GitHub se salta uno o dos ticks seguidos.
-    const SLOT_WINDOW_MINUTES = 45;
-    const matchingSlotMinutes = scheduledTimes
+    const todayIso = colombiaDateString(now);
+
+    // El workflow de GitHub Actions dice correr cada 15 min, pero es
+    // "mejor esfuerzo" de verdad: en producción se observaron huecos
+    // reales de hasta 7-8 horas entre ticks (GitHub despriorizando crons
+    // frecuentes). Una ventana angosta tras cada hora programada (lo que
+    // había antes) dejaba la franja del día entera sin servir si el
+    // próximo tick caía después de esa ventana -- que es exactamente lo
+    // que pasó: "recordatorios_alertas" se quedó 43h sin correr porque
+    // ningún tick cayó en sus 3 ventanas de 45 min ese día y medio. Ahora:
+    // si ya pasó alguna hora programada de HOY y esa franja (o una
+    // posterior) todavía no se sirvió hoy, corre -- sin importar cuánto
+    // tiempo pasó desde esa hora. Sigue sin repetir dentro del mismo día.
+    const duePastSlots = scheduledTimes
       .map(parseHHMM)
-      .find((slotMinutes): slotMinutes is number => slotMinutes !== null && nowMinutes - slotMinutes >= 0 && nowMinutes - slotMinutes < SLOT_WINDOW_MINUTES);
-    if (matchingSlotMinutes === undefined) return { run: false, reason: 'throttled' };
+      .filter((slotMinutes): slotMinutes is number => slotMinutes !== null && slotMinutes <= nowMinutes)
+      .sort((a, b) => b - a);
+    if (duePastSlots.length === 0) return { run: false, reason: 'throttled' };
+    const latestDueSlot = duePastSlots[0];
 
     if (config.lastRunAt) {
-      // Dedup por FRANJA, no por "hace cuánto corrió por última vez": un
-      // "Ejecutar ahora" manual (force) no debe bloquear la siguiente franja
-      // programada real -- solo evita repetir la MISMA franja si dos ticks
-      // caen dentro de su misma ventana.
       const lastRun = new Date(config.lastRunAt);
-      const lastRunMinutes = colombiaMinutesOfDay(lastRun);
-      const sameDay = colombiaDateString(lastRun) === colombiaDateString(now);
-      const alreadyServedThisSlot = sameDay && lastRunMinutes - matchingSlotMinutes >= 0 && lastRunMinutes - matchingSlotMinutes < SLOT_WINDOW_MINUTES;
-      if (alreadyServedThisSlot) return { run: false, reason: 'throttled' };
+      const sameDay = colombiaDateString(lastRun) === todayIso;
+      const alreadyServedLatestSlot = sameDay && colombiaMinutesOfDay(lastRun) >= latestDueSlot;
+      if (alreadyServedLatestSlot) return { run: false, reason: 'throttled' };
     }
     return { run: true };
   }
