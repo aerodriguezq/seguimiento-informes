@@ -58,6 +58,7 @@ interface ReportDetailModalProps {
   onAdvanceStep: (reportId: string) => Promise<void>;
   onSearchCandidateEmails: (reportId: string) => Promise<EmailCandidate[]>;
   onConfirmCandidateEmail: (reportId: string, messageId: string) => Promise<void>;
+  onDismissCandidateEmail: (reportId: string, messageId: string) => Promise<void>;
   onEditReport: (reportId: string, updates: { month?: string; dueDate?: string; contactIds?: string[]; primaryContactId?: string; observations?: string }) => Promise<void>;
   onEditReportStage: (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null }) => Promise<void>;
   onDeleteReportStageProgress: (reportId: string, stepId: string) => Promise<void>;
@@ -80,6 +81,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   onAdvanceStep,
   onSearchCandidateEmails,
   onConfirmCandidateEmail,
+  onDismissCandidateEmail,
   onEditReport,
   onEditReportStage,
   onDeleteReportStageProgress,
@@ -94,6 +96,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [candidateEmails, setCandidateEmails] = useState<EmailCandidate[] | null>(null);
   const [candidateSearchError, setCandidateSearchError] = useState('');
   const [confirmingMessageId, setConfirmingMessageId] = useState<string | null>(null);
+  const [dismissingMessageId, setDismissingMessageId] = useState<string | null>(null);
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
   const [stageStartInput, setStageStartInput] = useState('');
   const [stageDueInput, setStageDueInput] = useState('');
@@ -175,6 +178,18 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
       setCandidateSearchError(err instanceof Error ? err.message : 'No fue posible confirmar ese correo.');
     } finally {
       setConfirmingMessageId(null);
+    }
+  };
+
+  const handleDismissCandidate = async (messageId: string) => {
+    setDismissingMessageId(messageId);
+    try {
+      await onDismissCandidateEmail(report.id, messageId);
+      setCandidateEmails((prev) => (prev ? prev.filter((c) => c.messageId !== messageId) : prev));
+    } catch (err) {
+      setCandidateSearchError(err instanceof Error ? err.message : 'No fue posible descartar ese correo.');
+    } finally {
+      setDismissingMessageId(null);
     }
   };
   const [showTransitionModal, setShowTransitionModal] = useState(false);
@@ -680,11 +695,22 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                           <button
                             type="button"
                             onClick={() => void handleConfirmCandidate(candidate.messageId)}
-                            disabled={confirmingMessageId !== null}
+                            disabled={confirmingMessageId !== null || dismissingMessageId !== null}
                             className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {confirmingMessageId === candidate.messageId ? 'Confirmando...' : 'Confirmar y avanzar con este correo'}
                           </button>
+                          {user.isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => void handleDismissCandidate(candidate.messageId)}
+                              disabled={confirmingMessageId !== null || dismissingMessageId !== null}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-rose-300 text-rose-600 hover:bg-rose-50 rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Marca que este correo NO corresponde a esta entrega -- reanuda el recordatorio a la Principal"
+                            >
+                              {dismissingMessageId === candidate.messageId ? 'Descartando...' : 'Marcar inválido'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))

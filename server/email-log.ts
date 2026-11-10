@@ -9,6 +9,8 @@ export type EmailLogKind =
   | 'devolucion_paso'
   | 'aviso_revision'
   | 'aviso_revision_entrega'
+  | 'recordatorio_principal_vencido'
+  | 'validacion_candidatos'
   | 'prueba';
 
 // Deja un rastro de cada correo que el sistema intenta enviar (haya salido

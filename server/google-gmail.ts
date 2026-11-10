@@ -139,7 +139,7 @@ function urgencyColors(daysRemaining: number | null): UrgencyColors {
 
 // Correo que siempre debe ir en copia en la entrega de informes, sin
 // importar el paso o el proyecto -- requisito fijo del área de seguimiento.
-const MANDATORY_CC_EMAIL = 'a.rodriguez@gdm.com.co';
+export const MANDATORY_CC_EMAIL = 'a.rodriguez@gdm.com.co';
 
 export function buildAlertEmailHtml(options: {
   alertType: string;
@@ -538,6 +538,115 @@ export function buildStepDeliveryDetectedEmailHtml(options: {
     <p style="margin: 0; font-size: 13px; color: #334155;">Llegó el correo de entrega para el paso <strong>"${escape(options.stepName)}"</strong>. Como responsable principal, revísalo y decide si está todo correcto o si hay que devolverlo con observaciones.</p>
     ${options.emailLink ? `<p style="margin: 10px 0 0 0; text-align: center;"><a href="${options.emailLink}" style="display: inline-block; font-size: 13px; font-weight: bold; color: #ffffff; background-color: ${bg}; border-radius: 4px; padding: 8px 14px; text-decoration: none;">Abrir correo recibido</a></p>` : ''}
     <p style="margin: 10px 0 0 0; font-size: 13px; color: #334155;">Ingresa a la aplicación de Seguimiento de Informes y, desde el detalle de este informe, da el <strong>visto bueno</strong> para que avance, o genera una <strong>observación</strong> para devolverlo a corrección.</p>
+  </div>
+
+  <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">
+    <p style="font-size: 11px; color: #64748b; margin: 0;">Este mensaje fue enviado automáticamente desde <strong>Seguimiento de Informes</strong>.</p>
+  </div>
+</div>`;
+}
+
+// Se manda SOLO al responsable Principal (reemplaza el recordatorio general
+// a todos los contactos del paso) mientras la etapa esté vencida
+// (NO_RECIBIDA) y no se haya encontrado ningún correo parecido pendiente de
+// validar -- ver buildCandidateValidationEmailHtml para el otro caso.
+export function buildPrincipalOverdueReminderEmailHtml(options: {
+  projectName: string;
+  periodLabel: string;
+  stepName: string;
+  principalName: string;
+  dueDate: string | null;
+}): string {
+  const escape = (value: string) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c] as string));
+  const bg = '#b91c1c';
+  const accent = '#fecaca';
+
+  return `<div style="max-width: 480px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dce4ec; border-radius: 8px; font-family: Arial, sans-serif; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+  <div style="background-color: ${bg}; color: #ffffff; padding: 20px; text-align: center;">
+    <div style="font-size: 24px; margin-bottom: 5px;">⏰</div>
+    <h2 style="margin: 0; font-size: 18px; font-weight: bold; color: #ffffff;">Entrega vencida, sigue sin validarse</h2>
+    <p style="margin: 5px 0 0 0; font-size: 16px; font-weight: 600; color: ${accent};">${escape(options.stepName)}</p>
+  </div>
+
+  <div style="padding: 20px; background-color: #f8fafc;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #334155;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold; width: 45%;">🏢 Proyecto:</td>
+        <td style="padding: 10px 0;">${escape(options.projectName)}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold;">🗓️ Período:</td>
+        <td style="padding: 10px 0;">${escape(options.periodLabel)}</td>
+      </tr>
+      ${options.dueDate ? `<tr>
+        <td style="padding: 10px 0; font-weight: bold;">📅 Fecha límite:</td>
+        <td style="padding: 10px 0;">${escape(options.dueDate)}</td>
+      </tr>` : ''}
+    </table>
+  </div>
+
+  <div style="padding: 16px 20px; background-color: #fef2f2; border-top: 1px solid #e2e8f0;">
+    <p style="margin: 0; font-size: 13px; color: #334155;">El paso <strong>"${escape(options.stepName)}"</strong> ya venció y sigue sin registrarse la entrega. Como responsable principal, realiza el seguimiento con quien corresponda y valida la entrega apenas llegue.</p>
+  </div>
+
+  <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">
+    <p style="font-size: 11px; color: #64748b; margin: 0;">Este mensaje fue enviado automáticamente desde <strong>Seguimiento de Informes</strong>.</p>
+  </div>
+</div>`;
+}
+
+// Se manda a MANDATORY_CC_EMAIL cuando, para un paso vencido (NO_RECIBIDA),
+// el barrido encuentra correos recientes parecidos de los contactos del
+// paso (sin que el asunto calce exacto) -- en vez de mandarle el
+// recordatorio normal a la Principal, se pausa y se le pide a este correo
+// de control que valide manualmente desde la app si alguno de estos sí es
+// la entrega real.
+export function buildCandidateValidationEmailHtml(options: {
+  projectName: string;
+  periodLabel: string;
+  stepName: string;
+  candidates: Array<{ messageId: string; subject: string; from: string; receivedAt: string | null; snippet: string }>;
+}): string {
+  const escape = (value: string) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c] as string));
+  const bg = '#92400e';
+  const accent = '#fde68a';
+
+  const candidateRows = options.candidates.map((c) => `
+    <div style="padding: 10px 12px; background-color: #ffffff; border: 1px dashed #fbbf24; border-radius: 4px; margin-bottom: 8px;">
+      <p style="margin: 0 0 4px 0; font-size: 13px; font-weight: bold; color: #1e293b;">${escape(c.subject || '(sin asunto)')}</p>
+      <p style="margin: 0 0 4px 0; font-size: 12px; color: #475569;">De: ${escape(c.from)}${c.receivedAt ? ` · ${escape(new Date(c.receivedAt).toLocaleString('es-CO'))}` : ''}</p>
+      <p style="margin: 0 0 6px 0; font-size: 12px; color: #64748b; font-style: italic;">"${escape(c.snippet)}"</p>
+      <a href="https://mail.google.com/mail/u/0/#all/${encodeURIComponent(c.messageId)}" style="font-size: 12px; font-weight: bold; color: #92400e;">Abrir en Gmail →</a>
+    </div>`).join('');
+
+  return `<div style="max-width: 520px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dce4ec; border-radius: 8px; font-family: Arial, sans-serif; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+  <div style="background-color: ${bg}; color: #ffffff; padding: 20px; text-align: center;">
+    <div style="font-size: 24px; margin-bottom: 5px;">🔎</div>
+    <h2 style="margin: 0; font-size: 18px; font-weight: bold; color: #ffffff;">Valida correos parecidos</h2>
+    <p style="margin: 5px 0 0 0; font-size: 16px; font-weight: 600; color: ${accent};">${escape(options.stepName)}</p>
+  </div>
+
+  <div style="padding: 20px; background-color: #f8fafc;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; color: #334155;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 10px 0; font-weight: bold; width: 45%;">🏢 Proyecto:</td>
+        <td style="padding: 10px 0;">${escape(options.projectName)}</td>
+      </tr>
+      <tr>
+        <td style="padding: 10px 0; font-weight: bold;">🗓️ Período:</td>
+        <td style="padding: 10px 0;">${escape(options.periodLabel)}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div style="padding: 16px 20px; background-color: #fffbeb; border-top: 1px solid #e2e8f0;">
+    <p style="margin: 0 0 10px 0; font-size: 13px; color: #334155;">Este paso está vencido y sin entrega confirmada, pero se encontraron estos correos parecidos (el asunto no calzó exacto). El recordatorio al responsable Principal queda <strong>en pausa</strong> hasta que valides manualmente desde la aplicación si alguno corresponde a esta entrega:</p>
+    ${candidateRows}
+    <p style="margin: 10px 0 0 0; font-size: 12.5px; color: #334155;">Entra a la aplicación de Seguimiento de Informes, abre el detalle de este informe y usa "Buscar posibles correos": confirma el que corresponda, o márcalo como inválido para reanudar el recordatorio.</p>
   </div>
 
   <div style="padding: 15px 20px; background-color: #ffffff; text-align: center; border-top: 1px solid #e2e8f0;">

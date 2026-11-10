@@ -1657,6 +1657,37 @@ export default async function handler(request: VercelRequest, response: VercelRe
         }
         throw error;
       }
+    } else if (action === 'dismissCandidateEmail') {
+      // Marca un correo parecido como "no es esta entrega" -- reanuda de
+      // inmediato el recordatorio a la Principal (se quita la pausa de
+      // espera_validacion_admin) y evita que ese mismo correo se vuelva a
+      // ofrecer o a disparar un nuevo aviso de validación más adelante.
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede descartar un correo candidato.'] });
+      }
+      const { messageId } = request.body ?? {};
+      if (!messageId || typeof messageId !== 'string') {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Falta el id del correo a descartar.'] });
+      }
+      const [current] = (await sql`SELECT paso_actual_id AS "stepId" FROM informes WHERE informe_id = ${reportId}`) as any[];
+      if (!current?.stepId) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Este informe no tiene un paso de flujo activo.'] });
+      }
+      await sql`
+        UPDATE informe_pasos_instancia
+        SET espera_validacion_admin = FALSE,
+          candidatos_descartados = array_append(COALESCE(candidatos_descartados, ARRAY[]::TEXT[]), ${messageId}),
+          updated_at = NOW()
+        WHERE informe_id = ${reportId} AND paso_id = ${current.stepId}
+      `;
+      await sql`
+        INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
+        VALUES (
+          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), 'Usuario',
+          'Se marcó un correo parecido como no correspondiente a esta entrega -- el recordatorio se reanuda.'
+        )
+      `;
     } else if (action === 'attachment') {
       const { attachment, userName } = request.body ?? {};
       if (!attachment?.name || !attachment?.driveUrl) {

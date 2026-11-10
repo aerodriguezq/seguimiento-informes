@@ -1067,6 +1067,18 @@ export default function App() {
     showToast('Correo confirmado. El paso del flujo avanzó.', 'success');
   };
 
+  const handleDismissCandidateEmail = async (reportId: string, messageId: string) => {
+    const response = await fetch('/api/reports', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'dismissCandidateEmail', reportId, messageId }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible descartar el correo.');
+    setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+    showToast('Correo marcado como inválido. El recordatorio se reanuda.', 'success');
+  };
+
   // Project settings
   const handleToggleProjectAutoAlerts = async (projectId: string) => {
     const project = projects.find((p) => p.id === projectId);
@@ -1989,6 +2001,7 @@ export default function App() {
           onAdvanceStep={handleAdvanceReportStep}
           onSearchCandidateEmails={handleSearchCandidateEmails}
           onConfirmCandidateEmail={handleConfirmCandidateEmail}
+          onDismissCandidateEmail={handleDismissCandidateEmail}
           onEditReport={handleEditReport}
           onEditReportStage={handleEditReportStage}
           onDeleteReportStageProgress={handleDeleteReportStageProgress}

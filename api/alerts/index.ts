@@ -1,6 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveAccessToken } from '../../server/google-drive.js';
-import { sendEmail, confirmEmailSent, buildAlertEmailHtml, buildPeticionReminderEmailHtml } from '../../server/google-gmail.js';
+import {
+  sendEmail, confirmEmailSent, buildAlertEmailHtml, buildPeticionReminderEmailHtml,
+  buildPrincipalOverdueReminderEmailHtml, buildCandidateValidationEmailHtml,
+  findCandidateEmails, MANDATORY_CC_EMAIL,
+} from '../../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../../server/sweep-config.js';
 import { canEditModuleRequest, getAccessibleProjectIds } from '../../server/admin-auth.js';
 import { logEmailSend } from '../../server/email-log.js';
@@ -303,6 +307,126 @@ async function handlePeticionesReminders(sql: SqlClient, accessToken: string): P
   return { evaluated: rows.length, sent: sentCount };
 }
 
+// Para un paso ya vencido (NO_RECIBIDA): antes de molestar otra vez a la
+// Principal, busca correos RECIENTES PARECIDOS de los contactos del paso
+// (igual que el botón manual "Buscar posibles correos", sin exigir que el
+// asunto calce exacto -- si calzara exacto, el otro barrido ya lo habría
+// detectado y avanzado el paso solo). Si encuentra alguno que no se haya
+// descartado antes, pausa el recordatorio y le pide validación manual a
+// MANDATORY_CC_EMAIL; si no encuentra nada, sigue con el recordatorio
+// normal pero dirigido SOLO a la Principal (reemplaza el de todos los
+// contactos mientras dure el vencimiento). Devuelve true si mandó algún
+// correo (para el conteo de "sent" del sweep).
+async function handleOverdueStepReminder(
+  sql: SqlClient,
+  accessToken: string,
+  alert: {
+    id: number; reportId: number; stepId: number; projectName: string;
+    monthName: string | null; year: number | null; stepName: string | null;
+    fechaLimite: string | null; esperaValidacionAdmin: boolean; candidatosDescartados: string[] | null;
+  },
+  todayIso: string,
+): Promise<boolean> {
+  const stepName = alert.stepName || 'el paso';
+  const periodLabel = `${alert.monthName || ''} ${alert.year || ''}`.trim();
+
+  // Ya hay un candidato esperando que se valide manualmente -- no se manda
+  // nada nuevo (ni a la Principal ni otro aviso de validación) hasta que se
+  // resuelva desde la app.
+  if (alert.esperaValidacionAdmin) return false;
+
+  const contactRows = (await sql`
+    SELECT c.email FROM tipo_informe_paso_contacto tpc
+    JOIN contactos c ON c.contacto_id = tpc.contacto_id
+    WHERE tpc.paso_id = ${alert.stepId} AND c.email IS NOT NULL AND c.email <> ''
+  `) as any[];
+  const contactEmails = contactRows.map((r: any) => r.email as string);
+
+  const discarded = new Set(alert.candidatosDescartados || []);
+  let candidates: Array<{ messageId: string; subject: string; from: string; receivedAt: string | null; snippet: string }> = [];
+  if (contactEmails.length > 0) {
+    try {
+      const afterDate = alert.fechaLimite ? new Date(`${alert.fechaLimite}T00:00:00Z`) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const found = await findCandidateEmails(accessToken, contactEmails, afterDate, 8);
+      candidates = found.filter((c) => !discarded.has(c.messageId));
+    } catch (error) {
+      console.error('No fue posible buscar correos parecidos para validar', alert.id, error);
+    }
+  }
+
+  if (candidates.length > 0) {
+    const subject = `[Seguimiento] Valida correos parecidos: ${stepName}`;
+    try {
+      const html = buildCandidateValidationEmailHtml({ projectName: alert.projectName, periodLabel, stepName, candidates });
+      const sentMessage = await sendEmail(accessToken, { to: [MANDATORY_CC_EMAIL], subject, body: html, html: true });
+      const confirmed = await confirmEmailSent(accessToken, sentMessage.id);
+      await logEmailSend(sql, {
+        to: [MANDATORY_CC_EMAIL], subject, kind: 'validacion_candidatos',
+        reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null,
+        success: true, gmailMessageId: sentMessage.id, confirmed,
+      });
+      await sql`
+        UPDATE informe_pasos_instancia SET espera_validacion_admin = TRUE, updated_at = NOW()
+        WHERE informe_id = ${alert.reportId} AND paso_id = ${alert.stepId}
+      `;
+      await sql`
+        INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
+        VALUES (
+          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          ${alert.reportId}, (SELECT estado FROM informes WHERE informe_id = ${alert.reportId}), NOW(),
+          'Sistema (detección automática)',
+          ${`Se encontraron ${candidates.length} correo(s) parecido(s) para "${stepName}" -- se pausó el recordatorio y se pidió validación manual.`}
+        )
+      `;
+      return true;
+    } catch (error) {
+      console.error('No fue posible enviar el correo de validación de candidatos', alert.id, error);
+      await logEmailSend(sql, {
+        to: [], subject, kind: 'validacion_candidatos',
+        reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null,
+        success: false, errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  const principalRows = (await sql`
+    SELECT c.nombre AS name, c.email FROM tipo_informe_paso_contacto tpc
+    JOIN contactos c ON c.contacto_id = tpc.contacto_id
+    WHERE tpc.paso_id = ${alert.stepId} AND tpc.es_principal = TRUE
+  `) as any[];
+  const principal = principalRows[0];
+  if (!principal?.email) return false;
+
+  const subject = `[Seguimiento] Sigue sin recibirse: ${stepName}`;
+  try {
+    const html = buildPrincipalOverdueReminderEmailHtml({
+      projectName: alert.projectName, periodLabel, stepName, principalName: principal.name, dueDate: alert.fechaLimite,
+    });
+    const sentMessage = await sendEmail(accessToken, { to: [principal.email], subject, body: html, html: true });
+    const confirmed = await confirmEmailSent(accessToken, sentMessage.id);
+    await logEmailSend(sql, {
+      to: [principal.email], subject, kind: 'recordatorio_principal_vencido',
+      reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null,
+      success: true, gmailMessageId: sentMessage.id, confirmed,
+    });
+    await sql`UPDATE alertas SET ultimo_disparo = NOW() WHERE alerta_id = ${alert.id}`;
+    await sql`
+      UPDATE informe_pasos_instancia SET ultimo_recordatorio_en = ${todayIso}
+      WHERE informe_id = ${alert.reportId} AND paso_id = ${alert.stepId}
+    `;
+    return true;
+  } catch (error) {
+    console.error('Recordatorio vencido a la Principal falló', alert.id, error);
+    await logEmailSend(sql, {
+      to: [], subject, kind: 'recordatorio_principal_vencido',
+      reportId: Number(alert.reportId) || null, alertId: Number(alert.id) || null,
+      success: false, errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
 // Alertas ligadas a un paso de flujo de Informes (informe_id + paso_id):
 // ahora usan la misma escalada verde(5)/amarillo(3)/rojo(2+) que Peticiones
 // en vez de "una vez al día sin importar la urgencia", apoyándose en la
@@ -315,11 +439,17 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
     SELECT a.alerta_id AS id, a.nombre AS name, a.tipo AS type, a.frecuencia AS schedule,
            a.informe_id AS "reportId", a.paso_id AS "stepId",
            COALESCE(p.nombre, 'Todos los proyectos') AS "projectName",
+           i.mes_nombre AS "monthName", i.anio AS "year",
+           wp.nombre AS "stepName",
            TO_CHAR(ipi.fecha_inicio, 'YYYY-MM-DD') AS "fechaInicio",
            TO_CHAR(ipi.fecha_limite, 'YYYY-MM-DD') AS "fechaLimite",
-           TO_CHAR(ipi.ultimo_recordatorio_en, 'YYYY-MM-DD') AS "ultimoEn"
+           TO_CHAR(ipi.ultimo_recordatorio_en, 'YYYY-MM-DD') AS "ultimoEn",
+           ipi.espera_validacion_admin AS "esperaValidacionAdmin",
+           ipi.candidatos_descartados AS "candidatosDescartados"
     FROM alertas a
     LEFT JOIN proyectos p ON p.proyecto_id = a.proyecto_id
+    LEFT JOIN informes i ON i.informe_id = a.informe_id
+    LEFT JOIN tipo_informe_pasos wp ON wp.paso_id = a.paso_id
     LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = a.informe_id AND ipi.paso_id = a.paso_id
     WHERE a.activa = TRUE AND a.informe_id IS NOT NULL AND a.paso_id IS NOT NULL
       AND NOT EXISTS (
@@ -335,12 +465,13 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
     const days = alert.fechaLimite
       ? Math.round((new Date(`${alert.fechaLimite}T00:00:00Z`).getTime() - new Date(`${todayIso}T00:00:00Z`).getTime()) / (1000 * 60 * 60 * 24))
       : null;
+    const isOverdue = days !== null && days < 0;
 
     // Etapa vencida y todavía sin entrega: el estado pasa a NO_RECIBIDA
     // (motor de estados) independientemente de si toca reenviar el correo
     // hoy o no -- así el dashboard de "procesos en riesgo" refleja la
     // realidad aunque hoy ya se haya avisado.
-    if (days !== null && days < 0) {
+    if (isOverdue) {
       await sql`
         UPDATE informe_pasos_instancia SET estado_etapa = 'NO_RECIBIDA', updated_at = NOW()
         WHERE informe_id = ${alert.reportId} AND paso_id = ${alert.stepId} AND estado_etapa IN ('PENDIENTE', 'ALERTA_GENERADA')
@@ -355,6 +486,19 @@ async function handleInformeStepReminders(sql: SqlClient, accessToken: string): 
     // incumplimiento real. Como máximo un correo por día (ultimoEn).
     if (alert.fechaInicio && todayIso < alert.fechaInicio) continue;
     if (alert.ultimoEn === todayIso) continue;
+
+    // Paso vencido (NO_RECIBIDA): el recordatorio a TODOS los contactos se
+    // reemplaza por este flujo, que primero revisa si hay correos parecidos
+    // antes de molestar a la Principal otra vez -- ver handleOverdueStepReminder.
+    if (isOverdue) {
+      try {
+        const sentOne = await handleOverdueStepReminder(sql, accessToken, alert, todayIso);
+        if (sentOne) sentCount++;
+      } catch (error) {
+        console.error('Overdue step reminder failed', alert.id, error);
+      }
+      continue;
+    }
 
     const recipientRows = (await sql`
       SELECT c.email FROM alerta_contacto ac
