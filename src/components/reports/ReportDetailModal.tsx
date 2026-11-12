@@ -530,6 +530,23 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
 
         {/* Modal Body with Scroll */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1">
+          {/* Observaciones siempre visibles arriba, sin depender de la
+              pestaña activa -- antes quedaban escondidas dentro de
+              "Observaciones & Resumen" y costaba encontrarlas. */}
+          {report.observations && report.observations.trim() !== '' && (
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 shadow-xs">
+              <div className="flex items-center gap-2 mb-2">
+                <MessageSquare className="w-4 h-4 text-amber-700" />
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-800">
+                  Observaciones del Informe
+                </span>
+              </div>
+              <p className="text-sm text-amber-950 leading-relaxed whitespace-pre-wrap">
+                {report.observations}
+              </p>
+            </div>
+          )}
+
           {/* Línea de progreso del flujo real configurado (pasos del tipo de
               informe, no el estado administrativo genérico) -- nombres y
               responsables tal como quedaron en Listas Maestras. */}
@@ -906,15 +923,6 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
           {/* TAB 1: Observaciones & Resumen */}
           {activeTab === 'timeline' && (
             <div className="space-y-4">
-              <div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-                  Observaciones Operacionales del Informe
-                </h4>
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 leading-relaxed">
-                  {report.observations}
-                </div>
-              </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs">
                   <span className="text-slate-500 block">Responsable Principal:</span>
