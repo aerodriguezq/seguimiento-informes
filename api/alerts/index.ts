@@ -390,12 +390,24 @@ async function handleOverdueStepReminder(
     }
   }
 
-  const principalRows = (await sql`
-    SELECT c.nombre AS name, c.email FROM tipo_informe_paso_contacto tpc
-    JOIN contactos c ON c.contacto_id = tpc.contacto_id
-    WHERE tpc.paso_id = ${alert.stepId} AND tpc.es_principal = TRUE
+  // La persona a cargo asignada a este informe (informe_contacto.es_
+  // principal) reemplaza al Principal configurado en Listas Maestras para
+  // este recordatorio -- si no se asignó ninguna, se usa el Principal del
+  // paso como hasta ahora.
+  const [reportPrincipal] = (await sql`
+    SELECT c.nombre AS name, c.email FROM informe_contacto ic
+    JOIN contactos c ON c.contacto_id = ic.contacto_id
+    WHERE ic.informe_id = ${alert.reportId} AND ic.es_principal = TRUE AND c.email IS NOT NULL AND c.email <> ''
   `) as any[];
-  const principal = principalRows[0];
+  let principal = reportPrincipal;
+  if (!principal) {
+    const principalRows = (await sql`
+      SELECT c.nombre AS name, c.email FROM tipo_informe_paso_contacto tpc
+      JOIN contactos c ON c.contacto_id = tpc.contacto_id
+      WHERE tpc.paso_id = ${alert.stepId} AND tpc.es_principal = TRUE
+    `) as any[];
+    principal = principalRows[0];
+  }
   if (!principal?.email) return false;
 
   const subject = `[Seguimiento] Sigue sin recibirse: ${stepName}`;

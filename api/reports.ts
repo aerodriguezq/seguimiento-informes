@@ -11,16 +11,28 @@ type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 // observación) el contacto marcado Principal de ese paso, o un admin como
 // respaldo si el Principal no puede entrar a la app -- nunca cualquier
 // persona con edición en Informes, ni la detección automática de correo.
+//
+// La "persona a cargo" asignada a este informe puntual (informe_contacto.es_
+// principal, ver acción setPrimaryContact) reemplaza al Principal configurado
+// en Listas Maestras para ese paso -- si no se asignó ninguna para este
+// informe, se usa el Principal del paso como hasta ahora.
 async function canActOnReviewStep(
   request: { headers: { cookie?: string } },
   sql: SqlClient,
   stepId: number,
+  reportId: number | string,
 ): Promise<{ allowed: boolean; principalName: string | null }> {
-  const [principal] = (await sql`
+  const [reportPrincipal] = (await sql`
+    SELECT c.email, c.nombre AS name FROM informe_contacto ic
+    JOIN contactos c ON c.contacto_id = ic.contacto_id
+    WHERE ic.informe_id = ${reportId} AND ic.es_principal = TRUE
+  `) as any[];
+  const [stepPrincipal] = reportPrincipal ? [] : ((await sql`
     SELECT c.email, c.nombre AS name FROM tipo_informe_paso_contacto tpc
     JOIN contactos c ON c.contacto_id = tpc.contacto_id
     WHERE tpc.paso_id = ${stepId} AND tpc.es_principal = TRUE
-  `) as any[];
+  `) as any[]);
+  const principal = reportPrincipal || stepPrincipal;
   const session = await getSessionUser(request, sql);
   if (!session) return { allowed: false, principalName: principal?.name ?? null };
   if (session.isAdmin) return { allowed: true, principalName: principal?.name ?? null };
@@ -962,13 +974,16 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
            wp.paso_id AS "stepId", wp.nombre AS "stepName", wp.asunto_correo AS "emailSubjectBase",
            wp.palabras_clave AS "keywordsRaw", wp.requiere_revision AS "requiresReview",
            i.numero_secuencia AS "sequenceNumber", i.updated_at AS "stepStartedAt",
-           principal.nombre AS "principalName", principal.email AS "principalEmail"
+           COALESCE(reportPrincipal.nombre, principal.nombre) AS "principalName",
+           COALESCE(reportPrincipal.email, principal.email) AS "principalEmail"
     FROM informes i
     JOIN tipo_informe_pasos wp ON wp.paso_id = i.paso_actual_id
     JOIN proyectos p ON p.proyecto_id = i.proyecto_id
     LEFT JOIN informe_pasos_instancia ipi ON ipi.informe_id = i.informe_id AND ipi.paso_id = i.paso_actual_id
     LEFT JOIN tipo_informe_paso_contacto tpc ON tpc.paso_id = wp.paso_id AND tpc.es_principal = TRUE
     LEFT JOIN contactos principal ON principal.contacto_id = tpc.contacto_id
+    LEFT JOIN informe_contacto ic ON ic.informe_id = i.informe_id AND ic.es_principal = TRUE
+    LEFT JOIN contactos reportPrincipal ON reportPrincipal.contacto_id = ic.contacto_id
     WHERE i.flujo_completado = FALSE AND i.paso_actual_id IS NOT NULL
       AND (ipi.estado_etapa IS NULL OR ipi.estado_etapa <> 'EN_REVISION')
       AND (wp.requiere_revision = FALSE OR ipi.correo_gmail_id IS NULL)
@@ -1315,7 +1330,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
         WHERE i.informe_id = ${reportId}
       `) as any[];
       if (advanceCurrentStep?.requiresReview) {
-        const { allowed, principalName } = await canActOnReviewStep(request, sql, advanceCurrentStep.id);
+        const { allowed, principalName } = await canActOnReviewStep(request, sql, advanceCurrentStep.id, reportId);
         if (!allowed) {
           return response.status(403).json({ data: null, meta: {}, errors: [`Este paso requiere revisión -- solo ${principalName || 'el responsable principal'} (o un administrador) puede dar el visto bueno.`] });
         }
@@ -1451,7 +1466,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       // su Principal (o un admin) puede generar la observación -- no
       // cualquiera con edición en Informes, como en el resto de los pasos.
       if (isReturning && currentStep.requiresReview) {
-        const { allowed, principalName } = await canActOnReviewStep(request, sql, report.currentStepId);
+        const { allowed, principalName } = await canActOnReviewStep(request, sql, report.currentStepId, reportId);
         if (!allowed) {
           return response.status(403).json({ data: null, meta: {}, errors: [`Este paso requiere revisión -- solo ${principalName || 'el responsable principal'} (o un administrador) puede generar la observación.`] });
         }
@@ -1576,18 +1591,38 @@ export default async function handler(request: VercelRequest, response: VercelRe
       `;
       responseMeta = { undone: true };
     } else if (action === 'setPrimaryContact') {
-      const { contactId } = request.body ?? {};
+      // La persona a cargo de este informe puede ser cualquier contacto del
+      // sistema, no solo alguien ya vinculado como responsable -- si no
+      // estaba vinculado, se agrega de una vez como responsable y principal.
+      // Esta persona reemplaza al Principal configurado en Listas Maestras
+      // para TODOS los pasos de este informe puntual (ver canActOnReviewStep
+      // y el barrido de detección de correos).
+      if (!(await canEditModuleRequest(request, sql, 'reports'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Informes.'] });
+      }
+      const { contactId, userName } = request.body ?? {};
       const contactIdNum = Number(contactId);
       if (!Number.isInteger(contactIdNum) || contactIdNum <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Falta el id del contacto.'] });
       }
-      const assigned = (await sql`
-        SELECT contacto_id FROM informe_contacto WHERE informe_id = ${reportId} AND contacto_id = ${contactIdNum}
-      `) as any[];
-      if (!assigned[0]) {
-        return response.status(400).json({ data: null, meta: {}, errors: ['Ese contacto no está entre los responsables de este informe.'] });
+      const [contactExists] = (await sql`SELECT contacto_id, nombre FROM contactos WHERE contacto_id = ${contactIdNum}`) as any[];
+      if (!contactExists) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Ese contacto no existe.'] });
       }
-      await sql`UPDATE informe_contacto SET es_principal = (contacto_id = ${contactIdNum}) WHERE informe_id = ${reportId}`;
+      await sql`
+        INSERT INTO informe_contacto (informe_id, contacto_id, es_principal)
+        VALUES (${reportId}, ${contactIdNum}, TRUE)
+        ON CONFLICT (informe_id, contacto_id) DO UPDATE SET es_principal = TRUE
+      `;
+      await sql`UPDATE informe_contacto SET es_principal = FALSE WHERE informe_id = ${reportId} AND contacto_id <> ${contactIdNum}`;
+      await sql`
+        INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
+        VALUES (
+          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), ${userName || 'Usuario'},
+          ${`Se asignó a ${contactExists.nombre} como persona a cargo de este informe.`}
+        )
+      `;
     } else if (action === 'searchCandidateEmails') {
       // Cuando el asunto exacto no calzó (ej. alguien reenvió con "Fwd: ..."
       // en vez del asunto codificado), esto ofrece correos parecidos de los
@@ -1625,7 +1660,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
         WHERE i.informe_id = ${reportId}
       `) as any[];
       if (confirmCurrentStep?.requiresReview) {
-        const { allowed, principalName } = await canActOnReviewStep(request, sql, confirmCurrentStep.id);
+        const { allowed, principalName } = await canActOnReviewStep(request, sql, confirmCurrentStep.id, reportId);
         if (!allowed) {
           return response.status(403).json({ data: null, meta: {}, errors: [`Este paso requiere revisión -- solo ${principalName || 'el responsable principal'} (o un administrador) puede dar el visto bueno.`] });
         }
