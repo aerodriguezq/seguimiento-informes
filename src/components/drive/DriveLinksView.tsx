@@ -203,7 +203,7 @@ export const DriveLinksView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
-  const [copyProgress, setCopyProgress] = useState({ percent: 0, processed: 0, total: 0, phase: '' });
+  const [copyProgress, setCopyProgress] = useState({ percent: 0, processed: 0, total: 0, phase: '', scanning: false });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [driveSession, setDriveSession] = useState<{ connected: boolean; email: string | null }>({ connected: false, email: null });
   const [copyLog, setCopyLog] = useState<DriveCopyLogEntry[] | null>(null);
@@ -218,7 +218,7 @@ export const DriveLinksView: React.FC = () => {
   // Estado de "Validar" -- completamente aparte del de "Copiar": corre su
   // propio job de solo lectura, con su propio log en vivo y resumen final.
   const [isValidating, setIsValidating] = useState(false);
-  const [validateProgress, setValidateProgress] = useState({ percent: 0, processed: 0, total: 0, phase: '' });
+  const [validateProgress, setValidateProgress] = useState({ percent: 0, processed: 0, total: 0, phase: '', scanning: false });
   const [validateMessage, setValidateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [validateLog, setValidateLog] = useState<DriveCopyLogEntry[] | null>(null);
   const [validateLiveLog, setValidateLiveLog] = useState<ValidateRecentItem[]>([]);
@@ -336,10 +336,20 @@ export const DriveLinksView: React.FC = () => {
           setLiveLog((prev) => [...prev, ...result.recentItems]);
         }
 
-        {
-          // El total crece a medida que se descubren más carpetas -- no se
-          // conoce de antemano, así que el porcentaje es solo una
-          // referencia aproximada mientras la copia sigue en curso.
+        if (result.scanning) {
+          // Antes de copiar nada se mapea TODO el árbol de origen -- el
+          // total todavía no se conoce del todo, así que no se muestra un
+          // porcentaje de avance real (se vería saltar de forma rara). Una
+          // vez que el mapeo termina, el total ya queda fijo para toda la
+          // copia que sigue.
+          setCopyProgress({
+            percent: 5,
+            processed: 0,
+            total: result.total ?? 0,
+            phase: `Mapeando la carpeta origen... ${result.total ?? 0} elemento(s) encontrados`,
+            scanning: true,
+          });
+        } else {
           // "total" cuenta carpetas Y archivos (toda fila de drive_copy_items),
           // así que "processed" tiene que contar lo mismo -- antes solo sumaba
           // archivos, y con una copia reanudada desde una validación (donde
@@ -352,6 +362,7 @@ export const DriveLinksView: React.FC = () => {
             processed,
             total,
             phase: result.done ? 'Copia completada' : `Copiando... ${processed} de ${total} elemento(s) procesados`,
+            scanning: false,
           });
         }
 
@@ -414,14 +425,19 @@ export const DriveLinksView: React.FC = () => {
       if (response.ok) {
         const result = payload.data;
         if (Array.isArray(result.recentItems)) setLiveLog(result.recentItems);
-        const processed = (result.copiedFiles ?? 0) + (result.skippedFiles ?? 0) + (result.createdFolders ?? 0) + (result.reusedFolders ?? 0) + (result.errors ?? 0);
-        const total = result.total ?? processed;
-        setCopyProgress({
-          percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
-          processed,
-          total,
-          phase: `Retomando... ${processed} de ${total} elemento(s) procesados`,
-        });
+        if (result.scanning) {
+          setCopyProgress({ percent: 5, processed: 0, total: result.total ?? 0, phase: `Retomando el mapeo... ${result.total ?? 0} elemento(s) encontrados`, scanning: true });
+        } else {
+          const processed = (result.copiedFiles ?? 0) + (result.skippedFiles ?? 0) + (result.createdFolders ?? 0) + (result.reusedFolders ?? 0) + (result.errors ?? 0);
+          const total = result.total ?? processed;
+          setCopyProgress({
+            percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
+            processed,
+            total,
+            phase: `Retomando... ${processed} de ${total} elemento(s) procesados`,
+            scanning: false,
+          });
+        }
         if (result.done || result.cancelled) {
           clearSavedCopyJob();
           setIsCopying(false);
@@ -446,7 +462,7 @@ export const DriveLinksView: React.FC = () => {
     // tarde no lo confunda con uno propio.
     clearSavedValidateJob();
     setIsCopying(true);
-    setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Copiando lo que falta...' });
+    setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Copiando lo que falta...', scanning: false });
     setMessage(null);
     setCopyLog(null);
     setLiveLog([]);
@@ -455,7 +471,7 @@ export const DriveLinksView: React.FC = () => {
 
   const copyFolder = async () => {
     setIsCopying(true);
-    setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando copia...' });
+    setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando copia...', scanning: false });
     setMessage(null);
     setCopyLog(null);
     if (driveSession.connected) {
@@ -611,7 +627,15 @@ export const DriveLinksView: React.FC = () => {
           setValidateLiveLog((prev) => [...prev, ...result.recentItems]);
         }
 
-        {
+        if (result.scanning) {
+          setValidateProgress({
+            percent: 5,
+            processed: 0,
+            total: result.total ?? 0,
+            phase: `Mapeando la carpeta origen... ${result.total ?? 0} elemento(s) encontrados`,
+            scanning: true,
+          });
+        } else {
           const processed = (result.missingFiles ?? 0) + (result.missingFolders ?? 0) + (result.existingFiles ?? 0) + (result.existingFolders ?? 0) + (result.errors ?? 0);
           const total = result.total ?? processed;
           setValidateProgress({
@@ -619,6 +643,7 @@ export const DriveLinksView: React.FC = () => {
             processed,
             total,
             phase: result.done ? 'Validación completada' : `Validando... ${processed} de ${total} elemento(s) revisados`,
+            scanning: false,
           });
         }
 
@@ -675,14 +700,19 @@ export const DriveLinksView: React.FC = () => {
       if (response.ok) {
         const result = payload.data;
         if (Array.isArray(result.recentItems)) setValidateLiveLog(result.recentItems);
-        const processed = (result.missingFiles ?? 0) + (result.missingFolders ?? 0) + (result.existingFiles ?? 0) + (result.existingFolders ?? 0) + (result.errors ?? 0);
-        const total = result.total ?? processed;
-        setValidateProgress({
-          percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
-          processed,
-          total,
-          phase: `Retomando... ${processed} de ${total} elemento(s) revisados`,
-        });
+        if (result.scanning) {
+          setValidateProgress({ percent: 5, processed: 0, total: result.total ?? 0, phase: `Retomando el mapeo... ${result.total ?? 0} elemento(s) encontrados`, scanning: true });
+        } else {
+          const processed = (result.missingFiles ?? 0) + (result.missingFolders ?? 0) + (result.existingFiles ?? 0) + (result.existingFolders ?? 0) + (result.errors ?? 0);
+          const total = result.total ?? processed;
+          setValidateProgress({
+            percent: result.done ? 100 : total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 5,
+            processed,
+            total,
+            phase: `Retomando... ${processed} de ${total} elemento(s) revisados`,
+            scanning: false,
+          });
+        }
         if (result.done || result.cancelled) {
           clearSavedValidateJob();
           setIsValidating(false);
@@ -697,7 +727,7 @@ export const DriveLinksView: React.FC = () => {
 
   const validateFolder = async (force = false) => {
     setIsValidating(true);
-    setValidateProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando validación...' });
+    setValidateProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando validación...', scanning: false });
     setValidateMessage(null);
     setValidateLog(null);
     setCompletedValidateJobId(null);
@@ -790,12 +820,16 @@ export const DriveLinksView: React.FC = () => {
             <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3" role="status">
               <div className="flex items-center justify-between text-[11px] font-bold text-indigo-900">
                 <span>{validateProgress.phase}</span>
-                <span>{validateProgress.percent}%</span>
+                <span>{validateProgress.scanning ? '...' : `${validateProgress.percent}%`}</span>
               </div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
                 <div className="h-full rounded-full bg-indigo-600 transition-all duration-500" style={{ width: `${Math.max(validateProgress.percent, 3)}%` }} />
               </div>
-              <p className="mt-2 text-[11px] text-indigo-800">{validateProgress.processed} de {validateProgress.total || '...'} elementos revisados</p>
+              <p className="mt-2 text-[11px] text-indigo-800">
+                {validateProgress.scanning
+                  ? 'Mapeando el árbol de origen antes de empezar a validar...'
+                  : `${validateProgress.processed} de ${validateProgress.total || '...'} elementos revisados`}
+              </p>
 
               {validateLiveLog.length > 0 && (
                 <div className="mt-3 border-t border-indigo-100 pt-2.5">
@@ -853,12 +887,16 @@ export const DriveLinksView: React.FC = () => {
             <div className="mt-4 rounded-lg border border-teal-100 bg-teal-50 p-3" role="status">
               <div className="flex items-center justify-between text-[11px] font-bold text-teal-900">
                 <span>{copyProgress.phase}</span>
-                <span>{copyProgress.percent}%</span>
+                <span>{copyProgress.scanning ? '...' : `${copyProgress.percent}%`}</span>
               </div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
                 <div className="h-full rounded-full bg-teal-600 transition-all duration-500" style={{ width: `${Math.max(copyProgress.percent, 3)}%` }} />
               </div>
-              <p className="mt-2 text-[11px] text-teal-800">{copyProgress.processed} de {copyProgress.total || '...'} elementos procesados</p>
+              <p className="mt-2 text-[11px] text-teal-800">
+                {copyProgress.scanning
+                  ? 'Mapeando el árbol de origen antes de empezar a copiar...'
+                  : `${copyProgress.processed} de ${copyProgress.total || '...'} elementos procesados`}
+              </p>
 
               {liveLog.length > 0 && (
                 <div className="mt-3 border-t border-teal-100 pt-2.5">

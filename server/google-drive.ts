@@ -255,17 +255,97 @@ function createKeyedLock() {
 
 const COPY_CONCURRENCY = 6;
 const VALIDATE_CONCURRENCY = 8;
+const SCAN_CONCURRENCY = 10;
+const SCAN_BATCH_SELECT_SIZE = 40;
+
+// Mapea TODO el árbol de origen antes de copiar o validar nada -- así el
+// total que ve la persona es el real desde el primer momento, en vez de ir
+// creciendo a medida que la copia descubre más carpetas sobre la marcha
+// (antes pasaba, y el "1676 de 7034" de golpe pasaba a "1976 de 7931":
+// mismo trabajo hecho, pero el total se movía y parecía que algo andaba
+// mal). Solo lee -- nunca toca destino ni copia nada, solo lista hijos de
+// origen y los encola como filas "pending" listas para cuando empiece la
+// copia/validación real. Reanudable igual que las otras pasadas: retoma por
+// las carpetas que todavía no tengan `scanned = TRUE`.
+export async function scanSourceItemsBatch(
+  sql: SqlClient,
+  accessToken: string,
+  jobId: string,
+  deadline: number,
+  isCancelled: () => boolean = () => false,
+): Promise<{ done: boolean; cancelled: boolean }> {
+  while (true) {
+    if (isCancelled()) return { done: false, cancelled: true };
+    if (Date.now() > deadline) return { done: false, cancelled: false };
+
+    const folders = (await sql`
+      SELECT item_id AS id, source_id AS "sourceId", relative_path AS "relativePath"
+      FROM drive_copy_items
+      WHERE job_id = ${jobId} AND is_folder = TRUE AND scanned = FALSE
+      ORDER BY item_id ASC
+      LIMIT ${SCAN_BATCH_SELECT_SIZE}
+    `) as any[];
+
+    if (folders.length === 0) return { done: true, cancelled: false };
+
+    let stopped = false;
+    let stoppedByCancel = false;
+
+    await runPool(folders, SCAN_CONCURRENCY, () => stopped, async (folder) => {
+      try {
+        const sourceChildren = await listDriveChildren(accessToken, folder.sourceId);
+        if (sourceChildren.length > 0) {
+          const rows = sourceChildren.map((child) => ({
+            source_id: child.id,
+            parent_item_id: folder.id,
+            is_folder: child.mimeType === FOLDER_MIME,
+            name: child.name,
+            mime_type: child.mimeType,
+            relative_path: `${folder.relativePath}/${child.name}`,
+          }));
+          await sql`
+            INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
+            SELECT ${jobId}, r.source_id, r.parent_item_id, r.is_folder, r.name, r.mime_type, r.relative_path
+            FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
+              AS r(source_id text, parent_item_id bigint, is_folder boolean, name text, mime_type text, relative_path text)
+          `;
+        }
+        await sql`UPDATE drive_copy_items SET scanned = TRUE, updated_at = NOW() WHERE item_id = ${folder.id}`;
+      } catch (error) {
+        // No se puede dejar una carpeta sin marcar -- quedaría reintentándose
+        // para siempre y el mapeo nunca terminaría de completar. Se marca
+        // "scanned" igual (con lo que sí se alcanzó a ver) y queda constancia
+        // del error en error_message; la copia/validación real, cuando le
+        // llegue el turno, va a volver a intentar listar sus hijos y ahí sí
+        // puede fallar visiblemente si el problema persiste.
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        await sql`UPDATE drive_copy_items SET scanned = TRUE, error_message = ${`No se pudo mapear: ${errorMessage}`}, updated_at = NOW() WHERE item_id = ${folder.id}`;
+      }
+
+      if (isCancelled()) {
+        stopped = true;
+        stoppedByCancel = true;
+      } else if (Date.now() > deadline) {
+        stopped = true;
+      }
+    });
+
+    if (stoppedByCancel) return { done: false, cancelled: true };
+    if (stopped) return { done: false, cancelled: false };
+  }
+}
 
 const COPY_BATCH_SELECT_SIZE = 25;
 
 export type DriveCopyRecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'copied' | 'skipped' | 'error'; errorMessage?: string };
 
-// Copia Y descubre en el mismo paso -- nunca lee el árbol completo de
-// origen por adelantado. Cada vez que resuelve una carpeta, de una vez
-// lista y encola sus hijos directos, así que el primer archivo se copia
-// apenas se conoce, sin esperar a saber cuántos hay en total. Toma filas
-// "pending" cuyo padre ya se resolvió en destino (o que son la raíz), las
-// procesa, y repite hasta vaciar lo disponible o toparse con
+// Copia: para cuando ya se mapeó todo de antemano (fase "scanning" antes de
+// esta), lo normal es que cada carpeta ya llegue con sus hijos conocidos
+// (`scanned = TRUE`) y este paso no tenga que descubrir nada -- el bloque de
+// descubrimiento de abajo queda solo como red de seguridad (ej. si algo se
+// saltó el mapeo). Toma filas "pending" cuyo padre ya se resolvió en
+// destino (o que son la raíz), las procesa, y repite hasta vaciar lo
+// disponible o toparse con
 // `deadline`/cancelación. Si algo se rompe a mitad de camino, lo único que
 // se pierde es el lote en curso -- la siguiente invocación retoma
 // consultando qué filas siguen "pending", sin reconstruir ni reenviar nada.
@@ -292,7 +372,7 @@ export async function copyDriveItemsBatch(
     const items = (await sql`
       SELECT ci.item_id AS id, ci.source_id AS "sourceId", ci.parent_item_id AS "parentItemId",
         ci.is_folder AS "isFolder", ci.name, ci.mime_type AS "mimeType", ci.relative_path AS "relativePath",
-        parent.dest_id AS "parentDestId"
+        ci.scanned AS "scanned", parent.dest_id AS "parentDestId"
       FROM drive_copy_items ci
       LEFT JOIN drive_copy_items parent ON parent.item_id = ci.parent_item_id
       WHERE ci.job_id = ${jobId} AND ci.status = 'pending'
@@ -344,46 +424,48 @@ export async function copyDriveItemsBatch(
           });
           if (reused) summary.reusedFolders++;
           else summary.createdFolders++;
-          await sql`UPDATE drive_copy_items SET status = 'copied', dest_id = ${destFolder.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
+          await sql`UPDATE drive_copy_items SET status = 'copied', dest_id = ${destFolder.id}, scanned = TRUE, updated_at = NOW() WHERE item_id = ${item.id}`;
           recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'copied' });
 
-          // Recién ahora que la carpeta quedó resuelta en destino se listan
-          // sus hijos y se encolan como filas "pending" -- el descubrimiento
-          // avanza al mismo ritmo que la copia, nunca por adelantado. Esto va
-          // en su propio try/catch: si falla, la carpeta YA quedó copiada (no
-          // hay que deshacer eso) -- solo se deja constancia de que no se
-          // pudo ver su contenido, sin tocar el estado 'copied' de la fila
-          // original.
-          try {
-            const sourceChildren = await listDriveChildren(accessToken, item.sourceId);
-            if (sourceChildren.length > 0) {
-              // Una sola ida y vuelta a la base para todos los hijos de esta
-              // carpeta -- antes era un INSERT por hijo, y una carpeta con
-              // cientos de archivos directos por sí sola podía agotar el
-              // tiempo de la invocación antes de terminar de encolarlos.
-              const rows = sourceChildren.map((child) => ({
-                source_id: child.id,
-                parent_item_id: item.id,
-                is_folder: child.mimeType === FOLDER_MIME,
-                name: child.name,
-                mime_type: child.mimeType,
-                relative_path: `${item.relativePath}/${child.name}`,
-              }));
+          // Si la fase de mapeo (scanSourceItemsBatch, antes de empezar a
+          // copiar) ya vio esta carpeta, sus hijos YA están encolados -- no
+          // hay que volver a listarlos. Este bloque solo corre como red de
+          // seguridad para una carpeta que por lo que sea llegó sin mapear.
+          // Va en su propio try/catch: si falla, la carpeta YA quedó
+          // copiada (no hay que deshacer eso) -- solo se deja constancia de
+          // que no se pudo ver su contenido, sin tocar el estado 'copied'.
+          if (!item.scanned) {
+            try {
+              const sourceChildren = await listDriveChildren(accessToken, item.sourceId);
+              if (sourceChildren.length > 0) {
+                // Una sola ida y vuelta a la base para todos los hijos de esta
+                // carpeta -- antes era un INSERT por hijo, y una carpeta con
+                // cientos de archivos directos por sí sola podía agotar el
+                // tiempo de la invocación antes de terminar de encolarlos.
+                const rows = sourceChildren.map((child) => ({
+                  source_id: child.id,
+                  parent_item_id: item.id,
+                  is_folder: child.mimeType === FOLDER_MIME,
+                  name: child.name,
+                  mime_type: child.mimeType,
+                  relative_path: `${item.relativePath}/${child.name}`,
+                }));
+                await sql`
+                  INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
+                  SELECT ${jobId}, r.source_id, r.parent_item_id, r.is_folder, r.name, r.mime_type, r.relative_path
+                  FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
+                    AS r(source_id text, parent_item_id bigint, is_folder boolean, name text, mime_type text, relative_path text)
+                `;
+              }
+            } catch (discoveryError) {
+              const errorMessage = discoveryError instanceof Error ? discoveryError.message : String(discoveryError);
+              summary.errors++;
               await sql`
-                INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
-                SELECT ${jobId}, r.source_id, r.parent_item_id, r.is_folder, r.name, r.mime_type, r.relative_path
-                FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
-                  AS r(source_id text, parent_item_id bigint, is_folder boolean, name text, mime_type text, relative_path text)
+                INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path, status, error_message, scanned)
+                VALUES (${jobId}, ${item.sourceId}, ${item.parentItemId}, true, ${item.name}, ${item.mimeType}, ${item.relativePath}, 'error', ${`No se pudo listar su contenido: ${errorMessage}`}, true)
               `;
+              recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'error', errorMessage: `No se pudo listar su contenido: ${errorMessage}` });
             }
-          } catch (discoveryError) {
-            const errorMessage = discoveryError instanceof Error ? discoveryError.message : String(discoveryError);
-            summary.errors++;
-            await sql`
-              INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path, status, error_message)
-              VALUES (${jobId}, ${item.sourceId}, ${item.parentItemId}, true, ${item.name}, ${item.mimeType}, ${item.relativePath}, 'error', ${`No se pudo listar su contenido: ${errorMessage}`})
-            `;
-            recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'error', errorMessage: `No se pudo listar su contenido: ${errorMessage}` });
           }
         } else {
           const lockKey = `${destParentId}:f:${item.name}:${item.mimeType}`;
@@ -440,21 +522,23 @@ async function discoverSourceChildren(
   item: { id: number; sourceId: string; relativePath: string },
 ): Promise<void> {
   const sourceChildren = await listDriveChildren(accessToken, item.sourceId);
-  if (sourceChildren.length === 0) return;
-  const rows = sourceChildren.map((child) => ({
-    source_id: child.id,
-    parent_item_id: item.id,
-    is_folder: child.mimeType === FOLDER_MIME,
-    name: child.name,
-    mime_type: child.mimeType,
-    relative_path: `${item.relativePath}/${child.name}`,
-  }));
-  await sql`
-    INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
-    SELECT ${jobId}, r.source_id, r.parent_item_id, r.is_folder, r.name, r.mime_type, r.relative_path
-    FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
-      AS r(source_id text, parent_item_id bigint, is_folder boolean, name text, mime_type text, relative_path text)
-  `;
+  if (sourceChildren.length > 0) {
+    const rows = sourceChildren.map((child) => ({
+      source_id: child.id,
+      parent_item_id: item.id,
+      is_folder: child.mimeType === FOLDER_MIME,
+      name: child.name,
+      mime_type: child.mimeType,
+      relative_path: `${item.relativePath}/${child.name}`,
+    }));
+    await sql`
+      INSERT INTO drive_copy_items (job_id, source_id, parent_item_id, is_folder, name, mime_type, relative_path)
+      SELECT ${jobId}, r.source_id, r.parent_item_id, r.is_folder, r.name, r.mime_type, r.relative_path
+      FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
+        AS r(source_id text, parent_item_id bigint, is_folder boolean, name text, mime_type text, relative_path text)
+    `;
+  }
+  await sql`UPDATE drive_copy_items SET scanned = TRUE, updated_at = NOW() WHERE item_id = ${item.id}`;
 }
 
 export type DriveValidateSummary = { missingFiles: number; missingFolders: number; existingFiles: number; existingFolders: number; errors: number };
@@ -493,7 +577,7 @@ export async function validateDriveItemsBatch(
     const items = (await sql`
       SELECT ci.item_id AS id, ci.source_id AS "sourceId", ci.parent_item_id AS "parentItemId",
         ci.is_folder AS "isFolder", ci.name, ci.mime_type AS "mimeType", ci.relative_path AS "relativePath",
-        parent.dest_id AS "parentDestId", parent.status AS "parentStatus"
+        ci.scanned AS "scanned", parent.dest_id AS "parentDestId", parent.status AS "parentStatus"
       FROM drive_copy_items ci
       LEFT JOIN drive_copy_items parent ON parent.item_id = ci.parent_item_id
       WHERE ci.job_id = ${jobId} AND ci.status = 'pending'
@@ -532,7 +616,7 @@ export async function validateDriveItemsBatch(
           if (item.isFolder) summary.missingFolders++; else summary.missingFiles++;
           await sql`UPDATE drive_copy_items SET status = 'missing', updated_at = NOW() WHERE item_id = ${item.id}`;
           recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: !!item.isFolder, status: 'missing' });
-          if (item.isFolder) await discoverSourceChildren(sql, accessToken, jobId, item);
+          if (item.isFolder && !item.scanned) await discoverSourceChildren(sql, accessToken, jobId, item);
         } else if (item.isFolder) {
           const siblings = await getDestChildren(destParentId!, item.parentItemId);
           const existing = siblings.find((f) => f.name === item.name && f.mimeType === FOLDER_MIME);
@@ -545,7 +629,7 @@ export async function validateDriveItemsBatch(
             await sql`UPDATE drive_copy_items SET status = 'missing', updated_at = NOW() WHERE item_id = ${item.id}`;
             recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'missing' });
           }
-          await discoverSourceChildren(sql, accessToken, jobId, item);
+          if (!item.scanned) await discoverSourceChildren(sql, accessToken, jobId, item);
         } else {
           const siblings = await getDestChildren(destParentId!, item.parentItemId);
           const existing = siblings.find((f) => f.name === item.name && f.mimeType === item.mimeType);

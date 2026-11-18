@@ -5,6 +5,7 @@ import {
   getDriveAccessToken,
   copyDriveItemsBatch,
   validateDriveItemsBatch,
+  scanSourceItemsBatch,
   seedDriveCopyRoot,
   emptyDriveCopySummary,
   emptyDriveValidateSummary,
@@ -58,6 +59,41 @@ async function getMostRecentAccessToken(sql: SqlClient): Promise<string | null> 
   return getDriveAccessToken(session[0].token_json);
 }
 
+// Antes de copiar o validar nada, un job nuevo arranca en fase
+// "scanning_copying"/"scanning_validating": mapea TODO el árbol de origen
+// primero (scanSourceItemsBatch), para que el total mostrado sea el real
+// desde el principio en vez de ir creciendo sobre la marcha. Esta función
+// concentra esa transición -- si el mapeo termina con tiempo de sobra, sigue
+// de una vez con la copia/validación real en la MISMA invocación, en vez de
+// hacer esperar otra ida y vuelta solo para eso.
+async function advanceJob(
+  sql: SqlClient,
+  accessToken: string,
+  jobId: string,
+  job: { phase: string; summary: unknown; destinationRootId: string },
+  deadline: number,
+  isCancelled: () => boolean,
+) {
+  let phase = job.phase;
+  if (phase === 'scanning_copying' || phase === 'scanning_validating') {
+    const scanResult = await scanSourceItemsBatch(sql, accessToken, jobId, deadline, isCancelled);
+    if (scanResult.cancelled) return { kind: 'scanning' as const, done: false, cancelled: true };
+    if (!scanResult.done) return { kind: 'scanning' as const, done: false, cancelled: false };
+    phase = phase === 'scanning_validating' ? 'validating' : 'copying';
+    await sql`UPDATE drive_copy_jobs SET phase = ${phase}, updated_at = NOW() WHERE job_id = ${jobId}`;
+    if (isCancelled() || Date.now() > deadline) {
+      return { kind: 'scanning' as const, done: false, cancelled: isCancelled() };
+    }
+  }
+
+  if (phase === 'validating') {
+    const result = await validateDriveItemsBatch(sql, accessToken, jobId, job.destinationRootId, job.summary as DriveValidateSummary, deadline, isCancelled);
+    return { kind: 'validate' as const, ...result };
+  }
+  const result = await copyDriveItemsBatch(sql, accessToken, jobId, job.destinationRootId, job.summary as DriveCopySummary, deadline, isCancelled);
+  return { kind: 'copy' as const, ...result };
+}
+
 // Para que una copia (o validación) siga avanzando aunque la persona cierre
 // la pestaña, apague el computador o pierda la sesión -- GitHub Actions
 // "toca la puerta" cada 15 min (igual que los demás barridos) y esto
@@ -81,11 +117,14 @@ async function handleDriveCopySweep(sql: SqlClient): Promise<{ jobsProcessed: nu
 
   for (const job of runningJobs) {
     if (Date.now() > deadline) break;
-    const isValidate = job.phase === 'validating';
-    const result = isValidate
-      ? await validateDriveItemsBatch(sql, accessToken, job.id, job.destinationRootId, job.summary as DriveValidateSummary, deadline)
-      : await copyDriveItemsBatch(sql, accessToken, job.id, job.destinationRootId, job.summary as DriveCopySummary, deadline);
+    const result = await advanceJob(sql, accessToken, job.id, job, deadline, () => false);
     jobsProcessed++;
+    if (result.kind === 'scanning') {
+      // Sigue 'running' tal cual -- el mapeo mismo ya actualiza su propio
+      // progreso fila por fila; el siguiente tick retoma donde quedó, o si
+      // ya terminó, pasa derecho a copiar/validar.
+      continue;
+    }
     if (result.done) {
       // `phase` NO se pisa a 'done' -- se deja como 'validating'/'copying'
       // (qué tipo de job era) para que el caché de un día de Validar lo
@@ -164,7 +203,8 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       `) as any[];
       return response.status(200).json({
         data: {
-          jobId, phase: statusJob.phase, cancelled: statusJob.status === 'cancelled', done: statusJob.status === 'done',
+          jobId, phase: statusJob.phase, scanning: String(statusJob.phase).startsWith('scanning'),
+          cancelled: statusJob.status === 'cancelled', done: statusJob.status === 'done',
           total: Number(total), ...statusJob.summary, recentItems: doneRows,
         },
         meta: {}, errors: [],
@@ -260,13 +300,13 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       }
 
       jobId = crypto.randomUUID();
-      // Solo se siembra la fila raíz -- nunca se lee el árbol completo por
-      // adelantado. El resto se va descubriendo lote a lote a medida que se
-      // copia (o se valida), en server/google-drive.ts.
+      // Solo se siembra la fila raíz -- el resto del árbol lo mapea la fase
+      // "scanning_*" de abajo (scanSourceItemsBatch) antes de copiar o
+      // validar nada de verdad.
       await sql`
         INSERT INTO drive_copy_jobs (job_id, status, phase, scan_queue, summary, log, source_root_id, destination_root_id)
         VALUES (
-          ${jobId}, 'running', ${isValidate ? 'validating' : 'copying'}, '[]'::jsonb,
+          ${jobId}, 'running', ${isValidate ? 'scanning_validating' : 'scanning_copying'}, '[]'::jsonb,
           ${JSON.stringify(isValidate ? emptyDriveValidateSummary() : emptyDriveCopySummary())}::jsonb, '[]'::jsonb, ${sourceId}, ${destinationId}
         )
       `;
@@ -288,11 +328,29 @@ async function handler(request: VercelRequest, response: VercelResponse) {
     }
 
     const deadline = Date.now() + CHUNK_BUDGET_MS;
-    const isValidate = job.phase === 'validating';
-    const nextPhase = isValidate ? 'validating' : 'copying';
-    const result = isValidate
-      ? await validateDriveItemsBatch(sql, accessToken, jobId, job.destinationRootId, job.summary as DriveValidateSummary, deadline, () => connectionClosed)
-      : await copyDriveItemsBatch(sql, accessToken, jobId, job.destinationRootId, job.summary as DriveCopySummary, deadline, () => connectionClosed);
+    const result = await advanceJob(sql, accessToken, jobId, job, deadline, () => connectionClosed);
+
+    if (result.kind === 'scanning') {
+      if (result.cancelled) {
+        await sql`UPDATE drive_copy_jobs SET status = 'cancelled', phase = 'cancelled', updated_at = NOW() WHERE job_id = ${jobId}`;
+        const { total: cancelledTotal, log: cancelledLog } = await buildJobLog(sql, jobId);
+        return response.status(200).json({
+          data: { jobId, done: true, cancelled: true, scanning: true, total: cancelledTotal, log: cancelledLog, recentItems: [] },
+          meta: {}, errors: [],
+        });
+      }
+      // El mapeo previo (scanSourceItemsBatch) ya va guardando su propio
+      // avance fila por fila -- acá solo se reporta cuántos elementos de
+      // origen se alcanzaron a ver hasta ahora, nunca un porcentaje (el
+      // total real todavía no se conoce del todo mientras sigue mapeando).
+      const [{ total: scanTotal }] = (await sql`SELECT COUNT(*) AS total FROM drive_copy_items WHERE job_id = ${jobId}`) as any[];
+      return response.status(200).json({
+        data: { jobId, done: false, cancelled: false, phase: job.phase, scanning: true, total: Number(scanTotal), recentItems: [] },
+        meta: {}, errors: [],
+      });
+    }
+
+    const nextPhase = result.kind === 'validate' ? 'validating' : 'copying';
 
     if (result.cancelled) {
       await sql`
