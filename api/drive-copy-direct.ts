@@ -37,6 +37,30 @@ async function buildJobLog(sql: SqlClient, jobId: string): Promise<{ total: numb
   return { total: rows.length, log };
 }
 
+export type DriveTreeNode = { name: string; isFolder: boolean; relativePath: string; children: DriveTreeNode[] };
+
+// Arma el árbol anidado (no la lista plana de buildJobLog) de un job de
+// mapeo -- "Mapear origen"/"Mapear destino" lo muestran como HTML en
+// cascada en vez de una lista. parent_item_id ya trae la jerarquía real,
+// solo hay que agrupar cada fila bajo la de su padre.
+async function buildJobTree(sql: SqlClient, jobId: string): Promise<{ total: number; tree: DriveTreeNode[] }> {
+  const rows = (await sql`
+    SELECT item_id AS id, parent_item_id AS "parentId", name, is_folder AS "isFolder", relative_path AS "relativePath"
+    FROM drive_copy_items WHERE job_id = ${jobId} ORDER BY is_folder DESC, name ASC
+  `) as any[];
+  const byId = new Map<number, DriveTreeNode & { id: number; parentId: number | null }>();
+  for (const row of rows) {
+    byId.set(row.id, { id: row.id, parentId: row.parentId, name: row.name, isFolder: !!row.isFolder, relativePath: row.relativePath, children: [] });
+  }
+  const roots: DriveTreeNode[] = [];
+  for (const node of byId.values()) {
+    const parent = node.parentId !== null ? byId.get(node.parentId) : undefined;
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+  }
+  return { total: rows.length, tree: roots };
+}
+
 // Deja más margen con reintentos por límite de tasa de Drive; el troceo por
 // lotes (ver server/google-drive.ts, que copia y descubre a la vez) es lo
 // que de verdad evita que una copia grande choque contra este límite --
@@ -75,6 +99,16 @@ async function advanceJob(
   isCancelled: () => boolean,
 ) {
   let phase = job.phase;
+
+  // "Mapear origen"/"Mapear destino": mapeo puro, sin copiar ni validar
+  // nada después -- esta fase ES la fase final del job (nunca transiciona a
+  // 'copying'/'validating' como sí hace la fase de mapeo previo de abajo).
+  if (phase === 'scanning_only' || phase === 'scanning_destination') {
+    const scanResult = await scanSourceItemsBatch(sql, accessToken, jobId, deadline, isCancelled);
+    if (scanResult.cancelled) return { kind: 'mapping' as const, done: false, cancelled: true };
+    return { kind: 'mapping' as const, done: scanResult.done, cancelled: false };
+  }
+
   if (phase === 'scanning_copying' || phase === 'scanning_validating') {
     const scanResult = await scanSourceItemsBatch(sql, accessToken, jobId, deadline, isCancelled);
     if (scanResult.cancelled) return { kind: 'scanning' as const, done: false, cancelled: true };
@@ -123,6 +157,15 @@ async function handleDriveCopySweep(sql: SqlClient): Promise<{ jobsProcessed: nu
       // Sigue 'running' tal cual -- el mapeo mismo ya actualiza su propio
       // progreso fila por fila; el siguiente tick retoma donde quedó, o si
       // ya terminó, pasa derecho a copiar/validar.
+      continue;
+    }
+    if (result.kind === 'mapping') {
+      // "Mapear origen"/"Mapear destino" no tienen summary (no copian ni
+      // comparan nada) -- solo hace falta marcar 'done' cuando termina.
+      if (result.done) {
+        await sql`UPDATE drive_copy_jobs SET status = 'done', updated_at = NOW() WHERE job_id = ${job.id}`;
+        jobsCompleted++;
+      }
       continue;
     }
     if (result.done) {
@@ -263,6 +306,46 @@ async function handler(request: VercelRequest, response: VercelResponse) {
 
     const accessToken = await getDriveAccessToken(session.token_json);
 
+    // "Mapear origen"/"Mapear destino": mapeo de solo lectura de UNA sola
+    // carpeta (no hace falta el par origen+destino). Igual que Validar,
+    // reusa un mapeo de esa misma carpeta hecho en el último día en vez de
+    // recorrer Drive otra vez, salvo que pidan "force" (botón "Remapear").
+    if (!jobId && (action === 'mapSource' || action === 'mapDestination')) {
+      const isSource = action === 'mapSource';
+      const targetUrl = isSource ? request.body?.sourceUrl : request.body?.destinationUrl;
+      const targetId = folderIdFromUrl(targetUrl);
+      if (!targetId) {
+        return response.status(400).json({
+          data: null, meta: {}, errors: [`El enlace de ${isSource ? 'origen' : 'destino'} no es una carpeta Drive válida.`],
+        });
+      }
+      const mappingPhase = isSource ? 'scanning_only' : 'scanning_destination';
+
+      if (!request.body?.force) {
+        const [cached] = (await sql`
+          SELECT job_id AS id, updated_at AS "updatedAt"
+          FROM drive_copy_jobs
+          WHERE phase = ${mappingPhase} AND status = 'done'
+            AND source_root_id = ${targetId} AND updated_at > NOW() - INTERVAL '1 day'
+          ORDER BY updated_at DESC LIMIT 1
+        `) as any[];
+        if (cached) {
+          const { total: cachedTotal, tree } = await buildJobTree(sql, cached.id);
+          return response.status(200).json({
+            data: { jobId: cached.id, done: true, cancelled: false, mapping: true, total: cachedTotal, tree, cached: true, cachedAt: cached.updatedAt },
+            meta: {}, errors: [],
+          });
+        }
+      }
+
+      jobId = crypto.randomUUID();
+      await sql`
+        INSERT INTO drive_copy_jobs (job_id, status, phase, scan_queue, summary, log, source_root_id, destination_root_id)
+        VALUES (${jobId}, 'running', ${mappingPhase}, '[]'::jsonb, '{}'::jsonb, '[]'::jsonb, ${targetId}, NULL)
+      `;
+      await seedDriveCopyRoot(sql, jobId, accessToken, targetId);
+    }
+
     if (!jobId) {
       const sourceId = folderIdFromUrl(request.body?.sourceUrl);
       const destinationId = folderIdFromUrl(request.body?.destinationUrl);
@@ -329,6 +412,23 @@ async function handler(request: VercelRequest, response: VercelResponse) {
 
     const deadline = Date.now() + CHUNK_BUDGET_MS;
     const result = await advanceJob(sql, accessToken, jobId, job, deadline, () => connectionClosed);
+
+    if (result.kind === 'mapping') {
+      if (result.cancelled) {
+        await sql`UPDATE drive_copy_jobs SET status = 'cancelled', phase = 'cancelled', updated_at = NOW() WHERE job_id = ${jobId}`;
+        return response.status(200).json({ data: { jobId, done: true, cancelled: true, mapping: true, total: 0, tree: [] }, meta: {}, errors: [] });
+      }
+      if (result.done) {
+        await sql`UPDATE drive_copy_jobs SET status = 'done', updated_at = NOW() WHERE job_id = ${jobId}`;
+        const { total, tree } = await buildJobTree(sql, jobId);
+        return response.status(200).json({ data: { jobId, done: true, cancelled: false, mapping: true, total, tree }, meta: {}, errors: [] });
+      }
+      const [{ total: mapTotal }] = (await sql`SELECT COUNT(*) AS total FROM drive_copy_items WHERE job_id = ${jobId}`) as any[];
+      return response.status(200).json({
+        data: { jobId, done: false, cancelled: false, mapping: true, scanning: true, total: Number(mapTotal) },
+        meta: {}, errors: [],
+      });
+    }
 
     if (result.kind === 'scanning') {
       if (result.cancelled) {

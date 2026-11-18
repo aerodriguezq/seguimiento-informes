@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, ChevronDown, ChevronUp, Cloud, Copy, Download, ExternalLink, FolderInput, LogIn, LogOut, Save, SearchCheck, Square } from 'lucide-react';
+import {
+  ArrowUpRight, ChevronDown, ChevronRight, ChevronUp, Cloud, Copy, Download, ExternalLink, FileText, Folder,
+  FolderInput, LogIn, LogOut, Map, PlayCircle, RefreshCw, Save, SearchCheck, Square,
+} from 'lucide-react';
 import { DriveLinks } from '../../types';
 
 // Forma única del informe descargable -- mismos nombres de campo que ya usa
@@ -22,6 +25,54 @@ const STATUS_LABELS: Record<string, string> = {
 // que falta por copiar -- se corre antes de la copia real para saber qué
 // hace falta sin comprometerse todavía a copiar nada.
 type ValidateRecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'missing' | 'exists' | 'error'; errorMessage?: string | null };
+
+// Resultado de "Mapear origen"/"Mapear destino": árbol completo de UNA
+// carpeta (solo lectura, no compara contra la otra) -- se muestra como HTML
+// en cascada, con cada carpeta plegable para que un árbol de miles de
+// elementos siga siendo navegable.
+type DriveTreeNode = { name: string; isFolder: boolean; relativePath: string; children: DriveTreeNode[] };
+type DriveMapResult = { total: number; tree: DriveTreeNode[]; cached: boolean; cachedAt?: string | null };
+
+const DriveTreeNodeRow: React.FC<{ node: DriveTreeNode; depth: number }> = ({ node, depth }) => {
+  const [expanded, setExpanded] = useState(depth < 1);
+  const hasChildren = node.children.length > 0;
+  return (
+    <li>
+      <div className="flex items-center gap-1 py-0.5 text-xs">
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((prev) => !prev)}
+            className="shrink-0 text-slate-400 hover:text-slate-700"
+            aria-label={expanded ? 'Colapsar' : 'Expandir'}
+          >
+            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </button>
+        ) : (
+          <span className="inline-block w-3 shrink-0" />
+        )}
+        {node.isFolder ? <Folder className="h-3.5 w-3.5 shrink-0 text-amber-500" /> : <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />}
+        <span className={node.isFolder ? 'font-semibold text-slate-700' : 'text-slate-600'} title={node.relativePath}>{node.name}</span>
+        {hasChildren && <span className="text-[10.5px] text-slate-400">({node.children.length})</span>}
+      </div>
+      {expanded && hasChildren && (
+        <ul className="ml-2.5 border-l border-slate-200 pl-3">
+          {node.children.map((child, idx) => (
+            <DriveTreeNodeRow key={`${child.relativePath}-${idx}`} node={child} depth={depth + 1} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+};
+
+const DriveTreeView: React.FC<{ nodes: DriveTreeNode[] }> = ({ nodes }) => (
+  <ul className="max-h-80 overflow-y-auto pr-1">
+    {nodes.map((node, idx) => (
+      <DriveTreeNodeRow key={`${node.relativePath}-${idx}`} node={node} depth={0} />
+    ))}
+  </ul>
+);
 
 const LIVE_LOG_COLLAPSED_COUNT = 8;
 
@@ -231,6 +282,27 @@ export const DriveLinksView: React.FC = () => {
   const validateJobIdRef = useRef<string | null>(null);
   const validateCancelRequestedRef = useRef(false);
 
+  // "Mapear origen"/"Mapear destino" -- recorridos de solo lectura de UNA
+  // sola carpeta (no comparan entre sí), completamente aparte de Copiar y
+  // Validar. No se persisten en localStorage (a diferencia de copiar/
+  // validar): si se cierra la pestaña a mitad de un mapeo, el próximo clic
+  // simplemente lo vuelve a correr -- es lectura, no hay nada que perder.
+  const [isMappingSource, setIsMappingSource] = useState(false);
+  const [sourceMapProgress, setSourceMapProgress] = useState<number | null>(null);
+  const [sourceMapResult, setSourceMapResult] = useState<DriveMapResult | null>(null);
+  const [sourceMapError, setSourceMapError] = useState('');
+  const [isMappingDestination, setIsMappingDestination] = useState(false);
+  const [destinationMapProgress, setDestinationMapProgress] = useState<number | null>(null);
+  const [destinationMapResult, setDestinationMapResult] = useState<DriveMapResult | null>(null);
+  const [destinationMapError, setDestinationMapError] = useState('');
+
+  // Copias/validaciones que quedaron a mitad de camino (de un cierre de
+  // pestaña, un corte de red) para el par de links actual -- antes se
+  // retomaban solas al cargar la página; ahora queda un botón explícito
+  // "Continuar..." a la vista, y la persona decide cuándo apretarlo.
+  const [pendingCopyJob, setPendingCopyJob] = useState<SavedJob | null>(null);
+  const [pendingValidateJob, setPendingValidateJob] = useState<SavedJob | null>(null);
+
   useEffect(() => {
     const loadLinks = async () => {
       try {
@@ -239,15 +311,12 @@ export const DriveLinksView: React.FC = () => {
         if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible cargar los enlaces.');
         const loaded: DriveLinks = payload.data || { sourceUrl: '', destinationUrl: '' };
         setLinks(loaded);
-        // Si quedó una copia en curso de un refresco o cierre anterior, se
-        // retoma sola -- no hace falta darle clic a "Copiar" de nuevo para
-        // seguir viendo el progreso. Si en cambio se detuvo a propósito, NO
-        // se retoma sola acá (pidieron que parara) -- queda guardada para
-        // que el próximo clic en "Copiar"/"Validar" la retome desde ahí.
-        const savedJob = readSavedCopyJob(loaded.sourceUrl, loaded.destinationUrl);
-        if (savedJob && !savedJob.explicitlyStopped) void resumeSavedCopy(savedJob.jobId);
-        const savedValidateJob = readSavedValidateJob(loaded.sourceUrl, loaded.destinationUrl);
-        if (savedValidateJob && !savedValidateJob.explicitlyStopped) void resumeSavedValidate(savedValidateJob.jobId);
+        // Si quedó una copia o validación a mitad de camino (de un cierre de
+        // pestaña o un corte) para este mismo par de links, ya NO se retoma
+        // sola -- solo se detecta, y queda un botón "Continuar..." a la
+        // vista para que la persona decida cuándo seguir.
+        setPendingCopyJob(readSavedCopyJob(loaded.sourceUrl, loaded.destinationUrl));
+        setPendingValidateJob(readSavedValidateJob(loaded.sourceUrl, loaded.destinationUrl));
       } catch (error) {
         setMessage({ type: 'error', text: error instanceof Error ? error.message : 'No fue posible cargar los enlaces.' });
       } finally {
@@ -378,6 +447,7 @@ export const DriveLinksView: React.FC = () => {
           done = true;
         } else if (result.done) {
           clearSavedCopyJob();
+          setPendingCopyJob(null);
           setCopyLog(result.log || []);
           // El motivo del primer error se muestra directo en pantalla -- no
           // hay que abrir el CSV para enterarse de qué falló.
@@ -440,6 +510,7 @@ export const DriveLinksView: React.FC = () => {
         }
         if (result.done || result.cancelled) {
           clearSavedCopyJob();
+          setPendingCopyJob(null);
           setIsCopying(false);
           return;
         }
@@ -461,6 +532,7 @@ export const DriveLinksView: React.FC = () => {
     // limpia el puntero de validación guardado para que un "Validar" más
     // tarde no lo confunda con uno propio.
     clearSavedValidateJob();
+    setPendingValidateJob(null);
     setIsCopying(true);
     setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Copiando lo que falta...', scanning: false });
     setMessage(null);
@@ -470,6 +542,7 @@ export const DriveLinksView: React.FC = () => {
   };
 
   const copyFolder = async () => {
+    setPendingCopyJob(null);
     setIsCopying(true);
     setCopyProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando copia...', scanning: false });
     setMessage(null);
@@ -657,6 +730,7 @@ export const DriveLinksView: React.FC = () => {
           done = true;
         } else if (result.done) {
           clearSavedValidateJob();
+          setPendingValidateJob(null);
           setValidateLog(result.log || []);
           const missingTotal = (result.missingFiles ?? 0) + (result.missingFolders ?? 0);
           const errorNote = result.errors > 0 ? ` (${result.errors} con error al validar)` : '';
@@ -715,6 +789,7 @@ export const DriveLinksView: React.FC = () => {
         }
         if (result.done || result.cancelled) {
           clearSavedValidateJob();
+          setPendingValidateJob(null);
           setIsValidating(false);
           return;
         }
@@ -726,6 +801,7 @@ export const DriveLinksView: React.FC = () => {
   };
 
   const validateFolder = async (force = false) => {
+    setPendingValidateJob(null);
     setIsValidating(true);
     setValidateProgress({ percent: 3, processed: 0, total: 0, phase: 'Iniciando validación...', scanning: false });
     setValidateMessage(null);
@@ -756,6 +832,85 @@ export const DriveLinksView: React.FC = () => {
       } catch {
         // El loop local ya se detiene con validateCancelRequestedRef.
       }
+    }
+  };
+
+  // Botones explícitos "Continuar copiado/validación pendiente" -- antes
+  // esto se disparaba solo al cargar la página; ahora la persona decide.
+  // resumeSavedCopy/resumeSavedValidate ya empiezan con una lectura de
+  // estado (acción 'status') antes de seguir, así que de una vez "valida si
+  // había algo sin terminar" en vez de asumir ciegamente que el job sigue
+  // vivo.
+  const continueCopy = () => {
+    if (!pendingCopyJob) return;
+    const jobId = pendingCopyJob.jobId;
+    setPendingCopyJob(null);
+    void resumeSavedCopy(jobId);
+  };
+  const continueValidate = () => {
+    if (!pendingValidateJob) return;
+    const jobId = pendingValidateJob.jobId;
+    setPendingValidateJob(null);
+    void resumeSavedValidate(jobId);
+  };
+
+  // "Mapear origen"/"Mapear destino": corre la misma mecánica de sondeo que
+  // copiar/validar (crea el job, va pidiendo que siga hasta que `done`),
+  // pero termina en un árbol en vez de en una copia -- sin tocar destino, y
+  // sin persistir el job en localStorage (es de solo lectura, reintentar es
+  // barato). `force` se usa desde el botón "Remapear" para saltar el caché
+  // de 1 día que ya ofreció un resultado guardado.
+  const runMapLoop = async (kind: 'mapSource' | 'mapDestination', force = false) => {
+    const isSource = kind === 'mapSource';
+    const url = isSource ? links.sourceUrl : links.destinationUrl;
+    const setIsMapping = isSource ? setIsMappingSource : setIsMappingDestination;
+    const setProgress = isSource ? setSourceMapProgress : setDestinationMapProgress;
+    const setResult = isSource ? setSourceMapResult : setDestinationMapResult;
+    const setError = isSource ? setSourceMapError : setDestinationMapError;
+
+    if (!url) {
+      setError(`Falta el enlace de ${isSource ? 'origen' : 'destino'}.`);
+      return;
+    }
+
+    setIsMapping(true);
+    setError('');
+    setResult(null);
+    setProgress(0);
+
+    let jobId: string | null = null;
+    let done = false;
+    try {
+      let isFirstRequest = true;
+      while (!done) {
+        const body = isFirstRequest
+          ? { action: kind, sourceUrl: links.sourceUrl, destinationUrl: links.destinationUrl, force }
+          : { jobId };
+        isFirstRequest = false;
+        const response = await fetchWithRetry('/api/drive-copy-direct', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const payload = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible mapear la carpeta.');
+        const result = payload.data;
+        jobId = result.jobId;
+
+        if (result.cancelled) {
+          setError('Mapeo detenido.');
+          done = true;
+        } else if (result.done) {
+          setResult({ total: result.total ?? 0, tree: result.tree ?? [], cached: !!result.cached, cachedAt: result.cachedAt ?? null });
+          done = true;
+        } else {
+          setProgress(result.total ?? 0);
+        }
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'No fue posible mapear la carpeta.');
+    } finally {
+      setIsMapping(false);
     }
   };
 
@@ -871,10 +1026,48 @@ export const DriveLinksView: React.FC = () => {
             <p className="max-w-md text-[11px] leading-5 text-slate-500">Solo se almacenan las URLs. Las credenciales y permisos permanecen en Google Apps Script/Colab.</p>
             <div className="flex flex-wrap justify-end gap-2">
               <button type="submit" disabled={isSaving || isCopying || isValidating} className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"><Save className="h-3.5 w-3.5" />{isSaving ? 'Guardando...' : 'Guardar enlaces'}</button>
+              <button
+                type="button"
+                onClick={() => void runMapLoop('mapSource')}
+                disabled={isMappingSource || isMappingDestination || !links.sourceUrl || !driveSession.connected}
+                title="Recorre la carpeta origen de punta a punta y la muestra como árbol, sin copiar ni comparar nada"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Map className="h-3.5 w-3.5" /> {isMappingSource ? 'Mapeando origen...' : 'Mapear origen'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void runMapLoop('mapDestination')}
+                disabled={isMappingSource || isMappingDestination || !links.destinationUrl || !driveSession.connected}
+                title="Recorre la carpeta destino de punta a punta y la muestra como árbol -- para saber qué tan llena está antes de copiar"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Map className="h-3.5 w-3.5" /> {isMappingDestination ? 'Mapeando destino...' : 'Mapear destino'}
+              </button>
+              {pendingValidateJob && !isValidating && (
+                <button
+                  type="button"
+                  onClick={continueValidate}
+                  title="Hay una validación sin terminar para estos mismos links -- revisa en qué quedó y sigue desde ahí"
+                  className="inline-flex items-center gap-2 rounded-lg border border-amber-400 bg-amber-50 px-4 py-2.5 text-xs font-bold text-amber-800 transition hover:bg-amber-100 animate-pulse"
+                >
+                  <PlayCircle className="h-3.5 w-3.5" /> Continuar validación pendiente
+                </button>
+              )}
               {isValidating ? (
                 <button type="button" onClick={stopValidate} className="inline-flex items-center gap-2 rounded-lg border border-rose-600 bg-rose-50 px-4 py-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100"><Square className="h-3.5 w-3.5" /> Detener validación</button>
               ) : (
                 <button type="button" onClick={() => void validateFolder()} disabled={isSaving || isCopying || !links.sourceUrl || !links.destinationUrl || !driveSession.connected} title="Revisa qué archivos faltan por copiar, sin copiar nada todavía" className="inline-flex items-center gap-2 rounded-lg border border-indigo-600 px-4 py-2.5 text-xs font-bold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"><SearchCheck className="h-3.5 w-3.5" /> Validar qué falta</button>
+              )}
+              {pendingCopyJob && !isCopying && (
+                <button
+                  type="button"
+                  onClick={continueCopy}
+                  title="Hay una copia sin terminar para estos mismos links -- revisa en qué quedó y sigue desde ahí"
+                  className="inline-flex items-center gap-2 rounded-lg border border-amber-400 bg-amber-50 px-4 py-2.5 text-xs font-bold text-amber-800 transition hover:bg-amber-100 animate-pulse"
+                >
+                  <PlayCircle className="h-3.5 w-3.5" /> Continuar copiado pendiente
+                </button>
               )}
               {isCopying ? (
                 <button type="button" onClick={stopCopy} className="inline-flex items-center gap-2 rounded-lg border border-rose-600 bg-rose-50 px-4 py-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100"><Square className="h-3.5 w-3.5" /> Detener copiado</button>
@@ -883,6 +1076,62 @@ export const DriveLinksView: React.FC = () => {
               )}
             </div>
           </div>
+
+          {(isMappingSource || sourceMapResult || sourceMapError) && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                <span className="flex items-center gap-1.5"><Map className="h-3.5 w-3.5" /> Mapa de la carpeta origen</span>
+                {sourceMapResult && (
+                  <button type="button" onClick={() => void runMapLoop('mapSource', true)} className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-900">
+                    <RefreshCw className="h-3 w-3" /> Remapear
+                  </button>
+                )}
+              </div>
+              {isMappingSource && (
+                <p className="mt-2 text-[11px] text-slate-600">Mapeando... {sourceMapProgress ?? 0} elemento(s) encontrados</p>
+              )}
+              {sourceMapError && <p className="mt-2 text-[11px] font-semibold text-rose-600">{sourceMapError}</p>}
+              {sourceMapResult && (
+                <>
+                  <p className="mt-2 text-[11px] text-slate-600">
+                    {sourceMapResult.total} elemento(s) en total
+                    {sourceMapResult.cached && sourceMapResult.cachedAt ? ` -- mapeado ${relativeTimeFromNow(sourceMapResult.cachedAt)}` : ''}
+                  </p>
+                  <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
+                    <DriveTreeView nodes={sourceMapResult.tree} />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {(isMappingDestination || destinationMapResult || destinationMapError) && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                <span className="flex items-center gap-1.5"><Map className="h-3.5 w-3.5" /> Mapa de la carpeta destino</span>
+                {destinationMapResult && (
+                  <button type="button" onClick={() => void runMapLoop('mapDestination', true)} className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-slate-900">
+                    <RefreshCw className="h-3 w-3" /> Remapear
+                  </button>
+                )}
+              </div>
+              {isMappingDestination && (
+                <p className="mt-2 text-[11px] text-slate-600">Mapeando... {destinationMapProgress ?? 0} elemento(s) encontrados</p>
+              )}
+              {destinationMapError && <p className="mt-2 text-[11px] font-semibold text-rose-600">{destinationMapError}</p>}
+              {destinationMapResult && (
+                <>
+                  <p className="mt-2 text-[11px] text-slate-600">
+                    {destinationMapResult.total} elemento(s) en total
+                    {destinationMapResult.cached && destinationMapResult.cachedAt ? ` -- mapeado ${relativeTimeFromNow(destinationMapResult.cachedAt)}` : ''}
+                  </p>
+                  <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
+                    <DriveTreeView nodes={destinationMapResult.tree} />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {isCopying && (
             <div className="mt-4 rounded-lg border border-teal-100 bg-teal-50 p-3" role="status">
               <div className="flex items-center justify-between text-[11px] font-bold text-teal-900">
