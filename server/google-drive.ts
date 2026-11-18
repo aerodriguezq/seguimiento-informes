@@ -215,6 +215,47 @@ function createDestChildrenResolver(sql: SqlClient, jobId: string, accessToken: 
   };
 }
 
+// Antes cada item del lote se procesaba uno por uno, esperando a que Drive
+// respondiera antes de mandar el siguiente -- con cientos/miles de archivos
+// la copia se volvía lentísima aunque el límite real de la API de Drive (muy
+// por encima de esto) tuviera de sobra margen para varias peticiones a la
+// vez. `runPool` corre hasta `limit` llamadas a Drive en simultáneo por
+// lote, revisando `shouldStop` antes de tomar cada item nuevo (nunca
+// interrumpe uno que ya está en vuelo) para dejar de tomar trabajo nuevo
+// apenas se cumple el plazo o se cancela, sin perder lo que ya se mandó.
+async function runPool<T>(items: T[], limit: number, shouldStop: () => boolean, fn: (item: T) => Promise<void>): Promise<void> {
+  let index = 0;
+  const workerCount = Math.min(limit, items.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (index < items.length) {
+      if (shouldStop()) return;
+      const current = items[index++];
+      await fn(current);
+    }
+  });
+  await Promise.all(workers);
+}
+
+// Si dos hijos del mismo lote comparten carpeta destino + nombre + tipo
+// (Drive sí permite nombres duplicados dentro de una misma carpeta de
+// origen), sin esto ambos verían "no existe todavía" al mismo tiempo y
+// crearían dos carpetas/archivos en destino en vez de reusar uno. Encadena
+// el chequeo+creación de la misma llave para que el segundo espere el
+// resultado del primero -- llaves distintas (la inmensa mayoría) se quedan
+// corriendo en paralelo sin tocarse.
+function createKeyedLock() {
+  const tails = new Map<string, Promise<unknown>>();
+  return function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prior = (tails.get(key) ?? Promise.resolve()).catch(() => {});
+    const run = prior.then(fn);
+    tails.set(key, run);
+    return run;
+  };
+}
+
+const COPY_CONCURRENCY = 6;
+const VALIDATE_CONCURRENCY = 8;
+
 const COPY_BATCH_SELECT_SIZE = 25;
 
 export type DriveCopyRecentItem = { name: string; relativePath: string; isFolder: boolean; status: 'copied' | 'skipped' | 'error'; errorMessage?: string };
@@ -282,20 +323,26 @@ export async function copyDriveItemsBatch(
       return { summary, done: true, cancelled: false, recentItems };
     }
 
-    for (const item of items) {
-      if (isCancelled()) return { summary, done: false, cancelled: true, recentItems };
-      if (Date.now() > deadline) return { summary, done: false, cancelled: false, recentItems };
+    const withLock = createKeyedLock();
+    let stopped = false;
+    let stoppedByCancel = false;
 
+    await runPool(items, COPY_CONCURRENCY, () => stopped, async (item) => {
       const destParentId: string = item.parentItemId === null ? destinationRootId : item.parentDestId;
       try {
         if (item.isFolder) {
-          const siblings = await getDestChildren(destParentId, item.parentItemId);
-          const existing = siblings.find((f) => f.name === item.name && f.mimeType === FOLDER_MIME);
-          const destFolder = existing ?? (await driveRequest<DriveFile>(accessToken, '/files?supportsAllDrives=true', {
-            method: 'POST',
-            body: JSON.stringify({ name: item.name, mimeType: FOLDER_MIME, parents: [destParentId] }),
-          }));
-          if (existing) summary.reusedFolders++;
+          const lockKey = `${destParentId}:d:${item.name}`;
+          const { folder: destFolder, reused } = await withLock(lockKey, async () => {
+            const siblings = await getDestChildren(destParentId, item.parentItemId);
+            const existing = siblings.find((f) => f.name === item.name && f.mimeType === FOLDER_MIME);
+            if (existing) return { folder: existing, reused: true };
+            const created = await driveRequest<DriveFile>(accessToken, '/files?supportsAllDrives=true', {
+              method: 'POST',
+              body: JSON.stringify({ name: item.name, mimeType: FOLDER_MIME, parents: [destParentId] }),
+            });
+            return { folder: created, reused: false };
+          });
+          if (reused) summary.reusedFolders++;
           else summary.createdFolders++;
           await sql`UPDATE drive_copy_items SET status = 'copied', dest_id = ${destFolder.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
           recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'copied' });
@@ -339,19 +386,24 @@ export async function copyDriveItemsBatch(
             recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: true, status: 'error', errorMessage: `No se pudo listar su contenido: ${errorMessage}` });
           }
         } else {
-          const siblings = await getDestChildren(destParentId, item.parentItemId);
-          const existing = siblings.find((f) => f.name === item.name && f.mimeType === item.mimeType);
-          if (existing) {
-            summary.skippedFiles++;
-            await sql`UPDATE drive_copy_items SET status = 'skipped', dest_id = ${existing.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
-            recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: false, status: 'skipped' });
-          } else {
+          const lockKey = `${destParentId}:f:${item.name}:${item.mimeType}`;
+          const { file, reused } = await withLock(lockKey, async () => {
+            const siblings = await getDestChildren(destParentId, item.parentItemId);
+            const existing = siblings.find((f) => f.name === item.name && f.mimeType === item.mimeType);
+            if (existing) return { file: existing, reused: true };
             const copied = await driveRequest<DriveFile>(accessToken, `/files/${item.sourceId}/copy?supportsAllDrives=true`, {
               method: 'POST',
               body: JSON.stringify({ name: item.name, parents: [destParentId] }),
             });
+            return { file: copied, reused: false };
+          });
+          if (reused) {
+            summary.skippedFiles++;
+            await sql`UPDATE drive_copy_items SET status = 'skipped', dest_id = ${file.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
+            recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: false, status: 'skipped' });
+          } else {
             summary.copiedFiles++;
-            await sql`UPDATE drive_copy_items SET status = 'copied', dest_id = ${copied.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
+            await sql`UPDATE drive_copy_items SET status = 'copied', dest_id = ${file.id}, updated_at = NOW() WHERE item_id = ${item.id}`;
             recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: false, status: 'copied' });
           }
         }
@@ -364,7 +416,17 @@ export async function copyDriveItemsBatch(
         `;
         recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: !!item.isFolder, status: 'error', errorMessage });
       }
-    }
+
+      if (isCancelled()) {
+        stopped = true;
+        stoppedByCancel = true;
+      } else if (Date.now() > deadline) {
+        stopped = true;
+      }
+    });
+
+    if (stoppedByCancel) return { summary, done: false, cancelled: true, recentItems };
+    if (stopped) return { summary, done: false, cancelled: false, recentItems };
   }
 }
 
@@ -458,10 +520,10 @@ export async function validateDriveItemsBatch(
       return { summary, done: true, cancelled: false, recentItems };
     }
 
-    for (const item of items) {
-      if (isCancelled()) return { summary, done: false, cancelled: true, recentItems };
-      if (Date.now() > deadline) return { summary, done: false, cancelled: false, recentItems };
+    let stopped = false;
+    let stoppedByCancel = false;
 
+    await runPool(items, VALIDATE_CONCURRENCY, () => stopped, async (item) => {
       const parentIsMissing = item.parentItemId !== null && item.parentStatus === 'missing';
       const destParentId: string | null = item.parentItemId === null ? destinationRootId : item.parentDestId;
 
@@ -471,10 +533,7 @@ export async function validateDriveItemsBatch(
           await sql`UPDATE drive_copy_items SET status = 'missing', updated_at = NOW() WHERE item_id = ${item.id}`;
           recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: !!item.isFolder, status: 'missing' });
           if (item.isFolder) await discoverSourceChildren(sql, accessToken, jobId, item);
-          continue;
-        }
-
-        if (item.isFolder) {
+        } else if (item.isFolder) {
           const siblings = await getDestChildren(destParentId!, item.parentItemId);
           const existing = siblings.find((f) => f.name === item.name && f.mimeType === FOLDER_MIME);
           if (existing) {
@@ -509,6 +568,16 @@ export async function validateDriveItemsBatch(
         `;
         recentItems.push({ name: item.name, relativePath: item.relativePath, isFolder: !!item.isFolder, status: 'error', errorMessage });
       }
-    }
+
+      if (isCancelled()) {
+        stopped = true;
+        stoppedByCancel = true;
+      } else if (Date.now() > deadline) {
+        stopped = true;
+      }
+    });
+
+    if (stoppedByCancel) return { summary, done: false, cancelled: true, recentItems };
+    if (stopped) return { summary, done: false, cancelled: false, recentItems };
   }
 }
