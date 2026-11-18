@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { withApiMetrics } from '../server/metrics.js';
 
-export default async function handler(request: VercelRequest, response: VercelResponse) {
+async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'GET') return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
   const webhookUrl = process.env.APP_SCRIPT_WEBHOOK_URL;
   const sharedSecret = process.env.APP_SCRIPT_SHARED_SECRET;
@@ -21,3 +22,5 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return response.status(502).json({ data: null, meta: {}, errors: ['No fue posible consultar el progreso.'] });
   }
 }
+
+export default withApiMetrics('drive-progress', handler);

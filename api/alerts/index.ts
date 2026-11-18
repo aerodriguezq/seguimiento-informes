@@ -8,6 +8,7 @@ import {
 import { getSweepGate, recordSweepRun } from '../../server/sweep-config.js';
 import { canEditModuleRequest, getAccessibleProjectIds } from '../../server/admin-auth.js';
 import { logEmailSend } from '../../server/email-log.js';
+import { withApiMetrics } from '../../server/metrics.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -617,7 +618,7 @@ async function handleCronSweep(sql: SqlClient): Promise<{ evaluated: number; sen
   };
 }
 
-export default async function handler(request: VercelRequest, response: VercelResponse) {
+async function handler(request: VercelRequest, response: VercelResponse) {
   if (!['GET', 'POST', 'PATCH', 'DELETE'].includes(request.method || '')) {
     return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
   }
@@ -792,3 +793,5 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return response.status(503).json({ data: null, meta: {}, errors: ['No fue posible consultar o guardar las alertas.'] });
   }
 }
+
+export default withApiMetrics('alerts', handler);

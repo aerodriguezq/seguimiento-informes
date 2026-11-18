@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Clock, LogIn, ShieldAlert, ShieldCheck } from 'lucide-react';
 
-export type PermissionModule = 'dashboard' | 'reports' | 'projects' | 'alerts' | 'lists' | 'drive_links' | 'seguimiento' | 'peticiones' | 'file_cleaner';
+export type PermissionModule = 'dashboard' | 'reports' | 'projects' | 'alerts' | 'lists' | 'drive_links' | 'seguimiento' | 'peticiones' | 'file_cleaner' | 'performance';
 export type PermissionLevel = 'none' | 'view' | 'edit';
 
 // Nivel con el que arranca un módulo para un usuario no-admin cuando no hay
@@ -20,6 +20,7 @@ const MODULE_DEFAULT_LEVEL: Record<PermissionModule, PermissionLevel> = {
   seguimiento: 'edit',
   peticiones: 'edit',
   file_cleaner: 'none',
+  performance: 'none',
 };
 
 interface AuthUser {

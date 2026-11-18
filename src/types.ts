@@ -184,7 +184,8 @@ export type ActiveModule =
   | 'seguimiento'
   | 'peticiones'
   | 'users'
-  | 'file_cleaner';
+  | 'file_cleaner'
+  | 'performance';
 
 export interface PeticionResponsable {
   id: string;

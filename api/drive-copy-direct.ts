@@ -12,6 +12,7 @@ import {
   type DriveValidateSummary,
   type DriveCopyLogEntry,
 } from '../server/google-drive.js';
+import { withApiMetrics } from '../server/metrics.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -102,7 +103,7 @@ async function handleDriveCopySweep(sql: SqlClient): Promise<{ jobsProcessed: nu
   return { jobsProcessed, jobsCompleted };
 }
 
-export default async function handler(request: VercelRequest, response: VercelResponse) {
+async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method === 'GET') {
     const cronSecret = process.env.CRON_SECRET;
     const isCronRequest = !!cronSecret && request.headers.authorization === `Bearer ${cronSecret}`;
@@ -349,3 +350,5 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return response.status(502).json({ data: null, meta: {}, errors: [message] });
   }
 }
+
+export default withApiMetrics('drive-copy-direct', handler);

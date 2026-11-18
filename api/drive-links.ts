@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveSession } from '../server/google-oauth.js';
+import { withApiMetrics } from '../server/metrics.js';
 
-export default async function handler(request: VercelRequest, response: VercelResponse) {
+async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'GET' && request.method !== 'PUT') {
     return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
   }
@@ -43,6 +44,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return response.status(503).json({ data: null, meta: {}, errors: ['No fue posible consultar o guardar los enlaces de Drive.'] });
   }
 }
+
+export default withApiMetrics('drive-links', handler);
 
 function isDriveFolderUrl(value: unknown): value is string {
   return typeof value === 'string' && /^https:\/\/drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\/[\w-]+/.test(value.trim());

@@ -24,6 +24,7 @@ import {
   type Kpi,
 } from '../../server/seguimiento-parsers.js';
 import { getSweepGate, recordSweepRun } from '../../server/sweep-config.js';
+import { withApiMetrics } from '../../server/metrics.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -489,7 +490,7 @@ async function importAllCronogramas(sql: SqlClient) {
   return { sheetsChecked: configs.length, imported, failed };
 }
 
-export default async function handler(
+async function handler(
   request: VercelRequest,
   response: VercelResponse,
 ) {
@@ -1771,3 +1772,5 @@ export default async function handler(
     });
   }
 }
+
+export default withApiMetrics('projects', handler);

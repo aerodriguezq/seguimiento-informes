@@ -4,6 +4,7 @@ import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEma
 import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
 import { isAdminRequest, canEditModuleRequest, getAccessibleProjectIds, getSessionUser } from '../server/admin-auth.js';
 import { logEmailSend } from '../server/email-log.js';
+import { withApiMetrics } from '../server/metrics.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -1106,7 +1107,7 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
   return { checked: pendingSteps.length, advanced, flaggedForReview };
 }
 
-export default async function handler(request: VercelRequest, response: VercelResponse) {
+async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'PATCH' && request.method !== 'DELETE') {
     return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
   }
@@ -1751,3 +1752,5 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return response.status(503).json({ data: null, meta: {}, errors: ['No fue posible consultar o guardar los informes.'] });
   }
 }
+
+export default withApiMetrics('reports', handler);

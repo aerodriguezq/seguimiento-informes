@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { withApiMetrics } from '../server/metrics.js';
 
-export default async function handler(request: VercelRequest, response: VercelResponse) {
+async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'POST') {
     return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
   }
@@ -59,3 +60,5 @@ export default async function handler(request: VercelRequest, response: VercelRe
     });
   }
 }
+
+export default withApiMetrics('drive-copy', handler);

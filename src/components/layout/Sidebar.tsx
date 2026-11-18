@@ -16,6 +16,7 @@ import {
   Sprout,
   Info,
   X,
+  Activity,
 } from 'lucide-react';
 import { ActiveModule, Project, Report } from '../../types';
 import { useAuth } from '../../auth/AuthContext';
@@ -272,6 +273,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label: 'Limpieza de Archivos',
           icon: ShieldCheck,
           visible: canView('file_cleaner'),
+        },
+        {
+          kind: 'leaf',
+          id: 'performance',
+          label: 'Rendimiento del Sistema',
+          icon: Activity,
+          visible: user.isAdmin,
         },
       ],
     },

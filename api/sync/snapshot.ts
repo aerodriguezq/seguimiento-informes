@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { withApiMetrics } from '../../server/metrics.js';
 
 const syncTables = [
   'empresas',
@@ -21,7 +22,7 @@ const syncTables = [
   'resumen_correcciones',
 ] as const;
 
-export default async function handler(
+async function handler(
   request: VercelRequest,
   response: VercelResponse,
 ) {
@@ -66,3 +67,5 @@ export default async function handler(
     });
   }
 }
+
+export default withApiMetrics('sync-snapshot', handler);

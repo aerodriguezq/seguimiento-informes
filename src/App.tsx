@@ -46,6 +46,7 @@ import { MasterListsView } from './components/master-lists/MasterListsView';
 import { DriveLinksView } from './components/drive/DriveLinksView';
 import { UsersManagementView, AuthorizedUser, SweepConfig, EmailLogEntry } from './components/users/UsersManagementView';
 import { FileCleanerView } from './components/files/FileCleanerView';
+import { PerformanceView } from './components/metrics/PerformanceView';
 import { useAuth } from './auth/AuthContext';
 import { CheckCircle2, Info, X } from 'lucide-react';
 
@@ -62,6 +63,7 @@ const MODULE_ROUTES: Record<ActiveModule, string> = {
   peticiones: '/peticiones',
   users: '/usuarios',
   file_cleaner: '/limpieza-archivos',
+  performance: '/rendimiento',
 };
 
 const PATH_TO_MODULE: Partial<Record<string, ActiveModule>> = Object.fromEntries(
@@ -243,6 +245,46 @@ export default function App() {
       navigate('/dashboard', { replace: true });
     }
   }, [location.pathname]);
+
+  // Mide eficiencia del lado del navegador para el panel de Rendimiento del
+  // Sistema: cuánto tardó en cargar esta carga de página (Navigation Timing)
+  // y cualquier error de JS/promesa sin capturar -- una sola vez por carga
+  // real de la app, nunca debe poder romper nada si falla el envío.
+  useEffect(() => {
+    const sendBeacon = (body: Record<string, unknown>) => {
+      fetch('/api/health', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        keepalive: true,
+      }).catch(() => {});
+    };
+
+    const reportPageLoad = () => {
+      const [nav] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
+      if (nav) {
+        sendBeacon({ type: 'page_load', route: window.location.pathname, durationMs: nav.loadEventEnd - nav.startTime });
+      }
+    };
+    if (document.readyState === 'complete') reportPageLoad();
+    else window.addEventListener('load', reportPageLoad, { once: true });
+
+    const handleError = (event: ErrorEvent) => {
+      sendBeacon({ type: 'error', route: window.location.pathname, errorMessage: event.message?.slice(0, 500) });
+    };
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason instanceof Error ? event.reason.message : String(event.reason);
+      sendBeacon({ type: 'error', route: window.location.pathname, errorMessage: reason?.slice(0, 500) });
+    };
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => {
+      window.removeEventListener('load', reportPageLoad);
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleRejection);
+    };
+  }, []);
+
   const [projects, setProjects] = useState<Project[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
@@ -1972,6 +2014,10 @@ export default function App() {
           {/* Limpieza de metadatos de archivos: 100% cliente, el archivo nunca sale del navegador */}
           {!isLoadingWorkspace && !workspaceError && activeModule === 'file_cleaner' && (
             <FileCleanerView />
+          )}
+
+          {!isLoadingWorkspace && !workspaceError && activeModule === 'performance' && user.isAdmin && (
+            <PerformanceView />
           )}
         </main>
       </div>

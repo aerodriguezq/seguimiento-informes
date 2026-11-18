@@ -3,6 +3,7 @@ import { canEditModuleRequest, getAccessibleProjectIds } from '../server/admin-a
 import { sendEmail, confirmEmailSent, buildPeticionAssignedEmailHtml } from '../server/google-gmail.js';
 import { ensureDriveFolder, uploadDriveFile, extractDriveFolderId } from '../server/google-drive.js';
 import { logEmailSend } from '../server/email-log.js';
+import { withApiMetrics } from '../server/metrics.js';
 
 // fecha_plazo_respuesta siempre se recalcula a partir de fecha_radicacion +
 // plazo_respuesta (días calendario) — es un dato derivado, no editable a mano.
@@ -202,7 +203,7 @@ async function triggerSweep(kind: string) {
   return body?.data;
 }
 
-export default async function handler(
+async function handler(
   request: VercelRequest,
   response: VercelResponse,
 ) {
@@ -1411,3 +1412,5 @@ export default async function handler(
     return response.status(503).json({ data: null, meta: {}, errors: [`No fue posible guardar o consultar los catálogos: ${detail}`] });
   }
 }
+
+export default withApiMetrics('catalogs', handler);

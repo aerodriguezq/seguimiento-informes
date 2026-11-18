@@ -7,6 +7,7 @@ import {
   clearSessionCookie,
 } from '../../../server/google-oauth.js';
 import { getSql } from '../../../server/db.js';
+import { withApiMetrics } from '../../../server/metrics.js';
 
 // Ojo: esto NO mira la cookie drive_session de quien pregunta -- mira si la
 // conexión COMPARTIDA por toda la app (la que usa getConnectedAccessToken
@@ -149,7 +150,7 @@ async function callback(request: VercelRequest, response: VercelResponse) {
   }
 }
 
-export default function handler(request: VercelRequest, response: VercelResponse) {
+function handler(request: VercelRequest, response: VercelResponse) {
   const action = typeof request.query.action === 'string' ? request.query.action : '';
   switch (action) {
     case 'status':
@@ -168,3 +169,8 @@ export default function handler(request: VercelRequest, response: VercelResponse
       return response.status(404).json({ data: null, meta: {}, errors: ['Ruta no encontrada.'] });
   }
 }
+
+export default withApiMetrics(
+  (request) => `auth-google-${typeof request.query.action === 'string' ? request.query.action : 'unknown'}`,
+  handler,
+);

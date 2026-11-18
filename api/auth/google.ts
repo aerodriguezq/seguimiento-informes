@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getGoogleOAuthClient, driveScope, gmailReadScope, gmailSendScope, sheetsReadScope, sessionCookie } from '../../server/google-oauth.js';
+import { withApiMetrics } from '../../server/metrics.js';
 
-export default async function handler(request: VercelRequest, response: VercelResponse) {
+async function handler(request: VercelRequest, response: VercelResponse) {
   try {
     const client = await getGoogleOAuthClient();
     const state = crypto.randomUUID();
@@ -18,3 +19,5 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return response.status(503).json({ data: null, meta: {}, errors: ['OAuth de Google no está configurado.'] });
   }
 }
+
+export default withApiMetrics('auth-google-start', handler);
