@@ -60,7 +60,7 @@ interface ReportDetailModalProps {
   onConfirmCandidateEmail: (reportId: string, messageId: string) => Promise<void>;
   onDismissCandidateEmail: (reportId: string, messageId: string) => Promise<void>;
   onEditReport: (reportId: string, updates: { month?: string; dueDate?: string; contactIds?: string[]; primaryContactId?: string; observations?: string }) => Promise<void>;
-  onEditReportStage: (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null }) => Promise<void>;
+  onEditReportStage: (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null; fromEmail?: string | null }) => Promise<void>;
   onDeleteReportStageProgress: (reportId: string, stepId: string) => Promise<void>;
   onDeleteReport: (reportId: string) => Promise<void>;
   onToggleContactAlarm: (contactId: string, enabled: boolean) => Promise<void>;
@@ -100,6 +100,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
   const [stageStartInput, setStageStartInput] = useState('');
   const [stageDueInput, setStageDueInput] = useState('');
+  const [stageEmailInput, setStageEmailInput] = useState('');
   const [isSavingStage, setIsSavingStage] = useState(false);
   const [deletingStageId, setDeletingStageId] = useState<string | null>(null);
   const [togglingAlarmId, setTogglingAlarmId] = useState<string | null>(null);
@@ -271,16 +272,21 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const reportStepAlerts = alerts.filter((a) => a.reportId === report.id);
   const projectAlerts = reportStepAlerts.length > 0 ? reportStepAlerts : alerts.filter((a) => a.projectId === report.projectId);
 
-  const openEditStage = (stepId: string, startDate: string | null, dueDate: string | null) => {
+  const openEditStage = (stepId: string, startDate: string | null, dueDate: string | null, fromEmail: string | null) => {
     setEditingStageId(stepId);
     setStageStartInput(startDate ?? '');
     setStageDueInput(dueDate ?? '');
+    setStageEmailInput(fromEmail ?? '');
   };
 
   const handleSaveStage = async (stepId: string) => {
     setIsSavingStage(true);
     try {
-      await onEditReportStage(report.id, stepId, { startDate: stageStartInput || null, dueDate: stageDueInput || null });
+      await onEditReportStage(report.id, stepId, {
+        startDate: stageStartInput || null,
+        dueDate: stageDueInput || null,
+        fromEmail: stageEmailInput.trim() || null,
+      });
       setEditingStageId(null);
     } finally {
       setIsSavingStage(false);
@@ -869,17 +875,32 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                             </span>
                           </td>
                           <td className="py-2.5 px-3 text-slate-600">
-                            {stage.receivedAt ? new Date(stage.receivedAt).toLocaleString('es-CO') : '—'}
-                            {stage.emailLink && (
-                              <a
-                                href={stage.emailLink}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="Ver correo en Gmail"
-                                className="ml-1.5 inline-flex items-center text-indigo-600 hover:text-indigo-800"
-                              >
-                                <Send className="h-3 w-3" />
-                              </a>
+                            <div className="flex items-center">
+                              {stage.receivedAt ? new Date(stage.receivedAt).toLocaleString('es-CO') : '—'}
+                              {stage.emailLink && (
+                                <a
+                                  href={stage.emailLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title="Ver correo en Gmail"
+                                  className="ml-1.5 inline-flex items-center text-indigo-600 hover:text-indigo-800"
+                                >
+                                  <Send className="h-3 w-3" />
+                                </a>
+                              )}
+                            </div>
+                            {isEditingStage ? (
+                              <input
+                                type="email"
+                                value={stageEmailInput}
+                                onChange={(e) => setStageEmailInput(e.target.value)}
+                                placeholder="Correo del remitente"
+                                className="mt-1 w-44 px-1.5 py-1 text-xs border border-slate-200 rounded-md outline-none focus:border-teal-600"
+                              />
+                            ) : (
+                              stage.fromEmail && (
+                                <div className="mt-0.5 text-[10.5px] text-slate-400">{stage.fromEmail}</div>
+                              )
                             )}
                           </td>
                           {user.isAdmin && (
@@ -920,9 +941,9 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                                   )}
                                   <button
                                     type="button"
-                                    onClick={() => openEditStage(stage.stepId, stage.startDate, stage.dueDate)}
+                                    onClick={() => openEditStage(stage.stepId, stage.startDate, stage.dueDate, stage.fromEmail)}
                                     className="text-slate-400 hover:text-teal-700"
-                                    title="Editar fechas de la etapa"
+                                    title="Editar fechas y correo de la etapa"
                                   >
                                     <Pencil className="h-3.5 w-3.5" />
                                   </button>

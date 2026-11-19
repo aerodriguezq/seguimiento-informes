@@ -1353,22 +1353,24 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       if (!(await isAdminRequest(request, sql))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede editar las fechas de una etapa.'] });
       }
-      const { stepId, startDate, dueDate } = request.body ?? {};
+      const { stepId, startDate, dueDate, fromEmail } = request.body ?? {};
       const stepIdNum = Number(stepId);
       if (!Number.isInteger(stepIdNum) || stepIdNum <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Falta el id del paso.'] });
       }
       const hasField = (key: string) => Object.prototype.hasOwnProperty.call(request.body ?? {}, key);
       const currentStage = (await sql`
-        SELECT fecha_inicio, fecha_limite FROM informe_pasos_instancia WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
+        SELECT fecha_inicio, fecha_limite, correo_remitente FROM informe_pasos_instancia WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
       `) as any[];
       if (!currentStage[0]) {
         return response.status(404).json({ data: null, meta: {}, errors: ['Esta etapa todavía no tiene una instancia generada para este informe.'] });
       }
       const nextStart = hasField('startDate') ? (startDate || null) : currentStage[0].fecha_inicio;
       const nextDue = hasField('dueDate') ? (dueDate || null) : currentStage[0].fecha_limite;
+      const nextFromEmail = hasField('fromEmail') ? (fromEmail || null) : currentStage[0].correo_remitente;
       await sql`
-        UPDATE informe_pasos_instancia SET fecha_inicio = ${nextStart}, fecha_limite = ${nextDue}, updated_at = NOW()
+        UPDATE informe_pasos_instancia
+        SET fecha_inicio = ${nextStart}, fecha_limite = ${nextDue}, correo_remitente = ${nextFromEmail}, updated_at = NOW()
         WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
       `;
     } else if (action === 'deleteStageProgress') {

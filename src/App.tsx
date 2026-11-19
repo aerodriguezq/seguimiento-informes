@@ -988,7 +988,7 @@ export default function App() {
     showToast('Informe actualizado.', 'success');
   };
 
-  const handleEditReportStage = async (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null }) => {
+  const handleEditReportStage = async (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null; fromEmail?: string | null }) => {
     const response = await fetch('/api/reports', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -997,7 +997,7 @@ export default function App() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible editar la etapa.');
     setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
-    showToast('Fechas de la etapa actualizadas.', 'success');
+    showToast('Etapa actualizada.', 'success');
   };
 
   const handleDeleteReportStageProgress = async (reportId: string, stepId: string) => {
