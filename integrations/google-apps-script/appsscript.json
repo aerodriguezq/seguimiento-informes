@@ -2,8 +2,6 @@
   "timeZone": "America/Bogota",
   "dependencies": {
     "enabledAdvancedServices": [
-      { "userSymbol": "DriveActivity", "serviceId": "driveactivity", "version": "v2" },
-      { "userSymbol": "People", "serviceId": "people", "version": "v1" },
       { "userSymbol": "Drive", "serviceId": "drive", "version": "v3" }
     ]
   },
@@ -17,5 +15,9 @@
     "https://www.googleapis.com/auth/gmail.send"
   ],
   "exceptionLogging": "STACKDRIVER",
-  "runtimeVersion": "V8"
+  "runtimeVersion": "V8",
+  "webapp": {
+    "executeAs": "USER_ACCESSING",
+    "access": "ANYONE"
+  }
 }

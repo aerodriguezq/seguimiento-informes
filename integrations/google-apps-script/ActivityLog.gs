@@ -153,6 +153,39 @@ function openActivitySpreadsheet() {
   return SpreadsheetApp.openById(id);
 }
 
+// Drive Activity API y People API NO quedaron disponibles como
+// "servicio avanzado" en este proyecto (Apps Script devolvió "Service
+// not found" al intentar habilitarlas así) -- se llaman directo por
+// REST con el token OAuth del propio script, que ya trae los scopes
+// drive.activity.readonly/directory.readonly del manifiesto. Para que
+// esto funcione, además del scope hay que tener esas dos APIs
+// habilitadas en el proyecto de Google Cloud asociado al script
+// (Configuración del proyecto -> proyecto de GCP -> Habilitar APIs).
+function queryDriveActivity(request) {
+  var response = UrlFetchApp.fetch('https://driveactivity.googleapis.com/v2/activity:query', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    payload: JSON.stringify(request),
+    muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) {
+    throw new Error('Drive Activity API respondió ' + response.getResponseCode() + ': ' + response.getContentText());
+  }
+  return JSON.parse(response.getContentText());
+}
+
+function fetchPersonFields(personName) {
+  var response = UrlFetchApp.fetch(
+    'https://people.googleapis.com/v1/' + personName + '?personFields=names,emailAddresses',
+    { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true }
+  );
+  if (response.getResponseCode() !== 200) {
+    throw new Error('People API respondió ' + response.getResponseCode() + ': ' + response.getContentText());
+  }
+  return JSON.parse(response.getContentText());
+}
+
 // Resuelve el actor de una actividad a "Nombre <correo>" -- el caso
 // típico es un usuario conocido del dominio (actor.user.knownUser.
 // personName = "people/ID"), que se resuelve con la People API. El
@@ -173,7 +206,7 @@ function resolveActorName(actor, cache) {
 
   var resolved = personName;
   try {
-    var person = People.People.get(personName, { personFields: 'names,emailAddresses' });
+    var person = fetchPersonFields(personName);
     var email = person.emailAddresses && person.emailAddresses[0] ? person.emailAddresses[0].value : null;
     var name = person.names && person.names[0] ? person.names[0].displayName : null;
     resolved = name && email ? name + ' <' + email + '>' : (email || name || personName);
@@ -267,7 +300,7 @@ function runActivityExtractBatch(jobId) {
     };
     if (state.pageToken) request.pageToken = state.pageToken;
 
-    var response = DriveActivity.Activity.query(request);
+    var response = queryDriveActivity(request);
     var activities = response.activities || [];
     for (var i = 0; i < activities.length; i++) {
       var row = describeActivityRow(activities[i], state.actorCache);
@@ -385,7 +418,7 @@ function runActivitySimulateBatch(jobId) {
       };
       if (state.pageToken) request.pageToken = state.pageToken;
 
-      var response = DriveActivity.Activity.query(request);
+      var response = queryDriveActivity(request);
       var activities = response.activities || [];
       for (var i = 0; i < activities.length; i++) {
         registerFirstMove(activities[i], state.firstMoveByItem);
