@@ -280,12 +280,17 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   };
 
   const handleSaveStage = async (stepId: string) => {
+    const trimmedEmail = stageEmailInput.trim();
+    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      window.alert('El correo no tiene un formato válido (ej. nombre@dominio.com). Revisa que no hayas pegado un link en vez de un correo.');
+      return;
+    }
     setIsSavingStage(true);
     try {
       await onEditReportStage(report.id, stepId, {
         startDate: stageStartInput || null,
         dueDate: stageDueInput || null,
-        fromEmail: stageEmailInput.trim() || null,
+        fromEmail: trimmedEmail || null,
       });
       setEditingStageId(null);
     } finally {
@@ -899,7 +904,9 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                               />
                             ) : (
                               stage.fromEmail && (
-                                <div className="mt-0.5 text-[10.5px] text-slate-400">{stage.fromEmail}</div>
+                                <div className="mt-0.5 max-w-[180px] truncate text-[10.5px] text-slate-400" title={stage.fromEmail}>
+                                  {stage.fromEmail}
+                                </div>
                               )
                             )}
                           </td>
