@@ -1,0 +1,21 @@
+{
+  "timeZone": "America/Bogota",
+  "dependencies": {
+    "enabledAdvancedServices": [
+      { "userSymbol": "DriveActivity", "serviceId": "driveactivity", "version": "v2" },
+      { "userSymbol": "People", "serviceId": "people", "version": "v1" },
+      { "userSymbol": "Drive", "serviceId": "drive", "version": "v3" }
+    ]
+  },
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/drive.activity.readonly",
+    "https://www.googleapis.com/auth/directory.readonly",
+    "https://www.googleapis.com/auth/script.scriptapp",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/gmail.send"
+  ],
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8"
+}
