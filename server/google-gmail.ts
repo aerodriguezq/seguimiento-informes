@@ -764,11 +764,13 @@ export async function findCandidateEmails(
   fromEmails: string[],
   afterDate: Date,
   maxResults = 8,
+  subject?: string,
 ): Promise<EmailCandidate[]> {
-  if (fromEmails.length === 0) return [];
+  if (fromEmails.length === 0 && !subject) return [];
   const afterSeconds = Math.floor(afterDate.getTime() / 1000);
-  const senderQuery = `(${fromEmails.map((email) => `from:${email}`).join(' OR ')})`;
-  const query = `${senderQuery} after:${afterSeconds}`;
+  const senderQuery = fromEmails.length > 0 ? `(${fromEmails.map((email) => `from:${email}`).join(' OR ')})` : '';
+  const subjectQuery = subject?.trim() ? `subject:"${subject.trim()}"` : '';
+  const query = [senderQuery, subjectQuery, `after:${afterSeconds}`].filter(Boolean).join(' ');
   const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`;
   const listResponse = await fetch(listUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!listResponse.ok) {

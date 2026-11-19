@@ -59,7 +59,7 @@ interface ReportDetailModalProps {
   onSearchCandidateEmails: (reportId: string) => Promise<EmailCandidate[]>;
   onConfirmCandidateEmail: (reportId: string, messageId: string) => Promise<void>;
   onDismissCandidateEmail: (reportId: string, messageId: string) => Promise<void>;
-  onSearchStageCandidateEmails: (reportId: string, stepId: string) => Promise<EmailCandidate[]>;
+  onSearchStageCandidateEmails: (reportId: string, stepId: string, subject?: string) => Promise<EmailCandidate[]>;
   onAttachStageEmail: (reportId: string, stepId: string, messageId: string) => Promise<void>;
   onEditReport: (reportId: string, updates: { month?: string; dueDate?: string; contactIds?: string[]; primaryContactId?: string; observations?: string }) => Promise<void>;
   onEditReportStage: (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null; fromEmail?: string | null }) => Promise<void>;
@@ -106,6 +106,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [stageDueInput, setStageDueInput] = useState('');
   const [stageEmailInput, setStageEmailInput] = useState('');
   const [stageCandidateEmails, setStageCandidateEmails] = useState<EmailCandidate[] | null>(null);
+  const [stageSubjectInput, setStageSubjectInput] = useState('');
   const [isSearchingStageCandidates, setIsSearchingStageCandidates] = useState(false);
   const [stageCandidateError, setStageCandidateError] = useState('');
   const [attachingStageMessageId, setAttachingStageMessageId] = useState<string | null>(null);
@@ -285,6 +286,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
     setStageStartInput(startDate ?? '');
     setStageDueInput(dueDate ?? '');
     setStageEmailInput(fromEmail ?? '');
+    setStageSubjectInput('');
     setStageCandidateEmails(null);
     setStageCandidateError('');
   };
@@ -293,7 +295,7 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
     setIsSearchingStageCandidates(true);
     setStageCandidateError('');
     try {
-      const results = await onSearchStageCandidateEmails(report.id, stepId);
+      const results = await onSearchStageCandidateEmails(report.id, stepId, stageSubjectInput.trim() || undefined);
       setStageCandidateEmails(results);
     } catch (err) {
       setStageCandidateError(err instanceof Error ? err.message : 'No fue posible buscar correos.');
@@ -940,12 +942,19 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                                   placeholder="Correo del remitente"
                                   className="w-44 px-1.5 py-1 text-xs border border-slate-200 rounded-md outline-none focus:border-teal-600"
                                 />
+                                <input
+                                  type="text"
+                                  value={stageSubjectInput}
+                                  onChange={(e) => setStageSubjectInput(e.target.value)}
+                                  placeholder="Pega el asunto del correo (opcional)"
+                                  className="w-44 px-1.5 py-1 text-[11px] border border-slate-200 rounded-md outline-none focus:border-teal-600"
+                                />
                                 <button
                                   type="button"
                                   onClick={() => void handleSearchStageCandidates(stage.stepId)}
                                   disabled={isSearchingStageCandidates}
                                   className="flex items-center gap-1 text-[10.5px] font-semibold text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
-                                  title="Busca en Gmail el correo real de esta entrega, entre los responsables de este paso"
+                                  title="Busca en Gmail por ese asunto (o, si lo dejas vacío, entre los responsables de este paso)"
                                 >
                                   <Search className="h-3 w-3" />
                                   {isSearchingStageCandidates ? 'Buscando...' : 'Buscar correo en Gmail'}

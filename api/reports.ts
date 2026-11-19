@@ -1734,7 +1734,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       if (!(await isAdminRequest(request, sql))) {
         return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede buscar el correo de una etapa.'] });
       }
-      const { stepId } = request.body ?? {};
+      const { stepId, subject } = request.body ?? {};
       const stepIdNum = Number(stepId);
       if (!Number.isInteger(stepIdNum) || stepIdNum <= 0) {
         return response.status(400).json({ data: null, meta: {}, errors: ['Falta el id del paso.'] });
@@ -1749,13 +1749,21 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       if (!accessToken) {
         return response.status(503).json({ data: null, meta: {}, errors: ['Conecta una cuenta de Google (Fuentes Drive) para poder buscar correos.'] });
       }
-      const contactRows = (await sql`
-        SELECT c.email FROM tipo_informe_paso_contacto tpc
-        JOIN contactos c ON c.contacto_id = tpc.contacto_id
-        WHERE tpc.paso_id = ${stepIdNum} AND c.email IS NOT NULL AND c.email <> ''
-      `) as any[];
+      // Si se pega un asunto exacto, la búsqueda ya queda lo bastante
+      // acotada por sí sola -- no se exige además que el remitente esté
+      // en la lista de contactos configurados del paso.
+      const hasSubject = typeof subject === 'string' && subject.trim().length > 0;
+      let fromEmails: string[] = [];
+      if (!hasSubject) {
+        const contactRows = (await sql`
+          SELECT c.email FROM tipo_informe_paso_contacto tpc
+          JOIN contactos c ON c.contacto_id = tpc.contacto_id
+          WHERE tpc.paso_id = ${stepIdNum} AND c.email IS NOT NULL AND c.email <> ''
+        `) as any[];
+        fromEmails = contactRows.map((c: any) => c.email);
+      }
       const since = stageRow.fecha_inicio ? new Date(stageRow.fecha_inicio) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const candidates = await findCandidateEmails(accessToken, contactRows.map((c: any) => c.email), since);
+      const candidates = await findCandidateEmails(accessToken, fromEmails, since, 8, hasSubject ? subject : undefined);
       return response.status(200).json({ data: { candidates }, meta: {}, errors: [] });
     } else if (action === 'attachStageEmail') {
       // Toma un correo elegido de 'searchStageCandidateEmails' y lo asocia a

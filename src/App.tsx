@@ -1121,11 +1121,11 @@ export default function App() {
     showToast('Correo marcado como inválido. El recordatorio se reanuda.', 'success');
   };
 
-  const handleSearchStageCandidateEmails = async (reportId: string, stepId: string): Promise<EmailCandidate[]> => {
+  const handleSearchStageCandidateEmails = async (reportId: string, stepId: string, subject?: string): Promise<EmailCandidate[]> => {
     const response = await fetch('/api/reports', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'searchStageCandidateEmails', reportId, stepId: Number(stepId) }),
+      body: JSON.stringify({ action: 'searchStageCandidateEmails', reportId, stepId: Number(stepId), subject }),
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible buscar correos.');
