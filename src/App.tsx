@@ -1121,6 +1121,29 @@ export default function App() {
     showToast('Correo marcado como inválido. El recordatorio se reanuda.', 'success');
   };
 
+  const handleSearchStageCandidateEmails = async (reportId: string, stepId: string): Promise<EmailCandidate[]> => {
+    const response = await fetch('/api/reports', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'searchStageCandidateEmails', reportId, stepId: Number(stepId) }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible buscar correos.');
+    return payload.data.candidates || [];
+  };
+
+  const handleAttachStageEmail = async (reportId: string, stepId: string, messageId: string) => {
+    const response = await fetch('/api/reports', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'attachStageEmail', reportId, stepId: Number(stepId), messageId }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.errors?.[0] || 'No fue posible asociar el correo.');
+    setReports((prev) => prev.map((rep) => (rep.id === reportId ? payload.data : rep)));
+    showToast('Correo asociado a la etapa.', 'success');
+  };
+
   // Project settings
   const handleToggleProjectAutoAlerts = async (projectId: string) => {
     const project = projects.find((p) => p.id === projectId);
@@ -2048,6 +2071,8 @@ export default function App() {
           onSearchCandidateEmails={handleSearchCandidateEmails}
           onConfirmCandidateEmail={handleConfirmCandidateEmail}
           onDismissCandidateEmail={handleDismissCandidateEmail}
+          onSearchStageCandidateEmails={handleSearchStageCandidateEmails}
+          onAttachStageEmail={handleAttachStageEmail}
           onEditReport={handleEditReport}
           onEditReportStage={handleEditReportStage}
           onDeleteReportStageProgress={handleDeleteReportStageProgress}

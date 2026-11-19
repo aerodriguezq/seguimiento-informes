@@ -1726,6 +1726,65 @@ async function handler(request: VercelRequest, response: VercelResponse) {
           'Se marcó un correo parecido como no correspondiente a esta entrega -- el recordatorio se reanuda.'
         )
       `;
+    } else if (action === 'searchStageCandidateEmails') {
+      // Igual que 'searchCandidateEmails', pero para una etapa YA cerrada
+      // (no la que está activa en el flujo) -- sirve para cuando se
+      // confirmó una entrega a mano, sin correo detectado, y luego se
+      // quiere encontrar y asociar el correo real de esa entrega.
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede buscar el correo de una etapa.'] });
+      }
+      const { stepId } = request.body ?? {};
+      const stepIdNum = Number(stepId);
+      if (!Number.isInteger(stepIdNum) || stepIdNum <= 0) {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Falta el id del paso.'] });
+      }
+      const [stageRow] = (await sql`
+        SELECT fecha_inicio FROM informe_pasos_instancia WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
+      `) as any[];
+      if (!stageRow) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Esta etapa todavía no tiene una instancia generada para este informe.'] });
+      }
+      const accessToken = await getConnectedAccessToken(sql);
+      if (!accessToken) {
+        return response.status(503).json({ data: null, meta: {}, errors: ['Conecta una cuenta de Google (Fuentes Drive) para poder buscar correos.'] });
+      }
+      const contactRows = (await sql`
+        SELECT c.email FROM tipo_informe_paso_contacto tpc
+        JOIN contactos c ON c.contacto_id = tpc.contacto_id
+        WHERE tpc.paso_id = ${stepIdNum} AND c.email IS NOT NULL AND c.email <> ''
+      `) as any[];
+      const since = stageRow.fecha_inicio ? new Date(stageRow.fecha_inicio) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const candidates = await findCandidateEmails(accessToken, contactRows.map((c: any) => c.email), since);
+      return response.status(200).json({ data: { candidates }, meta: {}, errors: [] });
+    } else if (action === 'attachStageEmail') {
+      // Toma un correo elegido de 'searchStageCandidateEmails' y lo asocia a
+      // una etapa ya cerrada -- guarda el remitente real y deja funcionando
+      // el ícono de "ver correo en Gmail", sin tocar la fecha de recepción
+      // ya registrada ni mover el flujo.
+      if (!(await isAdminRequest(request, sql))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['Solo un administrador puede asociar un correo a una etapa.'] });
+      }
+      const { stepId, messageId } = request.body ?? {};
+      const stepIdNum = Number(stepId);
+      if (!Number.isInteger(stepIdNum) || stepIdNum <= 0 || !messageId || typeof messageId !== 'string') {
+        return response.status(400).json({ data: null, meta: {}, errors: ['Falta el paso o el id del correo.'] });
+      }
+      const [existingStage] = (await sql`
+        SELECT 1 FROM informe_pasos_instancia WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
+      `) as any[];
+      if (!existingStage) {
+        return response.status(404).json({ data: null, meta: {}, errors: ['Esta etapa todavía no tiene una instancia generada para este informe.'] });
+      }
+      const accessToken = await getConnectedAccessToken(sql);
+      if (!accessToken) {
+        return response.status(503).json({ data: null, meta: {}, errors: ['Conecta una cuenta de Google (Fuentes Drive) para poder leer ese correo.'] });
+      }
+      const delivery = await fetchMessageAsDelivery(accessToken, messageId);
+      await sql`
+        UPDATE informe_pasos_instancia SET correo_gmail_id = ${messageId}, correo_remitente = ${delivery.fromEmail}, updated_at = NOW()
+        WHERE informe_id = ${reportId} AND paso_id = ${stepIdNum}
+      `;
     } else if (action === 'attachment') {
       const { attachment, userName } = request.body ?? {};
       if (!attachment?.name || !attachment?.driveUrl) {

@@ -59,6 +59,8 @@ interface ReportDetailModalProps {
   onSearchCandidateEmails: (reportId: string) => Promise<EmailCandidate[]>;
   onConfirmCandidateEmail: (reportId: string, messageId: string) => Promise<void>;
   onDismissCandidateEmail: (reportId: string, messageId: string) => Promise<void>;
+  onSearchStageCandidateEmails: (reportId: string, stepId: string) => Promise<EmailCandidate[]>;
+  onAttachStageEmail: (reportId: string, stepId: string, messageId: string) => Promise<void>;
   onEditReport: (reportId: string, updates: { month?: string; dueDate?: string; contactIds?: string[]; primaryContactId?: string; observations?: string }) => Promise<void>;
   onEditReportStage: (reportId: string, stepId: string, updates: { startDate?: string | null; dueDate?: string | null; fromEmail?: string | null }) => Promise<void>;
   onDeleteReportStageProgress: (reportId: string, stepId: string) => Promise<void>;
@@ -82,6 +84,8 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   onSearchCandidateEmails,
   onConfirmCandidateEmail,
   onDismissCandidateEmail,
+  onSearchStageCandidateEmails,
+  onAttachStageEmail,
   onEditReport,
   onEditReportStage,
   onDeleteReportStageProgress,
@@ -101,6 +105,10 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
   const [stageStartInput, setStageStartInput] = useState('');
   const [stageDueInput, setStageDueInput] = useState('');
   const [stageEmailInput, setStageEmailInput] = useState('');
+  const [stageCandidateEmails, setStageCandidateEmails] = useState<EmailCandidate[] | null>(null);
+  const [isSearchingStageCandidates, setIsSearchingStageCandidates] = useState(false);
+  const [stageCandidateError, setStageCandidateError] = useState('');
+  const [attachingStageMessageId, setAttachingStageMessageId] = useState<string | null>(null);
   const [isSavingStage, setIsSavingStage] = useState(false);
   const [deletingStageId, setDeletingStageId] = useState<string | null>(null);
   const [togglingAlarmId, setTogglingAlarmId] = useState<string | null>(null);
@@ -277,6 +285,34 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
     setStageStartInput(startDate ?? '');
     setStageDueInput(dueDate ?? '');
     setStageEmailInput(fromEmail ?? '');
+    setStageCandidateEmails(null);
+    setStageCandidateError('');
+  };
+
+  const handleSearchStageCandidates = async (stepId: string) => {
+    setIsSearchingStageCandidates(true);
+    setStageCandidateError('');
+    try {
+      const results = await onSearchStageCandidateEmails(report.id, stepId);
+      setStageCandidateEmails(results);
+    } catch (err) {
+      setStageCandidateError(err instanceof Error ? err.message : 'No fue posible buscar correos.');
+    } finally {
+      setIsSearchingStageCandidates(false);
+    }
+  };
+
+  const handleAttachStageEmail = async (stepId: string, messageId: string) => {
+    setAttachingStageMessageId(messageId);
+    try {
+      await onAttachStageEmail(report.id, stepId, messageId);
+      setEditingStageId(null);
+      setStageCandidateEmails(null);
+    } catch (err) {
+      setStageCandidateError(err instanceof Error ? err.message : 'No fue posible asociar ese correo.');
+    } finally {
+      setAttachingStageMessageId(null);
+    }
   };
 
   const handleSaveStage = async (stepId: string) => {
@@ -848,7 +884,8 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                     {report.stageInstances.map((stage) => {
                       const isEditingStage = editingStageId === stage.stepId;
                       return (
-                        <tr key={stage.stepId}>
+                        <React.Fragment key={stage.stepId}>
+                        <tr>
                           <td className="py-2.5 px-4 font-semibold text-slate-900">{stage.order}. {stage.stepName}</td>
                           <td className="py-2.5 px-3 text-slate-600">
                             {isEditingStage ? (
@@ -895,13 +932,25 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                               )}
                             </div>
                             {isEditingStage ? (
-                              <input
-                                type="email"
-                                value={stageEmailInput}
-                                onChange={(e) => setStageEmailInput(e.target.value)}
-                                placeholder="Correo del remitente"
-                                className="mt-1 w-44 px-1.5 py-1 text-xs border border-slate-200 rounded-md outline-none focus:border-teal-600"
-                              />
+                              <div className="mt-1 space-y-1">
+                                <input
+                                  type="email"
+                                  value={stageEmailInput}
+                                  onChange={(e) => setStageEmailInput(e.target.value)}
+                                  placeholder="Correo del remitente"
+                                  className="w-44 px-1.5 py-1 text-xs border border-slate-200 rounded-md outline-none focus:border-teal-600"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSearchStageCandidates(stage.stepId)}
+                                  disabled={isSearchingStageCandidates}
+                                  className="flex items-center gap-1 text-[10.5px] font-semibold text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                                  title="Busca en Gmail el correo real de esta entrega, entre los responsables de este paso"
+                                >
+                                  <Search className="h-3 w-3" />
+                                  {isSearchingStageCandidates ? 'Buscando...' : 'Buscar correo en Gmail'}
+                                </button>
+                              </div>
                             ) : (
                               stage.fromEmail && (
                                 <div className="mt-0.5 max-w-[180px] truncate text-[10.5px] text-slate-400" title={stage.fromEmail}>
@@ -959,6 +1008,57 @@ export const ReportDetailModal: React.FC<ReportDetailModalProps> = ({
                             </td>
                           )}
                         </tr>
+                        {isEditingStage && (isSearchingStageCandidates || stageCandidateEmails || stageCandidateError) && (
+                          <tr>
+                            <td colSpan={user.isAdmin ? 6 : 5} className="bg-indigo-50/60 px-4 py-3">
+                              {stageCandidateError && (
+                                <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">{stageCandidateError}</p>
+                              )}
+                              {isSearchingStageCandidates && (
+                                <p className="text-xs text-indigo-700">Buscando correos de los responsables de este paso...</p>
+                              )}
+                              {stageCandidateEmails && (
+                                stageCandidateEmails.length === 0 ? (
+                                  <p className="text-xs text-indigo-800">No se encontró ningún correo de los responsables de este paso.</p>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {stageCandidateEmails.map((candidate) => (
+                                      <div key={candidate.messageId} className="bg-white border border-indigo-200 rounded-lg p-2.5 text-xs space-y-1">
+                                        <div className="flex items-start justify-between gap-3">
+                                          <p className="font-semibold text-slate-900 truncate" title={candidate.subject}>{candidate.subject}</p>
+                                          <span className="text-[10.5px] text-slate-400 shrink-0">
+                                            {candidate.receivedAt ? new Date(candidate.receivedAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : ''}
+                                          </span>
+                                        </div>
+                                        <p className="text-slate-500">De: {candidate.from}</p>
+                                        <div className="flex items-center gap-3 pt-1">
+                                          <a
+                                            href={`https://mail.google.com/mail/u/0/#all/${candidate.messageId}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-semibold"
+                                          >
+                                            <Send className="w-3 h-3" />
+                                            Ver correo
+                                          </a>
+                                          <button
+                                            type="button"
+                                            onClick={() => void handleAttachStageEmail(stage.stepId, candidate.messageId)}
+                                            disabled={attachingStageMessageId !== null}
+                                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                          >
+                                            {attachingStageMessageId === candidate.messageId ? 'Asociando...' : 'Usar este correo'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
