@@ -70,7 +70,7 @@ async function attachVinculaTodosSheets(sql: SqlClient, reportId: number, projec
     await sql`
       INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
       VALUES (
-        COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
+        nextval('informe_adjuntos_adjunto_id_seq'),
         ${reportId}, ${`Cronograma de Seguimiento: ${sheet.nombre}`}, ${driveUrl}, 'Seguimiento', NOW()
       )
     `;
@@ -302,7 +302,7 @@ async function createStepAlert(
   const insertedAlerts = await sql`
     INSERT INTO alertas (alerta_id, proyecto_id, informe_id, paso_id, nombre, frecuencia, tipo, activa, created_at, updated_at)
     VALUES (
-      COALESCE((SELECT MAX(alerta_id) FROM alertas), 0) + 1,
+      nextval('alertas_alerta_id_seq'),
       ${projectId}, ${reportId}, ${stepId}, ${`Recordatorio: ${stepName}`}, 'Diario hasta la entrega', 'Seguimiento', ${!requiresReview}, NOW(), NOW()
     )
     RETURNING alerta_id AS id
@@ -507,7 +507,7 @@ async function createReportRow(sql: SqlClient, input: CreateReportInput): Promis
   const insertedReports = await sql`
     INSERT INTO informes (informe_id, proyecto_id, tipo_informe_id, estado, mes_nombre, anio, fecha, observaciones, created_at, updated_at)
     VALUES (
-      COALESCE((SELECT MAX(informe_id) FROM informes), 0) + 1,
+      nextval('informes_informe_id_seq'),
       ${input.projectId}, ${input.typeId}, ${input.status}, ${input.month}, ${input.year}, ${dueDate},
       ${input.observations || 'Apertura de informe para seguimiento del cronograma contractual.'},
       NOW(), NOW()
@@ -540,7 +540,7 @@ async function createReportRow(sql: SqlClient, input: CreateReportInput): Promis
   await sql`
     INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
     VALUES (
-      COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+      nextval('seguimiento_informe_seguimiento_id_seq'),
       ${reportId}, ${input.status}, NOW(), ${input.userName || 'Usuario'},
       ${input.observations || 'Creación inicial del informe.'}
     )
@@ -633,7 +633,7 @@ async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ cre
           revisor_nombre, fecha_entrega_real, fecha_revision, created_at, updated_at
         )
         VALUES (
-          COALESCE((SELECT MAX(informe_id) FROM informes), 0) + 1,
+          nextval('informes_informe_id_seq'),
           ${project.id}, ${type.id}, ${status}, ${month}, ${year}, ${dueDate},
           ${fullObservations || 'Informe histórico cargado masivamente.'}, ${status === 'Enviado'},
           ${revisorNombre || null}, ${fechaEntregaReal || null}, ${fechaRevision || null},
@@ -650,13 +650,13 @@ async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ cre
       if (enlaceInforme && isDriveLink(enlaceInforme)) {
         await sql`
           INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
-          VALUES (COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1, ${reportId}, 'Informe', ${enlaceInforme}, 'Carga masiva', NOW())
+          VALUES (nextval('informe_adjuntos_adjunto_id_seq'), ${reportId}, 'Informe', ${enlaceInforme}, 'Carga masiva', NOW())
         `;
       }
       if (enlaceEvidencias && isDriveLink(enlaceEvidencias)) {
         await sql`
           INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
-          VALUES (COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1, ${reportId}, 'Evidencias', ${enlaceEvidencias}, 'Carga masiva', NOW())
+          VALUES (nextval('informe_adjuntos_adjunto_id_seq'), ${reportId}, 'Evidencias', ${enlaceEvidencias}, 'Carga masiva', NOW())
         `;
       }
       if (status === 'Enviado') {
@@ -686,7 +686,7 @@ async function bulkImportReports(sql: SqlClient, rows: unknown[]): Promise<{ cre
       await sql`
         INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
         VALUES (
-          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          nextval('seguimiento_informe_seguimiento_id_seq'),
           ${reportId}, ${status}, NOW(), 'Carga masiva', 'Informe histórico importado masivamente.'
         )
       `;
@@ -786,7 +786,7 @@ async function advanceReportStep(
   await sql`
     INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario, correo_link)
     VALUES (
-      COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+      nextval('seguimiento_informe_seguimiento_id_seq'),
       ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), ${resolvedDelivery.receivedAt.toISOString()},
       ${actorName || (resolvedDelivery.messageId ? 'Sistema (detección automática)' : 'Usuario')},
       ${comentario}, ${emailLink}
@@ -1022,7 +1022,7 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
         await sql`
           INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
           VALUES (
-            COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+            nextval('seguimiento_informe_seguimiento_id_seq'),
             ${step.reportId}, 'En revisión', NOW(), 'Sistema (detección automática)',
             ${`Se encontraron ${match.matchCount} correos coincidentes con el asunto "${expectedSubject}" -- requiere revisión manual antes de avanzar.`}
           )
@@ -1035,7 +1035,7 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
         await sql`
           INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
           VALUES (
-            COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
+            nextval('informe_adjuntos_adjunto_id_seq'),
             ${step.reportId}, ${`Evidencia recibida por correo (${expectedSubject})`}, ${match.driveUrl},
             ${match.fromEmail || 'Detección automática'}, NOW()
           )
@@ -1057,7 +1057,7 @@ async function runDeliveryDetectionSweep(sql: SqlClient): Promise<{ checked: num
         await sql`
           INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario, correo_link)
           VALUES (
-            COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+            nextval('seguimiento_informe_seguimiento_id_seq'),
             ${step.reportId}, (SELECT estado FROM informes WHERE informe_id = ${step.reportId}),
             ${match.receivedAt || new Date().toISOString()}, 'Sistema (detección automática)',
             ${`Se detectó el correo de entrega para "${step.stepName}"${match.fromEmail ? ` de ${match.fromEmail}` : ''} -- pendiente de revisión por ${step.principalName || 'el Principal'}.`},
@@ -1131,17 +1131,26 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       // Sin ON DELETE CASCADE en informe_contacto/seguimiento_informe ni en
       // alerta_contacto/alerta_dia (que referencian a las alertas del paso
       // actual, que sí cascadean desde informes) — hay que limpiar a mano en
-      // el orden correcto o la FK bloquea el borrado.
+      // el orden correcto o la FK bloquea el borrado. Todos los DELETE viajan
+      // en una sola transacción (sql.transaction) -- antes, si uno fallaba a
+      // mitad de camino, quedaba un informe a medio borrar (ej. sus alertas
+      // ya eliminadas pero el informe todavía existiendo).
       const linkedAlerts = (await sql`SELECT alerta_id AS id FROM alertas WHERE informe_id = ${reportId}`) as any[];
       const alertIds = linkedAlerts.map((a: any) => a.id);
-      if (alertIds.length > 0) {
-        await sql`DELETE FROM alerta_contacto WHERE alerta_id = ANY(${alertIds})`;
-        await sql`DELETE FROM alerta_dia WHERE alerta_id = ANY(${alertIds})`;
-        await sql`DELETE FROM alertas WHERE alerta_id = ANY(${alertIds})`;
-      }
-      await sql`DELETE FROM informe_contacto WHERE informe_id = ${reportId}`;
-      await sql`DELETE FROM seguimiento_informe WHERE informe_id = ${reportId}`;
-      const deleted = await sql`DELETE FROM informes WHERE informe_id = ${reportId} RETURNING informe_id AS id`;
+      const deleteQueries = [
+        ...(alertIds.length > 0
+          ? [
+              sql`DELETE FROM alerta_contacto WHERE alerta_id = ANY(${alertIds})`,
+              sql`DELETE FROM alerta_dia WHERE alerta_id = ANY(${alertIds})`,
+              sql`DELETE FROM alertas WHERE alerta_id = ANY(${alertIds})`,
+            ]
+          : []),
+        sql`DELETE FROM informe_contacto WHERE informe_id = ${reportId}`,
+        sql`DELETE FROM seguimiento_informe WHERE informe_id = ${reportId}`,
+        sql`DELETE FROM informes WHERE informe_id = ${reportId} RETURNING informe_id AS id`,
+      ];
+      const results = (await sql.transaction(deleteQueries)) as any[];
+      const deleted = results[results.length - 1];
       if (!deleted[0]) return response.status(404).json({ data: null, meta: {}, errors: ['Informe no encontrado.'] });
       return response.status(200).json({ data: deleted[0], meta: {}, errors: [] });
     }
@@ -1265,7 +1274,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       await sql`
         INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
         VALUES (
-          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          nextval('seguimiento_informe_seguimiento_id_seq'),
           ${reportId}, ${status}, NOW(), ${userName || 'Usuario'}, ${comment || ''}
         )
       `;
@@ -1331,7 +1340,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       await sql`
         INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
         VALUES (
-          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          nextval('seguimiento_informe_seguimiento_id_seq'),
           ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), ${userName || 'Usuario'}, 'Informe editado.'
         )
       `;
@@ -1542,7 +1551,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       await sql`
         INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
         VALUES (
-          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          nextval('seguimiento_informe_seguimiento_id_seq'),
           ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), ${userName || 'Usuario'},
           ${isReturning
             ? `Devuelto al paso "${step.name}" por observación: "${comment.trim()}"${attachments.length > 0 ? ` (${attachments.length} archivo(s) adjunto(s))` : ''}${emailSent ? ' (correo enviado a los responsables)' : ' (no se pudo enviar el correo)'}${clearedStepNames.length > 0 ? ` — también se reinician (quedan pendientes de nuevo): ${clearedStepNames.join(', ')}.` : ''}`
@@ -1602,7 +1611,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       await sql`
         INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
         VALUES (
-          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          nextval('seguimiento_informe_seguimiento_id_seq'),
           ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), ${undoUserName || 'Usuario'},
           ${`Deshecho hasta el paso "${undoStep.name}" (corrección por error, sin notificar).${undoClearedStepNames.length > 0 ? ` También se reinician: ${undoClearedStepNames.join(', ')}.` : ''}`}
         )
@@ -1636,7 +1645,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       await sql`
         INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
         VALUES (
-          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          nextval('seguimiento_informe_seguimiento_id_seq'),
           ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), ${userName || 'Usuario'},
           ${`Se asignó a ${contactExists.nombre} como persona a cargo de este informe.`}
         )
@@ -1692,7 +1701,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
         await sql`
           INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
           VALUES (
-            COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
+            nextval('informe_adjuntos_adjunto_id_seq'),
             ${reportId}, 'Evidencia confirmada manualmente desde correo', ${delivery.driveUrl},
             ${delivery.fromEmail || 'Confirmación manual'}, NOW()
           )
@@ -1736,7 +1745,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       await sql`
         INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
         VALUES (
-          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          nextval('seguimiento_informe_seguimiento_id_seq'),
           ${reportId}, (SELECT estado FROM informes WHERE informe_id = ${reportId}), NOW(), 'Usuario',
           'Se marcó un correo parecido como no correspondiente a esta entrega -- el recordatorio se reanuda.'
         )
@@ -1820,7 +1829,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       await sql`
         INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
         VALUES (
-          COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
+          nextval('informe_adjuntos_adjunto_id_seq'),
           ${reportId}, ${attachment.name}, ${attachment.driveUrl}, ${userName || attachment.uploadedBy || 'Usuario'}, NOW()
         )
       `;

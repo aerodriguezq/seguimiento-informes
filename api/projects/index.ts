@@ -64,7 +64,7 @@ async function attachSeguimientoToInforme(sql: SqlClient, informeId: number, nom
   await sql`
     INSERT INTO informe_adjuntos (adjunto_id, informe_id, nombre, drive_url, subido_por, subido_en)
     VALUES (
-      COALESCE((SELECT MAX(adjunto_id) FROM informe_adjuntos), 0) + 1,
+      nextval('informe_adjuntos_adjunto_id_seq'),
       ${informeId}, ${`Cronograma de Seguimiento: ${nombreHoja}`}, ${driveUrl}, 'Seguimiento', NOW()
     )
   `;

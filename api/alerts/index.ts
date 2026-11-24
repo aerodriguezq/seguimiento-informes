@@ -373,7 +373,7 @@ async function handleOverdueStepReminder(
       await sql`
         INSERT INTO seguimiento_informe (seguimiento_id, informe_id, estado, fecha_evento, usuario_nombre, comentario)
         VALUES (
-          COALESCE((SELECT MAX(seguimiento_id) FROM seguimiento_informe), 0) + 1,
+          nextval('seguimiento_informe_seguimiento_id_seq'),
           ${alert.reportId}, (SELECT estado FROM informes WHERE informe_id = ${alert.reportId}), NOW(),
           'Sistema (detección automática)',
           ${`Se encontraron ${candidates.length} correo(s) parecido(s) para "${stepName}" -- se pausó el recordatorio y se pidió validación manual.`}
@@ -775,7 +775,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
     const inserted = await sql`
       INSERT INTO alertas (alerta_id, proyecto_id, nombre, frecuencia, hora_texto, tipo, activa, created_at, updated_at)
       VALUES (
-        COALESCE((SELECT MAX(alerta_id) FROM alertas), 0) + 1,
+        nextval('alertas_alerta_id_seq'),
         ${projectId || null}, ${name}, ${schedule || ''}, ${time || ''}, ${type || 'Seguimiento'}, TRUE, NOW(), NOW()
       )
       RETURNING alerta_id AS id
