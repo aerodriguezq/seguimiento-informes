@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveSession } from '../server/google-oauth.js';
+import { canEditModuleRequest } from '../server/admin-auth.js';
 import { withApiMetrics } from '../server/metrics.js';
 
 async function handler(request: VercelRequest, response: VercelResponse) {
@@ -8,15 +9,23 @@ async function handler(request: VercelRequest, response: VercelResponse) {
   }
 
   try {
-    const expectedToken = process.env.APP_SCRIPT_SHARED_SECRET;
-    const receivedToken = request.headers.authorization?.replace(/^Bearer\s+/i, '') || request.query.token;
-    if (expectedToken && receivedToken && receivedToken !== expectedToken) {
-      return response.status(401).json({ data: null, meta: {}, errors: ['No autorizado.'] });
-    }
     const databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl?.trim()) return response.status(503).json({ data: null, meta: {}, errors: ['DATABASE_URL no está configurada.'] });
     const { neon } = await import('@neondatabase/serverless');
     const sql = neon(databaseUrl);
+
+    // Dos formas válidas de llegar acá: Apps Script/Colab con el secreto
+    // compartido exacto, o un usuario de la app con permiso de edición en
+    // Fuentes Drive. Antes, si NO se mandaba ningún token (el caso normal de
+    // cualquier cliente sin el secreto), la condición completa quedaba en
+    // falso y el chequeo se saltaba entero -- cualquiera sin login podía
+    // leer o sobrescribir los enlaces de origen/destino.
+    const expectedToken = process.env.APP_SCRIPT_SHARED_SECRET;
+    const receivedToken = request.headers.authorization?.replace(/^Bearer\s+/i, '') || request.query.token;
+    const hasValidSharedToken = !!expectedToken && receivedToken === expectedToken;
+    if (!hasValidSharedToken && !(await canEditModuleRequest(request, sql, 'drive_links'))) {
+      return response.status(401).json({ data: null, meta: {}, errors: ['No autorizado.'] });
+    }
 
     // Cada cuenta de Google conectada guarda y recupera sus propios últimos
     // enlaces. Apps Script/Colab (sin cookie de sesión) usan el bucket 'default'.

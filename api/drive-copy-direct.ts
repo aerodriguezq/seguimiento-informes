@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDriveSession } from '../server/google-oauth.js';
 import { getSql } from '../server/db.js';
+import { canEditModuleRequest } from '../server/admin-auth.js';
 import {
   getDriveAccessToken,
   copyDriveItemsBatch,
@@ -214,6 +215,9 @@ async function handler(request: VercelRequest, response: VercelResponse) {
     if (!session) return response.status(401).json({ data: null, meta: {}, errors: ['Conecta Google Drive antes de copiar.'] });
 
     const sql = await getSql();
+    if (!(await canEditModuleRequest(request, sql, 'drive_links'))) {
+      return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Fuentes Drive.'] });
+    }
     const action = request.body?.action;
     let jobId = typeof request.body?.jobId === 'string' ? request.body.jobId : null;
 

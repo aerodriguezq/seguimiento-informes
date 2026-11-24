@@ -1,9 +1,16 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { withApiMetrics } from '../server/metrics.js';
+import { getSql } from '../server/db.js';
+import { canEditModuleRequest } from '../server/admin-auth.js';
 
 async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'POST') {
     return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
+  }
+
+  const sql = await getSql();
+  if (!(await canEditModuleRequest(request, sql, 'drive_links'))) {
+    return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Fuentes Drive.'] });
   }
 
   const webhookUrl = process.env.APP_SCRIPT_WEBHOOK_URL;

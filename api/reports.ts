@@ -1175,15 +1175,21 @@ async function handler(request: VercelRequest, response: VercelResponse) {
 
     if (request.method === 'GET') {
       const reportsProjectId = request.query.projectId ? Number(request.query.projectId) : null;
-      if (reportsProjectId !== null) {
-        const accessibleIds = await getAccessibleProjectIds(request, sql);
-        if (accessibleIds !== 'all' && !accessibleIds.includes(reportsProjectId)) {
-          return response.status(403).json({ data: null, meta: {}, errors: ['No tienes acceso a ese proyecto.'] });
-        }
+      // getAccessibleProjectIds devuelve [] solo cuando no hay sesión válida
+      // (un usuario sin restricciones explícitas recibe 'all', no []) -- sin
+      // esto, cualquiera sin login podía pedir /api/reports sin projectId y
+      // recibir el listado completo de informes de todos los proyectos.
+      const accessibleIds = await getAccessibleProjectIds(request, sql);
+      if (accessibleIds !== 'all' && accessibleIds.length === 0) {
+        return response.status(401).json({ data: null, meta: {}, errors: ['Debes iniciar sesión para ver los informes.'] });
+      }
+      if (reportsProjectId !== null && accessibleIds !== 'all' && !accessibleIds.includes(reportsProjectId)) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes acceso a ese proyecto.'] });
       }
       const idRows = await sql`
         SELECT informe_id AS id FROM informes
-        WHERE ${reportsProjectId === null} OR proyecto_id = ${reportsProjectId}
+        WHERE (${reportsProjectId === null} OR proyecto_id = ${reportsProjectId})
+          AND (${accessibleIds === 'all'} OR proyecto_id = ANY(${accessibleIds === 'all' ? [] : accessibleIds}))
       `;
       const reports = await fetchReportsByIds(sql, idRows.map((r: any) => r.id));
       reports.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1206,6 +1212,9 @@ async function handler(request: VercelRequest, response: VercelResponse) {
     }
 
     if (request.method === 'POST') {
+      if (!(await canEditModuleRequest(request, sql, 'reports'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Informes.'] });
+      }
       const { projectId, typeId, month, year, status, observations, userName } = request.body ?? {};
 
       if (!projectId || !typeId || !month || !year || !status) {
@@ -1246,6 +1255,9 @@ async function handler(request: VercelRequest, response: VercelResponse) {
     let responseMeta: Record<string, unknown> = {};
 
     if (action === 'status') {
+      if (!(await canEditModuleRequest(request, sql, 'reports'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Informes.'] });
+      }
       const { status, comment, userName } = request.body ?? {};
       if (!status) return response.status(400).json({ data: null, meta: {}, errors: ['Falta el nuevo estado.'] });
 
@@ -1266,6 +1278,9 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       // observaciones. Año, tipo y proyecto se dejan fijos a propósito — de
       // ellos depende el consecutivo y el número de secuencia ya asignados;
       // si están mal, es más seguro borrar el informe y crear uno nuevo.
+      if (!(await canEditModuleRequest(request, sql, 'reports'))) {
+        return response.status(403).json({ data: null, meta: {}, errors: ['No tienes permiso de edición en Informes.'] });
+      }
       const { month, dueDate, contactIds, primaryContactId, observations, userName } = request.body ?? {};
       const has = (key: string) => Object.prototype.hasOwnProperty.call(request.body ?? {}, key);
 
