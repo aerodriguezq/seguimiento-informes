@@ -1,5 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { timingSafeEqual } from 'crypto';
 import { withApiMetrics } from '../../server/metrics.js';
+
+// Comparación en tiempo constante -- !== filtra el secreto carácter a
+// carácter por temporización. Buffers de distinto largo se rechazan sin
+// llamar a timingSafeEqual (que lanza si los tamaños no calzan).
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
 
 const syncTables = [
   'empresas',
@@ -30,11 +40,14 @@ async function handler(
     return response.status(405).json({ data: null, meta: {}, errors: ['Método no permitido.'] });
   }
 
+  // Solo por header -- el querystring queda en logs del servidor y en el
+  // historial de URL de quien lo invoque; el único llamador real (Apps
+  // Script, ver integrations/google-apps-script/Código.js) ya manda
+  // Authorization: Bearer, así que no hay nada que dejar de soportar.
   const expectedToken = process.env.APP_SCRIPT_SHARED_SECRET;
-  const receivedToken = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-    || request.query.token;
+  const receivedToken = request.headers.authorization?.replace(/^Bearer\s+/i, '') ?? '';
 
-  if (!expectedToken || receivedToken !== expectedToken) {
+  if (!expectedToken || !receivedToken || !safeEqual(receivedToken, expectedToken)) {
     return response.status(401).json({ data: null, meta: {}, errors: ['No autorizado.'] });
   }
 

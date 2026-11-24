@@ -2,6 +2,24 @@ import { readCookie } from './google-oauth.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
+// Mismo mapa que MODULE_DEFAULT_LEVEL en src/auth/AuthContext.tsx -- se
+// duplica acá (no se importa desde src/, que es código de frontend) porque
+// el backend necesita el mismo default por módulo para no quedar más
+// permisivo que lo que el usuario ve habilitado en el sidebar. Todo módulo
+// nuevo debe agregarse aquí en 'none', igual que allá.
+const MODULE_DEFAULT_LEVEL: Record<string, 'none' | 'view' | 'edit'> = {
+  dashboard: 'edit',
+  reports: 'edit',
+  projects: 'edit',
+  alerts: 'edit',
+  lists: 'edit',
+  drive_links: 'edit',
+  seguimiento: 'edit',
+  peticiones: 'edit',
+  file_cleaner: 'none',
+  performance: 'none',
+};
+
 export async function isAdminRequest(request: { headers: { cookie?: string } }, sql: SqlClient): Promise<boolean> {
   const sessionId = readCookie(request, 'app_session');
   if (!sessionId) return false;
@@ -16,12 +34,13 @@ export async function isAdminRequest(request: { headers: { cookie?: string } }, 
 
 // Admin siempre puede; si no, revisa el permiso de esta persona para ese
 // módulo. Un módulo SIN entrada en permisos (nunca se guardó explícitamente)
-// se trata como "edit" por defecto -- igual que levelOf() en
-// src/auth/AuthContext.tsx ("user.permissions[module] ?? 'edit'"). Antes
-// este backend exigía 'edit' explícito, así que cualquier usuario sin ese
-// módulo guardado en su JSONB (el caso normal para módulos nuevos como
-// "seguimiento"/"peticiones" en cuentas creadas antes de que existieran)
-// veía el botón habilitado en el frontend pero el backend lo rechazaba.
+// cae al default de MODULE_DEFAULT_LEVEL -- igual que levelOf() en
+// src/auth/AuthContext.tsx ("user.permissions[module] ?? MODULE_DEFAULT_LEVEL[module]").
+// Antes acá el default era 'edit' GLOBAL para cualquier módulo sin entrada,
+// no por módulo: un módulo nuevo registrado como 'none' por defecto (la
+// regla del proyecto para módulos admin-only) quedaba editable en el
+// backend igual, aunque el frontend lo mantuviera oculto -- el chequeo
+// pasaba a ser pura decoración de UI.
 export async function canEditModuleRequest(
   request: { headers: { cookie?: string } },
   sql: SqlClient,
@@ -37,8 +56,9 @@ export async function canEditModuleRequest(
   `) as any[];
   if (!row) return false;
   if (row.isAdmin) return true;
-  const level = (row.permissions ?? {})[moduleKey];
-  return level === undefined || level === null || level === 'edit';
+  const storedLevel = (row.permissions ?? {})[moduleKey];
+  const level = storedLevel ?? MODULE_DEFAULT_LEVEL[moduleKey] ?? 'edit';
+  return level === 'edit';
 }
 
 // Para los pasos de flujo "requiere revisión": necesitamos saber QUIÉN está
