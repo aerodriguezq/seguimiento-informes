@@ -1,8 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { canEditModuleRequest, isAdminRequest, getAccessibleProjectIds } from '../../server/admin-auth.js';
-import { getGoogleOAuthClient } from '../../server/google-oauth.js';
 import { getSheetTitleByGid, getSheetGridWithBackgrounds, getSheetValues, listSheetTabs, type SheetCell, type SheetValue, type SheetTab } from '../../server/google-sheets.js';
-import { getDriveFileMeta, downloadDriveFileBuffer } from '../../server/google-drive.js';
+import { getDriveFileMeta, downloadDriveFileBuffer, getConnectedAccessToken } from '../../server/google-drive.js';
 import { isExcelMimeType, loadExcelWorkbook, findExcelSheetByName, getExcelGridWithBackgrounds, getExcelValues } from '../../server/excel-seguimiento-source.js';
 import { parseCronograma } from '../../server/cronograma-parser.js';
 import {
@@ -25,20 +24,9 @@ import {
 } from '../../server/seguimiento-parsers.js';
 import { getSweepGate, recordSweepRun } from '../../server/sweep-config.js';
 import { withApiMetrics } from '../../server/metrics.js';
+import { toClientErrorMessage } from '../../server/errors.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
-
-async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
-  const session = (await sql`
-    SELECT token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
-  `) as any[];
-  if (!session[0]) return null;
-  const client = await getGoogleOAuthClient();
-  client.setCredentials(JSON.parse(session[0].token_json));
-  const token = await client.getAccessToken();
-  if (!token.token) throw new Error('La sesión de Google conectada expiró. Reconéctala desde Fuentes Drive.');
-  return token.token;
-}
 
 // Cuando una hoja de Seguimiento queda ligada a un informe mensual ya
 // entregado, su link queda también como adjunto de ESE informe -- mismo
@@ -603,7 +591,7 @@ async function handler(
         }
         return response.status(200).json({ data: tabs, meta: { total: tabs.length }, errors: [] });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'No fue posible listar las pestañas del archivo.';
+        const message = toClientErrorMessage(error, 'No fue posible listar las pestañas del archivo.');
         return response.status(502).json({ data: null, meta: {}, errors: [message] });
       }
     }
@@ -903,7 +891,7 @@ async function handler(
         await sql`UPDATE seguimiento_config SET ultima_importacion = NOW(), ultimo_error = NULL WHERE seguimiento_id = ${seguimientoId}`;
         return response.status(200).json({ data: result, meta: {}, errors: [] });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'No fue posible importar el seguimiento.';
+        const message = toClientErrorMessage(error, 'No fue posible importar el seguimiento.');
         await sql`UPDATE seguimiento_config SET ultimo_error = ${message} WHERE seguimiento_id = ${seguimientoId}`;
         return response.status(502).json({ data: null, meta: {}, errors: [message] });
       }

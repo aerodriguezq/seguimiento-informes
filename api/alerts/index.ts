@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getDriveAccessToken } from '../../server/google-drive.js';
+import { getDriveAccessToken, getConnectedAccessToken } from '../../server/google-drive.js';
 import {
   sendEmail, confirmEmailSent, buildAlertEmailHtml, buildPeticionReminderEmailHtml,
   buildPrincipalOverdueReminderEmailHtml, buildCandidateValidationEmailHtml,
@@ -7,18 +7,11 @@ import {
 } from '../../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../../server/sweep-config.js';
 import { canEditModuleRequest, getAccessibleProjectIds } from '../../server/admin-auth.js';
+import { toClientErrorMessage } from '../../server/errors.js';
 import { logEmailSend } from '../../server/email-log.js';
 import { withApiMetrics } from '../../server/metrics.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
-
-async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
-  const session = (await sql`
-    SELECT token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
-  `) as any[];
-  if (!session[0]) return null;
-  return getDriveAccessToken(session[0].token_json);
-}
 
 // Igual que composeStepEmailSubject en api/reports.ts: el asunto real que la
 // automatización busca en Gmail es la base configurada en el paso más el
@@ -188,7 +181,7 @@ async function handleSend(request: VercelRequest, response: VercelResponse, sql:
       success: false,
       errorMessage: error instanceof Error ? error.message : String(error),
     });
-    return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible enviar el correo.'] });
+    return response.status(502).json({ data: null, meta: {}, errors: [toClientErrorMessage(error, 'No fue posible enviar el correo.')] });
   }
 }
 
@@ -763,7 +756,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
         await sql`UPDATE peticiones SET ultimo_recordatorio_nivel = ${level}, ultimo_recordatorio_en = ${todayIso} WHERE peticion_id = ${peticionId}`;
         return response.status(200).json({ data: { sent: true, level }, meta: {}, errors: [] });
       } catch (error) {
-        return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible enviar el recordatorio.'] });
+        return response.status(502).json({ data: null, meta: {}, errors: [toClientErrorMessage(error, 'No fue posible enviar el recordatorio.')] });
       }
     }
 

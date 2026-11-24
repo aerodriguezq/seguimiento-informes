@@ -11,6 +11,22 @@ export function extractDriveFolderId(input: string): string | null {
   return null;
 }
 
+// Centraliza lo que antes estaba copiado literal en reports.ts, catalogs.ts,
+// alerts/index.ts, projects/index.ts y drive-copy-direct.ts (como
+// getMostRecentAccessToken) -- no depende de la cookie de sesión del
+// navegador (los barridos por cron no tienen ninguna), usa la cuenta de
+// Google conectada más reciente. catalogs.ts y projects/index.ts tenían su
+// propia copia manual (sin el manejo de invalid_grant de getDriveAccessToken
+// de abajo), así que además de deduplicar, esto unifica el mensaje de error
+// cuando la conexión ya no es válida.
+export async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
+  const session = (await sql`
+    SELECT token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
+  `) as any[];
+  if (!session[0]) return null;
+  return getDriveAccessToken(session[0].token_json);
+}
+
 export async function getDriveAccessToken(tokenJson: string) {
   const client = await getGoogleOAuthClient();
   client.setCredentials(JSON.parse(tokenJson));

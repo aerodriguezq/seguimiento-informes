@@ -4,6 +4,7 @@ import { getSql } from '../server/db.js';
 import { canEditModuleRequest } from '../server/admin-auth.js';
 import {
   getDriveAccessToken,
+  getConnectedAccessToken,
   copyDriveItemsBatch,
   validateDriveItemsBatch,
   scanSourceItemsBatch,
@@ -15,6 +16,7 @@ import {
   type DriveCopyLogEntry,
 } from '../server/google-drive.js';
 import { withApiMetrics } from '../server/metrics.js';
+import { toClientErrorMessage } from '../server/errors.js';
 
 type SqlClient = ReturnType<typeof import('@neondatabase/serverless').neon>;
 
@@ -72,17 +74,6 @@ export const config = { maxDuration: 60 };
 // Por debajo del límite de la función: deja tiempo de sobra para guardar el
 // progreso en la base antes de que Vercel corte la ejecución.
 const CHUNK_BUDGET_MS = 40000;
-
-// Igual que getConnectedAccessToken en api/reports.ts -- no depende de la
-// cookie de sesión del navegador (no hay ninguna en un barrido por cron),
-// usa la cuenta de Google conectada más reciente.
-async function getMostRecentAccessToken(sql: SqlClient): Promise<string | null> {
-  const session = (await sql`
-    SELECT token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
-  `) as any[];
-  if (!session[0]) return null;
-  return getDriveAccessToken(session[0].token_json);
-}
 
 // Antes de copiar o validar nada, un job nuevo arranca en fase
 // "scanning_copying"/"scanning_validating": mapea TODO el árbol de origen
@@ -143,7 +134,7 @@ async function handleDriveCopySweep(sql: SqlClient): Promise<{ jobsProcessed: nu
   `) as any[];
   if (runningJobs.length === 0) return { jobsProcessed: 0, jobsCompleted: 0, skipped: 'no-running-jobs' };
 
-  const accessToken = await getMostRecentAccessToken(sql);
+  const accessToken = await getConnectedAccessToken(sql);
   if (!accessToken) return { jobsProcessed: 0, jobsCompleted: 0, skipped: 'no-connected-google-account' };
 
   const deadline = Date.now() + CHUNK_BUDGET_MS;
@@ -197,7 +188,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       return response.status(200).json({ data: result, meta: {}, errors: [] });
     } catch (error) {
       console.error('Drive copy background sweep failed', error);
-      const message = error instanceof Error ? error.message : 'No fue posible continuar las copias de Drive en segundo plano.';
+      const message = toClientErrorMessage(error, 'No fue posible continuar las copias de Drive en segundo plano.');
       return response.status(502).json({ data: null, meta: {}, errors: [message] });
     }
   }
@@ -496,7 +487,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
     });
   } catch (error) {
     console.error('Direct Drive copy failed', error);
-    const message = error instanceof Error ? error.message : 'No fue posible copiar la carpeta desde Google Drive.';
+    const message = toClientErrorMessage(error, 'No fue posible copiar la carpeta desde Google Drive.');
     // Si la conexión quedó inválida (invalid_grant), se borra la sesión
     // guardada -- si no, "Fuentes Drive" seguiría mostrando "conectado"
     // aunque cada operación real falle, sin ninguna señal de que hay que

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getDriveAccessToken } from '../server/google-drive.js';
+import { getDriveAccessToken, getConnectedAccessToken } from '../server/google-drive.js';
+import { toClientErrorMessage } from '../server/errors.js';
 import { findDeliveryEmail, findCandidateEmails, fetchMessageAsDelivery, sendEmail, confirmEmailSent, buildStepReturnEmailHtml, buildStepReviewPendingEmailHtml, buildStepDeliveryDetectedEmailHtml, type EmailAttachment } from '../server/google-gmail.js';
 import { getSweepGate, recordSweepRun } from '../server/sweep-config.js';
 import { isAdminRequest, canEditModuleRequest, getAccessibleProjectIds, getSessionUser } from '../server/admin-auth.js';
@@ -39,14 +40,6 @@ async function canActOnReviewStep(
   if (session.isAdmin) return { allowed: true, principalName: principal?.name ?? null };
   const allowed = !!principal?.email && String(principal.email).toLowerCase() === session.email.toLowerCase();
   return { allowed, principalName: principal?.name ?? null };
-}
-
-async function getConnectedAccessToken(sql: SqlClient): Promise<string | null> {
-  const session = (await sql`
-    SELECT token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
-  `) as any[];
-  if (!session[0]) return null;
-  return getDriveAccessToken(session[0].token_json);
 }
 
 // Las hojas de Seguimiento (Gantt) en modo "vincular a TODOS los informes"
@@ -1245,7 +1238,7 @@ async function handler(request: VercelRequest, response: VercelResponse) {
       try {
         reportId = await createReportRow(sql, { projectId, typeId, month, year, status, observations, userName });
       } catch (error) {
-        return response.status(400).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible crear el informe.'] });
+        return response.status(400).json({ data: null, meta: {}, errors: [toClientErrorMessage(error, 'No fue posible crear el informe.')] });
       }
 
       const [report] = await fetchReportsByIds(sql, [reportId]);

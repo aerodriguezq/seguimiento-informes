@@ -1,8 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { canEditModuleRequest, getAccessibleProjectIds } from '../server/admin-auth.js';
 import { sendEmail, confirmEmailSent, buildPeticionAssignedEmailHtml } from '../server/google-gmail.js';
-import { ensureDriveFolder, uploadDriveFile, extractDriveFolderId } from '../server/google-drive.js';
+import { ensureDriveFolder, uploadDriveFile, extractDriveFolderId, getConnectedAccessToken } from '../server/google-drive.js';
 import { logEmailSend } from '../server/email-log.js';
+import { toClientErrorMessage } from '../server/errors.js';
 import { withApiMetrics } from '../server/metrics.js';
 
 // fecha_plazo_respuesta siempre se recalcula a partir de fecha_radicacion +
@@ -135,19 +136,6 @@ async function isAdminRequest(request: VercelRequest, sql: any): Promise<boolean
     WHERE s.session_id = ${sessionId} AND s.expires_at > NOW() AND u.activo = TRUE
   `;
   return Boolean(row?.isAdmin);
-}
-
-async function getConnectedAccessToken(sql: any): Promise<string | null> {
-  const session = (await sql`
-    SELECT token_json FROM google_drive_sessions WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1
-  `) as any[];
-  if (!session[0]) return null;
-  const { getGoogleOAuthClient } = await import('../server/google-oauth.js');
-  const client = await getGoogleOAuthClient();
-  client.setCredentials(JSON.parse(session[0].token_json));
-  const token = await client.getAccessToken();
-  if (!token.token) throw new Error('La sesión de Google conectada expiró. Reconéctala desde Fuentes Drive.');
-  return token.token;
 }
 
 const SWEEP_LABELS: Record<string, string> = {
@@ -1027,7 +1015,7 @@ async function handler(
         const [config] = await fetchSweepConfig(sql).then((rows) => rows.filter((r) => r.kind === sweepKind));
         return response.status(200).json({ data: { result, config }, meta: {}, errors: [] });
       } catch (error) {
-        return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible lanzar el barrido.'] });
+        return response.status(502).json({ data: null, meta: {}, errors: [toClientErrorMessage(error, 'No fue posible lanzar el barrido.')] });
       }
     }
 
@@ -1060,7 +1048,7 @@ async function handler(
           to: [email], subject: 'Acceso aprobado — Seguimiento de Informes', kind: 'prueba',
           success: false, errorMessage: error instanceof Error ? error.message : String(error),
         });
-        return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible enviar el correo de prueba.'] });
+        return response.status(502).json({ data: null, meta: {}, errors: [toClientErrorMessage(error, 'No fue posible enviar el correo de prueba.')] });
       }
     }
 
@@ -1197,7 +1185,7 @@ async function handler(
               `;
         return response.status(200).json({ data: (rows as any[])[0], meta: {}, errors: [] });
       } catch (error) {
-        return response.status(502).json({ data: null, meta: {}, errors: [error instanceof Error ? error.message : 'No fue posible subir el documento a Drive.'] });
+        return response.status(502).json({ data: null, meta: {}, errors: [toClientErrorMessage(error, 'No fue posible subir el documento a Drive.')] });
       }
     }
 
@@ -1408,7 +1396,7 @@ async function handler(
     return response.status(400).json({ data: null, meta: {}, errors: ['Catálogo no soportado.'] });
   } catch (error) {
     console.error('Catalog query failed', error);
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = toClientErrorMessage(error, 'Error interno.');
     return response.status(503).json({ data: null, meta: {}, errors: [`No fue posible guardar o consultar los catálogos: ${detail}`] });
   }
 }
