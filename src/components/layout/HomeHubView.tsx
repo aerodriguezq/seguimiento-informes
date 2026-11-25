@@ -9,20 +9,28 @@ import { useAuth } from '../../auth/AuthContext';
 // y rebota de vuelta.
 const GEO_CAMPO_URL = `/api/auth/google/sso-geocampo?return=${encodeURIComponent('https://geocampo-egdn.vercel.app/panel/')}`;
 
+// Ruta especial (no es un módulo real) que App.tsx reconoce para arrancar
+// derecho en el espacio de Configuración -- así esta tarjeta puede abrirlo
+// en una pestaña nueva de verdad (una URL real, no solo un cambio de estado
+// interno), mientras el usuario sigue trabajando en Informes en la otra.
+const CONFIGURACION_URL = '/configuracion';
+
 interface HomeHubViewProps {
   onEnterReports: () => void;
-  onEnterSettings: () => void;
   canOpenSettings: boolean;
   onLogout: () => void;
 }
 
 // Primera pantalla tras iniciar sesión: elegir a cuál de los sistemas
 // disponibles entrar. "Informes" lleva al shell de esta app tal cual
-// (Sidebar + Dashboard); "Configuración" entra directo a Listas Maestras;
-// "Geo-Campo" es un sistema externo aparte, se abre en pestaña nueva para no
-// perder la sesión de esta app. Se puede volver a esta pantalla haciendo
-// clic en el logo del Sidebar (ver onGoHome en App.tsx).
-export const HomeHubView: React.FC<HomeHubViewProps> = ({ onEnterReports, onEnterSettings, canOpenSettings, onLogout }) => {
+// (Sidebar + Dashboard), en la misma pestaña. "Configuración" se abre en una
+// pestaña NUEVA (junta en un solo lugar la configuración de Informes y la de
+// GeoCampo, para poder seguir trabajando en Informes mientras se configura
+// algo). "Geo-Campo" también navega en la misma pestaña -- para volver a
+// esta pantalla desde ahí se usa el botón "Inicio" de GeoCampo. Desde
+// Informes se vuelve con el botón "Inicio" del Sidebar (ver onGoHome en
+// App.tsx).
+export const HomeHubView: React.FC<HomeHubViewProps> = ({ onEnterReports, canOpenSettings, onLogout }) => {
   const { user } = useAuth();
 
   return (
@@ -78,24 +86,37 @@ export const HomeHubView: React.FC<HomeHubViewProps> = ({ onEnterReports, onEnte
             </span>
           </button>
 
-          <button
-            type="button"
-            onClick={canOpenSettings ? onEnterSettings : undefined}
-            disabled={!canOpenSettings}
-            title={canOpenSettings ? undefined : 'No tienes permiso para ver Configuración.'}
-            className={`group text-left bg-white rounded-2xl border border-slate-200 p-6 transition-all flex flex-col ${
-              canOpenSettings ? 'hover:border-indigo-400 hover:shadow-lg' : 'opacity-50 cursor-not-allowed'
-            }`}
-          >
-            <div className={`flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700 ${canOpenSettings ? 'group-hover:bg-indigo-100' : ''}`}>
-              <Settings className="h-6 w-6" />
+          {canOpenSettings ? (
+            <a
+              href={CONFIGURACION_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group text-left bg-white rounded-2xl border border-slate-200 p-6 hover:border-indigo-400 hover:shadow-lg transition-all flex flex-col"
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700 group-hover:bg-indigo-100">
+                <Settings className="h-6 w-6" />
+              </div>
+              <h3 className="mt-4 text-base font-bold text-slate-900">Configuración</h3>
+              <p className="mt-1 text-xs text-slate-500 flex-1">Listas maestras de Informes y accesos de GeoCampo, en una pestaña aparte.</p>
+              <span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-indigo-700">
+                Abrir en pestaña nueva <ArrowRight className="h-3.5 w-3.5" />
+              </span>
+            </a>
+          ) : (
+            <div
+              title="No tienes permiso para ver Configuración."
+              className="text-left bg-white rounded-2xl border border-slate-200 p-6 opacity-50 cursor-not-allowed flex flex-col"
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700">
+                <Settings className="h-6 w-6" />
+              </div>
+              <h3 className="mt-4 text-base font-bold text-slate-900">Configuración</h3>
+              <p className="mt-1 text-xs text-slate-500 flex-1">Listas maestras de Informes y accesos de GeoCampo, en una pestaña aparte.</p>
+              <span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-indigo-700">
+                Abrir en pestaña nueva <ArrowRight className="h-3.5 w-3.5" />
+              </span>
             </div>
-            <h3 className="mt-4 text-base font-bold text-slate-900">Configuración</h3>
-            <p className="mt-1 text-xs text-slate-500 flex-1">Listas maestras, tipos de informe, roles y empresas.</p>
-            <span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-indigo-700">
-              Entrar <ArrowRight className="h-3.5 w-3.5" />
-            </span>
-          </button>
+          )}
         </div>
       </div>
     </div>

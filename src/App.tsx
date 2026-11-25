@@ -68,6 +68,16 @@ const MODULE_ROUTES: Record<ActiveModule, string> = {
   performance: '/rendimiento',
 };
 
+// Los 5 módulos que viven en el espacio de Configuración (ver ConfigSidebar),
+// no en el de Informes -- sirve para reconocer, a partir de la URL, en cuál
+// de los dos espacios hay que arrancar (ver el estado `space` más abajo).
+const CONFIG_MODULES: ActiveModule[] = ['lists', 'users', 'drive_links', 'file_cleaner', 'performance'];
+
+// Ruta de entrada que la tarjeta "Configuración" del hub abre en una pestaña
+// nueva (ver HomeHubView) -- no es un módulo real, solo hace arrancar el
+// componente directo en el espacio de Configuración en vez del hub.
+const CONFIGURACION_ENTRY_PATH = '/configuracion';
+
 const PATH_TO_MODULE: Partial<Record<string, ActiveModule>> = Object.fromEntries(
   Object.entries(MODULE_ROUTES).map(([mod, path]) => [path, mod as ActiveModule])
 );
@@ -219,9 +229,10 @@ export default function App() {
   const goBackFromProjectDetail = () => goToModule(user.isAdmin ? 'projects' : 'dashboard');
 
   // Global State
-  const [activeModule, setActiveModule] = useState<ActiveModule>(
-    PATH_TO_MODULE[location.pathname] || 'dashboard'
-  );
+  const [activeModule, setActiveModule] = useState<ActiveModule>(() => {
+    if (location.pathname === CONFIGURACION_ENTRY_PATH) return 'lists';
+    return PATH_TO_MODULE[location.pathname] || 'dashboard';
+  });
 
   // Qué "espacio" se ve: el hub de selección (Geo-Campo/Informes/
   // Configuración, lo primero tras el login -- arranca ahí cada vez que
@@ -230,7 +241,18 @@ export default function App() {
   // Configuración (separado de Informes a propósito -- ver ConfigSidebar).
   // Se vuelve al hub con el botón "Inicio" (o el logo) de cualquiera de los
   // otros dos espacios.
-  const [space, setSpace] = useState<'hub' | 'informes' | 'config'>('hub');
+  //
+  // Única excepción al "siempre arranca en el hub": la tarjeta de
+  // Configuración del hub la abre en una pestaña NUEVA (HomeHubView) hacia
+  // CONFIGURACION_ENTRY_PATH, o alguien entra por un deep-link directo a uno
+  // de los CONFIG_MODULES -- en esos casos arranca derecho en 'config' en
+  // vez de en el hub, porque esa pestaña nueva no tiene por dónde pasar por
+  // el hub primero.
+  const [space, setSpace] = useState<'hub' | 'informes' | 'config'>(() => {
+    if (location.pathname === CONFIGURACION_ENTRY_PATH) return 'config';
+    const matched = PATH_TO_MODULE[location.pathname];
+    return matched && CONFIG_MODULES.includes(matched) ? 'config' : 'hub';
+  });
 
   // Keep the URL and the active module in sync: every module has a real path,
   // including sub-views like new_report/project_detail (their context, e.g.
@@ -245,6 +267,11 @@ export default function App() {
   };
 
   useEffect(() => {
+    // No es un módulo real -- solo la ruta de entrada que abre la tarjeta
+    // de Configuración en pestaña nueva (ver CONFIGURACION_ENTRY_PATH). Se
+    // deja la URL tal cual hasta que se elija algo puntual dentro de
+    // Configuración (ahí sí navega a la ruta real de ese módulo).
+    if (location.pathname === CONFIGURACION_ENTRY_PATH) return;
     if (location.pathname === '/') {
       navigate('/dashboard', { replace: true });
       return;
@@ -1785,10 +1812,6 @@ export default function App() {
     return (
       <HomeHubView
         onEnterReports={() => setSpace('informes')}
-        onEnterSettings={() => {
-          setSpace('config');
-          goToModule('lists');
-        }}
         canOpenSettings={canViewModule('lists')}
         onLogout={logout}
       />
@@ -1814,7 +1837,7 @@ export default function App() {
           onSelectModule={goToModule}
           isMobileOpen={isMobileSidebarOpen}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
-          onGoHome={() => setSpace('hub')}
+          onGoHome={() => { setSpace('hub'); navigate('/dashboard'); }}
         />
       ) : (
       <Sidebar
@@ -1835,7 +1858,7 @@ export default function App() {
         isCurrentProjectSuspended={isCurrentProjectSuspended}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
-        onGoHome={() => setSpace('hub')}
+        onGoHome={() => { setSpace('hub'); navigate('/dashboard'); }}
       />
       )}
 
