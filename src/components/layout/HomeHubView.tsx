@@ -2,9 +2,12 @@ import React from 'react';
 import { MapPin, FileBarChart2, Settings, LogOut, ArrowRight, ExternalLink } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 
-// Enlace fijo al sistema externo de Geo-Campo -- no es parte de esta app,
-// así que no hay nada que resolver desde el backend, solo abrir la URL.
-const GEO_CAMPO_URL = 'https://geocampo-egdn.vercel.app/panel/';
+// Pasa por el puente de sesión (api/auth/google/[action].ts, acción
+// sso-geocampo) en vez de abrir el link directo -- así, si ya hay sesión
+// aquí, Geo-Campo recibe un JWT firmado y la persona entra sin loguearse
+// otra vez. Si no hay sesión, ese mismo endpoint manda a loguearse primero
+// y rebota de vuelta.
+const GEO_CAMPO_URL = `/api/auth/google/sso-geocampo?return=${encodeURIComponent('https://geocampo-egdn.vercel.app/panel/')}`;
 
 interface HomeHubViewProps {
   onEnterReports: () => void;

@@ -10,3 +10,5 @@ coverage/
 .vscode/
 .idea/
 reference/
+.vercel
+.env*
