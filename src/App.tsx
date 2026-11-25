@@ -39,6 +39,7 @@ import { ReportDetailModal } from './components/reports/ReportDetailModal';
 import { ProjectsListView } from './components/projects/ProjectsListView';
 import { ProjectDetailView } from './components/projects/ProjectDetailView';
 import { ProjectPickerView } from './components/projects/ProjectPickerView';
+import { HomeHubView } from './components/layout/HomeHubView';
 import { SeguimientoModule } from './components/projects/SeguimientoModule';
 import { PeticionesView } from './components/peticiones/PeticionesView';
 import { AlertsView } from './components/alerts/AlertsView';
@@ -220,6 +221,13 @@ export default function App() {
   const [activeModule, setActiveModule] = useState<ActiveModule>(
     PATH_TO_MODULE[location.pathname] || 'dashboard'
   );
+
+  // Pantalla de selección de sistema (Geo-Campo/Informes/Configuración),
+  // la primera cosa que se ve tras iniciar sesión -- arranca en true cada
+  // vez que este componente se monta de cero (login nuevo o recarga de
+  // página), que es justo cuándo debe volver a aparecer. Se puede volver a
+  // ella haciendo clic en el logo del Sidebar (ver onGoHome más abajo).
+  const [showHub, setShowHub] = useState(true);
 
   // Keep the URL and the active module in sync: every module has a real path,
   // including sub-views like new_report/project_detail (their context, e.g.
@@ -1765,6 +1773,24 @@ export default function App() {
 
   const activeReportForModal = reports.find((r) => r.id === selectedReportId);
 
+  // Primera pantalla tras el login: elegir a qué sistema entrar
+  // (Geo-Campo/Informes/Configuración). "Informes" y "Configuración" solo
+  // bajan esta bandera y dejan que el resto del flujo (selector de
+  // proyecto, luego el shell normal) siga exactamente igual que hoy.
+  if (showHub) {
+    return (
+      <HomeHubView
+        onEnterReports={() => setShowHub(false)}
+        onEnterSettings={() => {
+          setShowHub(false);
+          goToModule('lists');
+        }}
+        canOpenSettings={canViewModule('lists')}
+        onLogout={logout}
+      />
+    );
+  }
+
   // Remasterización: hasta elegir un proyecto, toda la app queda en espera
   // -- se muestra el selector de tarjetas en vez del shell normal (sin
   // sidebar/header, es su propia pantalla completa).
@@ -1793,6 +1819,7 @@ export default function App() {
         isCurrentProjectSuspended={isCurrentProjectSuspended}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        onGoHome={() => setShowHub(true)}
       />
 
       {/* Main Workspace Column */}

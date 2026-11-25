@@ -37,6 +37,9 @@ interface SidebarProps {
   // (botón hamburguesa) y el estado en App.tsx.
   isMobileOpen: boolean;
   onCloseMobile: () => void;
+  // Vuelve a la pantalla de selección de sistema (Geo-Campo/Informes/
+  // Configuración) que se ve justo tras el login -- ver showHub en App.tsx.
+  onGoHome: () => void;
 }
 
 type LeafNode = {
@@ -110,6 +113,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isCurrentProjectSuspended,
   isMobileOpen,
   onCloseMobile,
+  onGoHome,
 }) => {
   const { user, canView } = useAuth();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['informes']));
@@ -407,7 +411,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <div className="flex flex-col h-full select-none" style={{ background: BG, color: '#94A3B8' }}>
       {/* Encabezado con logo real dentro del badge con gradiente */}
       <div className="h-16 shrink-0 flex items-center px-4 border-b" style={{ borderColor: `${BORDER}b3` }}>
-        <div className="flex items-center gap-3 overflow-hidden">
+        <button
+          type="button"
+          onClick={onGoHome}
+          title="Volver a la selección de sistema"
+          className="flex items-center gap-3 overflow-hidden text-left rounded-lg -mx-1 px-1 py-1 hover:bg-white/5 transition-colors"
+        >
           <div
             className="relative w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ring-1 ring-white/20 shadow-md bg-gradient-to-tr from-[#3B82F6] via-[#5238F5] to-[#8B5CF6]"
             style={{ boxShadow: `0 4px 14px -2px ${ACCENT}4d` }}
@@ -418,7 +427,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <h1 className="text-sm font-bold text-[#E2E8F0] tracking-tight truncate leading-tight">Seguimiento & Alertas</h1>
             <p className="text-[10px] text-[#94A3B8] font-medium truncate mt-0.5">Gestión Operacional de Informes</p>
           </motion.div>
-        </div>
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3.5 no-scrollbar">
