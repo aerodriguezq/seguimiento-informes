@@ -100,7 +100,7 @@ async function appLogout(request: VercelRequest, response: VercelResponse) {
 // Permitidos EXACTOS como prefijo de "return" -- cualquier otro valor se
 // rechaza con 400. Sin esta lista, "return" sería una redirección abierta
 // (open redirect): cualquiera podría mandar a alguien autenticado aquí a
-// "https://seguimiento-informes.vercel.app/api/auth/google/sso-geocampo?return=https://sitio-malicioso.com/#sso=<jwt>"
+// "https://informes-egdn.vercel.app/api/auth/google/sso-geocampo?return=https://sitio-malicioso.com/#sso=<jwt>"
 // y quedarse con un JWT válido de esa persona.
 const SSO_GEOCAMPO_ALLOWED_RETURN_PREFIXES = [
   'https://geocampo-egdn.vercel.app/panel/',
@@ -168,7 +168,7 @@ async function ssoGeoCampo(request: VercelRequest, response: VercelResponse) {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const header = { alg: 'EdDSA', typ: 'JWT' };
     const payload = {
-      iss: 'https://seguimiento-informes.vercel.app',
+      iss: 'https://informes-egdn.vercel.app',
       aud: 'geocampo',
       sub: String(authorizedUser.email).trim().toLowerCase(),
       name: authorizedUser.name,
