@@ -7,16 +7,12 @@ import {
   List,
   PlusCircle,
   BellRing,
-  HardDrive,
-  Archive,
-  Users,
   ChevronRight,
   Inbox,
-  ShieldCheck,
   Sprout,
   Info,
   X,
-  Activity,
+  ArrowLeft,
 } from 'lucide-react';
 import { ActiveModule, Project, Report } from '../../types';
 import { useAuth } from '../../auth/AuthContext';
@@ -246,48 +242,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
       ],
     },
-    {
-      kind: 'section',
-      label: 'Datos & Gobernanza',
-      children: [
-        {
-          kind: 'leaf',
-          id: 'drive_links',
-          label: 'Fuentes Google Drive',
-          icon: HardDrive,
-          visible: canView('drive_links'),
-        },
-        {
-          kind: 'leaf',
-          id: 'lists',
-          label: 'Listas Maestras',
-          icon: Archive,
-          visible: canView('lists'),
-        },
-        {
-          kind: 'leaf',
-          id: 'users',
-          label: 'Equipo & Permisos',
-          icon: Users,
-          visible: user.isAdmin,
-        },
-        {
-          kind: 'leaf',
-          id: 'file_cleaner',
-          label: 'Limpieza de Archivos',
-          icon: ShieldCheck,
-          visible: canView('file_cleaner'),
-        },
-        {
-          kind: 'leaf',
-          id: 'performance',
-          label: 'Rendimiento del Sistema',
-          icon: Activity,
-          visible: user.isAdmin,
-        },
-      ],
-    },
   ];
+  // "Datos & Gobernanza" (Fuentes Drive, Listas Maestras, Equipo & Permisos,
+  // Limpieza de Archivos, Rendimiento) se sacó de este árbol -- ahora vive en
+  // su propio espacio (ver ConfigSidebar.tsx), separado de la operación
+  // diaria de Informes. Se entra por la tarjeta "Configuración" del hub
+  // inicial (HomeHubView), no desde aquí.
 
   // Si navegamos a una ruta cuya hoja está dentro de un grupo cerrado (p.ej.
   // por deep-link, o porque el usuario lo había plegado), lo reabrimos para
@@ -431,6 +391,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3.5 no-scrollbar">
+        {/* Botón explícito de volver al hub -- además de hacer clic en el
+            logo del encabezado, que no todos notan que es clickeable. */}
+        <button
+          type="button"
+          onClick={onGoHome}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-[#94A3B8] hover:text-[#E2E8F0] hover:bg-[#1E293B]"
+          style={{ border: `1px solid ${BORDER}` }}
+        >
+          <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
+          Inicio
+        </button>
+
         {/* Proyecto en Pantalla: aclara de inmediato a qué proyecto queda
             acotada toda la app (ver remasterización de acceso por proyecto). */}
         {currentProject && (

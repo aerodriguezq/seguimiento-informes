@@ -32,6 +32,7 @@ import {
 import { Header } from './components/layout/Header';
 import { SearchCommandModal } from './components/layout/SearchCommandModal';
 import { Sidebar } from './components/layout/Sidebar';
+import { ConfigSidebar } from './components/layout/ConfigSidebar';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { ReportsListView } from './components/reports/ReportsListView';
 import { NewReportWizard } from './components/reports/NewReportWizard';
@@ -222,12 +223,14 @@ export default function App() {
     PATH_TO_MODULE[location.pathname] || 'dashboard'
   );
 
-  // Pantalla de selección de sistema (Geo-Campo/Informes/Configuración),
-  // la primera cosa que se ve tras iniciar sesión -- arranca en true cada
-  // vez que este componente se monta de cero (login nuevo o recarga de
-  // página), que es justo cuándo debe volver a aparecer. Se puede volver a
-  // ella haciendo clic en el logo del Sidebar (ver onGoHome más abajo).
-  const [showHub, setShowHub] = useState(true);
+  // Qué "espacio" se ve: el hub de selección (Geo-Campo/Informes/
+  // Configuración, lo primero tras el login -- arranca ahí cada vez que
+  // este componente se monta de cero, que es justo cuándo debe volver a
+  // aparecer), el shell operativo de Informes, o el espacio propio de
+  // Configuración (separado de Informes a propósito -- ver ConfigSidebar).
+  // Se vuelve al hub con el botón "Inicio" (o el logo) de cualquiera de los
+  // otros dos espacios.
+  const [space, setSpace] = useState<'hub' | 'informes' | 'config'>('hub');
 
   // Keep the URL and the active module in sync: every module has a real path,
   // including sub-views like new_report/project_detail (their context, e.g.
@@ -1774,15 +1777,16 @@ export default function App() {
   const activeReportForModal = reports.find((r) => r.id === selectedReportId);
 
   // Primera pantalla tras el login: elegir a qué sistema entrar
-  // (Geo-Campo/Informes/Configuración). "Informes" y "Configuración" solo
-  // bajan esta bandera y dejan que el resto del flujo (selector de
-  // proyecto, luego el shell normal) siga exactamente igual que hoy.
-  if (showHub) {
+  // (Geo-Campo/Informes/Configuración). "Informes" entra al shell operativo
+  // de siempre; "Configuración" entra a su espacio propio, separado de
+  // Informes (ver ConfigSidebar) -- ninguno de los dos necesita todavía un
+  // proyecto elegido, eso lo decide el siguiente gate más abajo.
+  if (space === 'hub') {
     return (
       <HomeHubView
-        onEnterReports={() => setShowHub(false)}
+        onEnterReports={() => setSpace('informes')}
         onEnterSettings={() => {
-          setShowHub(false);
+          setSpace('config');
           goToModule('lists');
         }}
         canOpenSettings={canViewModule('lists')}
@@ -1793,14 +1797,26 @@ export default function App() {
 
   // Remasterización: hasta elegir un proyecto, toda la app queda en espera
   // -- se muestra el selector de tarjetas en vez del shell normal (sin
-  // sidebar/header, es su propia pantalla completa).
-  if (!isLoadingWorkspace && !workspaceError && !currentProjectId) {
+  // sidebar/header, es su propia pantalla completa). Configuración no vive
+  // dentro de ningún proyecto (Listas Maestras, Usuarios, etc. son globales),
+  // así que no la bloqueamos con este selector.
+  if (!isLoadingWorkspace && !workspaceError && !currentProjectId && space !== 'config') {
     return <ProjectPickerView projects={projects} onSelectProject={selectProject} onLogout={logout} />;
   }
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex font-sans antialiased">
-      {/* Sidebar Navigation */}
+      {/* Sidebar Navigation -- operativo de Informes, o el espacio propio
+          de Configuración, nunca los dos a la vez. */}
+      {space === 'config' ? (
+        <ConfigSidebar
+          activeModule={activeModule}
+          onSelectModule={goToModule}
+          isMobileOpen={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
+          onGoHome={() => setSpace('hub')}
+        />
+      ) : (
       <Sidebar
         activeModule={activeModule}
         onSelectModule={(mod) => {
@@ -1819,8 +1835,9 @@ export default function App() {
         isCurrentProjectSuspended={isCurrentProjectSuspended}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
-        onGoHome={() => setShowHub(true)}
+        onGoHome={() => setSpace('hub')}
       />
+      )}
 
       {/* Main Workspace Column */}
       <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
