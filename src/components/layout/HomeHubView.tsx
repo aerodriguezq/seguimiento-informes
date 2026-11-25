@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapPin, FileBarChart2, Settings, LogOut, ArrowRight, ExternalLink } from 'lucide-react';
+import { MapPin, FileBarChart2, Settings, LogOut, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 
 // Pasa por el puente de sesión (api/auth/google/[action].ts, acción
@@ -51,8 +51,6 @@ export const HomeHubView: React.FC<HomeHubViewProps> = ({ onEnterReports, onEnte
         <div className="w-full max-w-5xl grid grid-cols-1 sm:grid-cols-3 gap-5">
           <a
             href={GEO_CAMPO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
             className="group text-left bg-white rounded-2xl border border-slate-200 p-6 hover:border-emerald-400 hover:shadow-lg transition-all flex flex-col"
           >
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 group-hover:bg-emerald-100">
@@ -61,7 +59,7 @@ export const HomeHubView: React.FC<HomeHubViewProps> = ({ onEnterReports, onEnte
             <h3 className="mt-4 text-base font-bold text-slate-900">Geo-Campo</h3>
             <p className="mt-1 text-xs text-slate-500 flex-1">Sistema externo de georreferenciación y visitas de campo.</p>
             <span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
-              Abrir <ExternalLink className="h-3.5 w-3.5" />
+              Entrar <ArrowRight className="h-3.5 w-3.5" />
             </span>
           </a>
 
