@@ -245,7 +245,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
   // "Datos & Gobernanza" (Fuentes Drive, Listas Maestras, Equipo & Permisos,
   // Limpieza de Archivos, Rendimiento) se sacó de este árbol -- ahora vive en
-  // su propio espacio (ver ConfigSidebar.tsx), separado de la operación
+  // su propio espacio (ver ConfigSpace.tsx), separado de la operación
   // diaria de Informes. Se entra por la tarjeta "Configuración" del hub
   // inicial (HomeHubView), no desde aquí.
 

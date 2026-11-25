@@ -185,7 +185,12 @@ export type ActiveModule =
   | 'peticiones'
   | 'users'
   | 'file_cleaner'
-  | 'performance';
+  | 'performance'
+  // Panel de entrada del espacio de Configuración (ver ConfigOverview) --
+  // no es una vista de datos como las demás, solo el landing con las dos
+  // zonas (Seguimiento de Informes / GeoCampo) desde donde se entra a cada
+  // una. Vive en /configuracion.
+  | 'config_home';
 
 export interface PeticionResponsable {
   id: string;

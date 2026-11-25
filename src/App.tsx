@@ -32,7 +32,7 @@ import {
 import { Header } from './components/layout/Header';
 import { SearchCommandModal } from './components/layout/SearchCommandModal';
 import { Sidebar } from './components/layout/Sidebar';
-import { ConfigSidebar } from './components/layout/ConfigSidebar';
+import { ConfigSpace, GeoCampoSectionKey } from './components/layout/ConfigSpace';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { ReportsListView } from './components/reports/ReportsListView';
 import { NewReportWizard } from './components/reports/NewReportWizard';
@@ -66,17 +66,17 @@ const MODULE_ROUTES: Record<ActiveModule, string> = {
   users: '/usuarios',
   file_cleaner: '/limpieza-archivos',
   performance: '/rendimiento',
+  config_home: '/configuracion',
 };
 
-// Los 5 módulos que viven en el espacio de Configuración (ver ConfigSidebar),
-// no en el de Informes -- sirve para reconocer, a partir de la URL, en cuál
-// de los dos espacios hay que arrancar (ver el estado `space` más abajo).
-const CONFIG_MODULES: ActiveModule[] = ['lists', 'users', 'drive_links', 'file_cleaner', 'performance'];
-
-// Ruta de entrada que la tarjeta "Configuración" del hub abre en una pestaña
-// nueva (ver HomeHubView) -- no es un módulo real, solo hace arrancar el
-// componente directo en el espacio de Configuración en vez del hub.
-const CONFIGURACION_ENTRY_PATH = '/configuracion';
+// Los módulos que viven en el espacio de Configuración (ver ConfigSpace), no
+// en el de Informes -- sirve para reconocer, a partir de la URL, en cuál de
+// los dos espacios hay que arrancar (ver el estado `space` más abajo).
+// config_home es el panel de entrada (landing con las dos zonas); el resto
+// son las vistas reales de Seguimiento de Informes. GeoCampo no tiene
+// módulos propios -- vive como estado local (geoCampoSection) dentro de
+// ConfigSpace, no en la URL.
+const CONFIG_MODULES: ActiveModule[] = ['config_home', 'lists', 'users', 'drive_links', 'file_cleaner', 'performance'];
 
 const PATH_TO_MODULE: Partial<Record<string, ActiveModule>> = Object.fromEntries(
   Object.entries(MODULE_ROUTES).map(([mod, path]) => [path, mod as ActiveModule])
@@ -221,6 +221,9 @@ export default function App() {
     if (mod === 'dashboard' || mod === 'new_report' || mod === 'project_detail') {
       return mod === 'new_report' ? canView('reports') : mod === 'project_detail' ? canView('projects') : true;
     }
+    // El panel de Configuración se ve si hay acceso a Listas Maestras --
+    // mismo criterio que ya usaba la tarjeta "Configuración" del hub.
+    if (mod === 'config_home') return canView('lists');
     return canView(mod as any);
   };
 
@@ -229,30 +232,31 @@ export default function App() {
   const goBackFromProjectDetail = () => goToModule(user.isAdmin ? 'projects' : 'dashboard');
 
   // Global State
-  const [activeModule, setActiveModule] = useState<ActiveModule>(() => {
-    if (location.pathname === CONFIGURACION_ENTRY_PATH) return 'lists';
-    return PATH_TO_MODULE[location.pathname] || 'dashboard';
-  });
+  const [activeModule, setActiveModule] = useState<ActiveModule>(
+    PATH_TO_MODULE[location.pathname] || 'dashboard'
+  );
 
   // Qué "espacio" se ve: el hub de selección (Geo-Campo/Informes/
   // Configuración, lo primero tras el login -- arranca ahí cada vez que
   // este componente se monta de cero, que es justo cuándo debe volver a
   // aparecer), el shell operativo de Informes, o el espacio propio de
-  // Configuración (separado de Informes a propósito -- ver ConfigSidebar).
-  // Se vuelve al hub con el botón "Inicio" (o el logo) de cualquiera de los
-  // otros dos espacios.
+  // Configuración (separado de Informes a propósito -- ver ConfigSpace). Se
+  // vuelve al hub con el botón "Inicio" de cualquiera de los otros dos
+  // espacios.
   //
-  // Única excepción al "siempre arranca en el hub": la tarjeta de
-  // Configuración del hub la abre en una pestaña NUEVA (HomeHubView) hacia
-  // CONFIGURACION_ENTRY_PATH, o alguien entra por un deep-link directo a uno
-  // de los CONFIG_MODULES -- en esos casos arranca derecho en 'config' en
-  // vez de en el hub, porque esa pestaña nueva no tiene por dónde pasar por
-  // el hub primero.
+  // Única excepción al "siempre arranca en el hub": entrar por la URL de
+  // alguno de los CONFIG_MODULES (la tarjeta "Configuración" del hub abre
+  // config_home en una pestaña nueva, o alguien entra por deep-link directo
+  // a un módulo puntual) arranca derecho en 'config', porque esa pestaña
+  // nueva no tiene por dónde pasar por el hub primero.
   const [space, setSpace] = useState<'hub' | 'informes' | 'config'>(() => {
-    if (location.pathname === CONFIGURACION_ENTRY_PATH) return 'config';
     const matched = PATH_TO_MODULE[location.pathname];
     return matched && CONFIG_MODULES.includes(matched) ? 'config' : 'hub';
   });
+
+  // GeoCampo no tiene módulos propios en la URL -- cuál de sus 4 secciones
+  // se ve dentro de Configuración es puro estado local (ver ConfigSpace).
+  const [geoCampoSection, setGeoCampoSection] = useState<GeoCampoSectionKey | null>(null);
 
   // Keep the URL and the active module in sync: every module has a real path,
   // including sub-views like new_report/project_detail (their context, e.g.
@@ -267,11 +271,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    // No es un módulo real -- solo la ruta de entrada que abre la tarjeta
-    // de Configuración en pestaña nueva (ver CONFIGURACION_ENTRY_PATH). Se
-    // deja la URL tal cual hasta que se elija algo puntual dentro de
-    // Configuración (ahí sí navega a la ruta real de ese módulo).
-    if (location.pathname === CONFIGURACION_ENTRY_PATH) return;
     if (location.pathname === '/') {
       navigate('/dashboard', { replace: true });
       return;
@@ -1806,7 +1805,7 @@ export default function App() {
   // Primera pantalla tras el login: elegir a qué sistema entrar
   // (Geo-Campo/Informes/Configuración). "Informes" entra al shell operativo
   // de siempre; "Configuración" entra a su espacio propio, separado de
-  // Informes (ver ConfigSidebar) -- ninguno de los dos necesita todavía un
+  // Informes (ver ConfigSpace) -- ninguno de los dos necesita todavía un
   // proyecto elegido, eso lo decide el siguiente gate más abajo.
   if (space === 'hub') {
     return (
@@ -1818,28 +1817,102 @@ export default function App() {
     );
   }
 
+  // Configuración es su propio espacio completo (no el shell de Informes
+  // con otro sidebar) -- no necesita proyecto elegido, así que se resuelve
+  // antes del gate del selector de proyecto de abajo.
+  if (space === 'config') {
+    return (
+      <ConfigSpace
+        activeModule={activeModule}
+        onSelectModule={goToModule}
+        onGoHome={() => { setSpace('hub'); navigate('/dashboard'); }}
+        geoCampoSection={geoCampoSection}
+        onSelectGeoCampoSection={setGeoCampoSection}
+        canViewModule={canViewModule}
+      >
+        {isLoadingWorkspace && (
+          <div className="mx-auto max-w-7xl rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+            <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-teal-600" />
+            <p className="text-sm font-semibold text-slate-800">Cargando espacio de trabajo</p>
+            <p className="mt-1 text-xs text-slate-500">Conectando proyectos y catálogos con Neon.</p>
+          </div>
+        )}
+        {!isLoadingWorkspace && workspaceError && (
+          <div className="mx-auto max-w-7xl rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+            <p className="text-sm font-semibold text-rose-900">No se pudo cargar la información</p>
+            <p className="mt-1 text-xs text-rose-700">{workspaceError}</p>
+          </div>
+        )}
+
+        {!isLoadingWorkspace && !workspaceError && activeModule === 'lists' && (
+          <MasterListsView
+            reportTypes={reportTypes}
+            contacts={contacts}
+            reportTypeSteps={reportTypeSteps}
+            projects={projects}
+            currentProjectId={currentProjectId}
+            onUpdateProjectApplicableTypes={handleUpdateProjectApplicableTypes}
+            onCreateProject={handleCreateProject}
+            onAddReportType={handleAddReportType}
+            onAddContact={handleAddContact}
+            onUpdateContact={handleUpdateContact}
+            onDeleteContact={handleDeleteContact}
+            onAddReportTypeStep={handleAddReportTypeStep}
+            onEditReportTypeStep={handleEditReportTypeStep}
+            onDeleteReportTypeStep={handleDeleteReportTypeStep}
+            onMoveReportTypeStep={handleMoveReportTypeStep}
+            areasConsolida={areasConsolida}
+            onAddAreaConsolida={handleAddAreaConsolida}
+            onUpdateAreaConsolida={handleUpdateAreaConsolida}
+            onDeleteAreaConsolida={handleDeleteAreaConsolida}
+            onUpdateReportType={handleUpdateReportType}
+            onDeleteReportType={handleDeleteReportType}
+            empresas={empresas}
+            onAddCompany={handleAddCompany}
+            onUpdateCompany={handleUpdateCompany}
+            onDeleteCompany={handleDeleteCompany}
+            roles={roles}
+            onAddRole={handleAddRole}
+            onUpdateRole={handleUpdateRole}
+            onDeleteRole={handleDeleteRole}
+          />
+        )}
+
+        {!isLoadingWorkspace && !workspaceError && activeModule === 'drive_links' && <DriveLinksView />}
+
+        {!isLoadingWorkspace && !workspaceError && activeModule === 'users' && user.isAdmin && (
+          <UsersManagementView
+            users={authorizedUsers}
+            currentUserEmail={user.email}
+            projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+            onAddUser={handleAddAuthorizedUser}
+            onUpdateUser={handleUpdateAuthorizedUser}
+            onRemoveUser={handleRemoveAuthorizedUser}
+            onSendTestEmail={handleSendTestEmail}
+            sweeps={sweeps}
+            onUpdateSweep={handleUpdateSweep}
+            onTriggerSweep={handleTriggerSweep}
+            emailLog={emailLog}
+          />
+        )}
+
+        {!isLoadingWorkspace && !workspaceError && activeModule === 'file_cleaner' && <FileCleanerView />}
+
+        {!isLoadingWorkspace && !workspaceError && activeModule === 'performance' && user.isAdmin && <PerformanceView />}
+      </ConfigSpace>
+    );
+  }
+
   // Remasterización: hasta elegir un proyecto, toda la app queda en espera
   // -- se muestra el selector de tarjetas en vez del shell normal (sin
-  // sidebar/header, es su propia pantalla completa). Configuración no vive
-  // dentro de ningún proyecto (Listas Maestras, Usuarios, etc. son globales),
-  // así que no la bloqueamos con este selector.
-  if (!isLoadingWorkspace && !workspaceError && !currentProjectId && space !== 'config') {
+  // sidebar/header, es su propia pantalla completa).
+  if (!isLoadingWorkspace && !workspaceError && !currentProjectId) {
     return <ProjectPickerView projects={projects} onSelectProject={selectProject} onLogout={logout} />;
   }
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex font-sans antialiased">
-      {/* Sidebar Navigation -- operativo de Informes, o el espacio propio
-          de Configuración, nunca los dos a la vez. */}
-      {space === 'config' ? (
-        <ConfigSidebar
-          activeModule={activeModule}
-          onSelectModule={goToModule}
-          isMobileOpen={isMobileSidebarOpen}
-          onCloseMobile={() => setIsMobileSidebarOpen(false)}
-          onGoHome={() => { setSpace('hub'); navigate('/dashboard'); }}
-        />
-      ) : (
+      {/* Sidebar Navigation */}
       <Sidebar
         activeModule={activeModule}
         onSelectModule={(mod) => {
@@ -1860,7 +1933,6 @@ export default function App() {
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         onGoHome={() => { setSpace('hub'); navigate('/dashboard'); }}
       />
-      )}
 
       {/* Main Workspace Column */}
       <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
@@ -2031,43 +2103,6 @@ export default function App() {
             />
           )}
 
-          {/* M08: Listas Maestras */}
-          {!isLoadingWorkspace && !workspaceError && activeModule === 'lists' && (
-            <MasterListsView
-              reportTypes={reportTypes}
-              contacts={contacts}
-              reportTypeSteps={reportTypeSteps}
-              projects={projects}
-              currentProjectId={currentProjectId}
-              onUpdateProjectApplicableTypes={handleUpdateProjectApplicableTypes}
-              onCreateProject={handleCreateProject}
-              onAddReportType={handleAddReportType}
-              onAddContact={handleAddContact}
-              onUpdateContact={handleUpdateContact}
-              onDeleteContact={handleDeleteContact}
-              onAddReportTypeStep={handleAddReportTypeStep}
-              onEditReportTypeStep={handleEditReportTypeStep}
-              onDeleteReportTypeStep={handleDeleteReportTypeStep}
-              onMoveReportTypeStep={handleMoveReportTypeStep}
-              areasConsolida={areasConsolida}
-              onAddAreaConsolida={handleAddAreaConsolida}
-              onUpdateAreaConsolida={handleUpdateAreaConsolida}
-              onDeleteAreaConsolida={handleDeleteAreaConsolida}
-              onUpdateReportType={handleUpdateReportType}
-              onDeleteReportType={handleDeleteReportType}
-              empresas={empresas}
-              onAddCompany={handleAddCompany}
-              onUpdateCompany={handleUpdateCompany}
-              onDeleteCompany={handleDeleteCompany}
-              roles={roles}
-              onAddRole={handleAddRole}
-              onUpdateRole={handleUpdateRole}
-              onDeleteRole={handleDeleteRole}
-            />
-          )}
-
-          {!isLoadingWorkspace && !workspaceError && activeModule === 'drive_links' && <DriveLinksView />}
-
           {!isLoadingWorkspace && !workspaceError && activeModule === 'seguimiento' && (
             <SeguimientoModule currentProjectId={currentProjectId} />
           )}
@@ -2084,31 +2119,6 @@ export default function App() {
             />
           )}
 
-          {/* M09: Usuarios Autorizados (solo administradores) */}
-          {!isLoadingWorkspace && !workspaceError && activeModule === 'users' && user.isAdmin && (
-            <UsersManagementView
-              users={authorizedUsers}
-              currentUserEmail={user.email}
-              projects={projects.map((p) => ({ id: p.id, name: p.name }))}
-              onAddUser={handleAddAuthorizedUser}
-              onUpdateUser={handleUpdateAuthorizedUser}
-              onRemoveUser={handleRemoveAuthorizedUser}
-              onSendTestEmail={handleSendTestEmail}
-              sweeps={sweeps}
-              onUpdateSweep={handleUpdateSweep}
-              onTriggerSweep={handleTriggerSweep}
-              emailLog={emailLog}
-            />
-          )}
-
-          {/* Limpieza de metadatos de archivos: 100% cliente, el archivo nunca sale del navegador */}
-          {!isLoadingWorkspace && !workspaceError && activeModule === 'file_cleaner' && (
-            <FileCleanerView />
-          )}
-
-          {!isLoadingWorkspace && !workspaceError && activeModule === 'performance' && user.isAdmin && (
-            <PerformanceView />
-          )}
         </main>
       </div>
 
